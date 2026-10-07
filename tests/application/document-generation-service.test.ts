@@ -1,4 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
+import { HostExecutionBudget } from '../../src/application/execution-budget';
 import type { DocumentGenerationProgressCallback, DocumentGenerationProgressEvent } from '../../src/application/document-generation-service';
 import {
   ConversationApplicationError,
@@ -222,7 +223,7 @@ describe('document generation application service', () => {
     const f = environment(undefined, onProgress);
     await f.service.generateFromMessage({ conversationId, expectedRevision: f.conversation.revision, messageId,
       kind: 'ppt', images: [] });
-    expect(events.map(event => `${event.code}:${event.status}`)).toEqual(['plan_validation:started', 'plan_validation:completed']);
+    expect(events.map(event => `${event.code}:${event.status}`)).toEqual(['request_received:started', 'plan_validation:started', 'plan_validation:completed']);
     expect(f.run).toHaveBeenCalledWith(expect.objectContaining({ onProgress }));
   });
 
@@ -232,8 +233,17 @@ describe('document generation application service', () => {
     f.recover.mockImplementation(() => { throw new DocumentDraftCompilationError('invalid_structure', 'invalid outline'); });
     await expect(f.service.generateFromMessage({ conversationId, expectedRevision: f.conversation.revision, messageId,
       kind: 'ppt', images: [] })).rejects.toThrow('invalid outline');
-    expect(events.map(event => `${event.code}:${event.status}`)).toEqual(['plan_validation:started', 'plan_validation:failed']);
+    expect(events.map(event => `${event.code}:${event.status}`)).toEqual(['request_received:started', 'plan_validation:started', 'plan_validation:failed']);
     expect(f.run).not.toHaveBeenCalled();
+  });
+
+  it('starts one diagnostic cycle when duplicate commands share the same generation operation', async () => {
+    const events: DocumentGenerationProgressEvent[] = [];
+    const f = environment(undefined, async event => { events.push(event); });
+    const input = { conversationId, expectedRevision: f.conversation.revision, messageId, kind: 'ppt' as const, images: [] };
+    await Promise.all([f.service.generateFromMessage(input), f.service.generateFromMessage(input)]);
+    expect(events.filter(event => event.code === 'request_received')).toHaveLength(1);
+    expect(f.run).toHaveBeenCalledTimes(1);
   });
 
   it('does not fail successful generation when progress recording is unavailable', async () => {
@@ -543,7 +553,7 @@ describe('document generation application service', () => {
     expect(createCompletedLocalAssistantMessage).not.toHaveBeenCalled();
   });
 
-  it('applies a deterministic PPT page clear without compiling the provider draft', async () => {
+  it.each(['normal', 'hung_revision', 'cancelled_revision'] as const)('applies a deterministic PPT page clear with %s', async mode => {
     const previousMessageId = toMessageId('document-application-clear-parent');
     const currentMessageId = toMessageId('document-application-clear-current');
     const parentWorkId = toWorkId('document-application-clear-work');
@@ -641,6 +651,17 @@ describe('document generation application service', () => {
       sizeBytes: 4096
     }));
     const fingerprint = vi.fn<(content: string) => string>(() => 'clear-page-content-sha256');
+    const terminalStatuses: string[] = [];
+    const fail = vi.fn(async () => undefined);
+    let enteredRevision!: () => void;
+    const revisionStarted = new Promise<void>(resolve => { enteredRevision = resolve; });
+    let budget: HostExecutionBudget | undefined;
+    if (mode !== 'normal') {
+      vi.useFakeTimers();
+      const startedAt = Date.now();
+      budget = new HostExecutionBudget({ startedAt, deadlineAt: startedAt + 100, maxToolCalls: 8, budgetUnits: 24 });
+      revisionAgent.mockImplementation(() => { enteredRevision(); return new Promise(() => undefined); });
+    }
     const service = new DocumentGenerationApplicationService({
     resolvePresentationMap: async (_workId, outline) => ({ checksumSha256: '0'.repeat(64), totalPages: outline.sections.length + 2,
       sections: outline.sections.map((section, index) => ({ sectionIndex: index, heading: section.heading, pages: [index + 2] })) }),
@@ -655,12 +676,18 @@ describe('document generation application service', () => {
         recover
       },
       generator: { run },
+      ...(budget ? { runtime: { create: async () => ({ executionId: 'hung-revision-runtime', executionBudget: budget,
+        start: async () => undefined, progress: async () => undefined, complete: async () => undefined, fail }) } } : {}),
+      ...(budget ? { conversations: {
+        load: async () => conversation, attachDocumentResult: async () => undefined,
+        updateDocumentGenerationStatus: async input => { terminalStatuses.push(input.status.state); }
+      } } : {}),
       revisionAgent,
       fingerprint,
       wait: async () => undefined
     });
 
-    await service.generateFromMessage({
+    const pending = service.generateFromMessage({
       conversationId,
       expectedRevision: conversation.revision,
       messageId: currentMessageId,
@@ -668,6 +695,22 @@ describe('document generation application service', () => {
       parentWorkId,
       images: []
     });
+
+    if (mode !== 'normal') {
+      try {
+        const stopped = expect(pending).rejects.toMatchObject({ code: mode === 'hung_revision' ? 'timeout' : 'cancelled',
+          ...(mode === 'hung_revision' ? { scope: 'execution' } : {}) });
+        await revisionStarted;
+        if (mode === 'hung_revision') await vi.advanceTimersByTimeAsync(100);
+        else budget!.cancel('cancelled');
+        await stopped;
+        expect(fail).toHaveBeenCalledWith(mode === 'hung_revision' ? 'failed' : 'cancelled');
+        expect(terminalStatuses.at(-1)).toBe(mode === 'hung_revision' ? 'failed' : 'cancelled');
+        expect(run).not.toHaveBeenCalled();
+      } finally { budget?.dispose(); vi.useRealTimers(); }
+      return;
+    }
+    await pending;
 
     expect(revisionAgent).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -1021,6 +1064,7 @@ describe('document generation application service', () => {
       expect.objectContaining({
         parentWorkId,
         requestedTotalPages: 5,
+        pageRequirement: { mode: 'target', targetPages: 5, countBasis: 'total' },
         outline: expect.objectContaining({
           title: previousOutline.title,
           sections: proposedOutline.sections
@@ -1029,7 +1073,10 @@ describe('document generation application service', () => {
     );
   });
 
-  it('rejects a total-page rewrite whose body section count is not exact', async () => {
+  it.each([
+    { request: '扩展至 5 页', strict: false },
+    { request: '必须恰好 5 页', strict: true }
+  ])('distinguishes a planning goal from a strict page rewrite: $request', async ({ request, strict }) => {
     const previousMessageId = toMessageId('document-application-mismatch-parent');
     const currentMessageId = toMessageId('document-application-mismatch-current');
     const parentWorkId = toWorkId('document-application-mismatch-work');
@@ -1065,7 +1112,7 @@ describe('document generation application service', () => {
     );
     conversation = addUserMessage(conversation, {
       id: toMessageId('document-application-mismatch-request'),
-      content: '扩展至 5 页',
+      content: request,
       createdAt: now
     });
     conversation = appendCompletedAssistantMessage(
@@ -1073,7 +1120,10 @@ describe('document generation application service', () => {
       currentMessageId,
       JSON.stringify(proposedOutline)
     );
-    const run = vi.fn();
+    const run = vi.fn(async () => ({
+      taskId: toTaskId('task-page-rewrite'), executionId: toExecutionId('execution-page-rewrite'),
+      workId: toWorkId('work-page-rewrite'), fileName: 'page-rewrite.pptx', sizeBytes: 8192
+    }));
     const statuses: unknown[] = [];
     const service = new DocumentGenerationApplicationService({
     resolvePresentationMap: async (_workId, outline) => ({ checksumSha256: '0'.repeat(64), totalPages: outline.sections.length + 2,
@@ -1096,20 +1146,27 @@ describe('document generation application service', () => {
       wait: async () => undefined
     });
 
-    await expect(service.generateFromMessage({
+    const result = service.generateFromMessage({
       conversationId,
       expectedRevision: conversation.revision,
       messageId: currentMessageId,
       kind: 'ppt',
       parentWorkId,
       images: []
-    })).rejects.toMatchObject({ code: 'page_count_mismatch' });
-    expect(run).not.toHaveBeenCalled();
-    expect(statuses.at(-1)).toEqual({
-      state: 'failed',
-      kind: 'ppt',
-      errorCode: 'page_count_mismatch'
     });
+    if (strict) {
+      await expect(result).rejects.toMatchObject({ code: 'page_count_mismatch' });
+      expect(run).not.toHaveBeenCalled();
+    } else {
+      await expect(result).resolves.toMatchObject({ fileName: 'page-rewrite.pptx' });
+      expect(run).toHaveBeenCalledWith(expect.objectContaining({
+        pageRequirement: { mode: 'target', targetPages: 5, countBasis: 'total' }
+      }));
+    }
+    if (strict) expect(statuses.at(-1)).toEqual({
+      state: 'failed', kind: 'ppt', errorCode: 'page_count_mismatch'
+    });
+    else expect(statuses).not.toContainEqual(expect.objectContaining({ state: 'failed' }));
   });
 
   it('recovers a non-empty PPT draft locally and completes the same generation run', async () => {

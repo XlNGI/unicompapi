@@ -1,4 +1,7 @@
 import {
+  acknowledgeConversationAgentRunReconciliation,
+  confirmConversationAgentRunProjectedCompletion,
+  assertConversationAgentRunUpdate,
   parseConversationAgentRun,
   toIsoTimestamp,
   type ConversationAgentRunRepository,
@@ -6,7 +9,9 @@ import {
   type ConversationAgentRunId,
   type ConversationId,
   type ConversationResponseExecutionId,
-  type ProjectId
+  type ProjectId,
+  type IsoTimestamp,
+  type AgentRunReconciliationReason
 } from '../../domain';
 import { projectStoragePaths, type ProjectStorageAdapter } from '../storage';
 
@@ -52,7 +57,9 @@ export class JsonConversationAgentRunRepository implements ConversationAgentRunR
   async create(run: ConversationAgentRunV1): Promise<void> {
     const validated = this.requireProjectRun(run);
     if (validated.revision !== 0) throw new TypeError('A new conversation agent run must have revision 0');
+    const authoritative = await this.load();
     await this.storage.mutateJsonAtomically(projectStoragePaths.entities.conversationAgentRuns, current => {
+      if (current === undefined && authoritative.revision > 0) throw new TypeError('agent_run_storage_reconciliation_required');
       const document = this.parseOrEmpty(current);
       const existing = document.runs.find(item => item.id === validated.id);
       if (existing) throw new ConversationAgentRunRevisionConflictError(validated.id, null, existing.revision);
@@ -68,11 +75,13 @@ export class JsonConversationAgentRunRepository implements ConversationAgentRunR
   async save(run: ConversationAgentRunV1, expectedRevision: number): Promise<void> {
     const validated = this.requireProjectRun(run);
     if (validated.revision !== expectedRevision + 1) throw new TypeError('Saved conversation agent run revision must increment exactly once');
+    await this.load();
     await this.storage.mutateJsonAtomically(projectStoragePaths.entities.conversationAgentRuns, current => {
       const document = this.parseOrEmpty(current);
       const index = document.runs.findIndex(item => item.id === validated.id);
       const actualRevision = index < 0 ? null : document.runs[index].revision;
       if (actualRevision !== expectedRevision) throw new ConversationAgentRunRevisionConflictError(validated.id, expectedRevision, actualRevision);
+      assertConversationAgentRunUpdate(document.runs[index], validated);
       const runs = [...document.runs];
       runs[index] = validated;
       return {
@@ -84,11 +93,53 @@ export class JsonConversationAgentRunRepository implements ConversationAgentRunR
     }, { backup: true });
   }
 
+  /** The Application confirmation command validates scope and an inspected revision before calling this CAS. */
+  async acknowledgeReconciliation(id: ConversationAgentRunId, expectedRevision: number, at: IsoTimestamp, reason?: AgentRunReconciliationReason): Promise<ConversationAgentRunV1> {
+    await this.load();
+    const document = await this.storage.mutateJsonAtomically(projectStoragePaths.entities.conversationAgentRuns, current => {
+      const stored = this.parseOrEmpty(current);
+      const index = stored.runs.findIndex(run => run.id === id);
+      const previous = stored.runs[index];
+      if (!previous || previous.revision !== expectedRevision) {
+        throw new ConversationAgentRunRevisionConflictError(id, expectedRevision, previous?.revision ?? null);
+      }
+      const next = acknowledgeConversationAgentRunReconciliation(previous, at, reason);
+      if (next === previous) return stored;
+      assertConversationAgentRunUpdate(previous, next, { reconciliationAcknowledged: true });
+      const runs = [...stored.runs];
+      runs[index] = next;
+      return { schemaVersion: 1, revision: stored.revision + 1, updatedAt: toIsoTimestamp(this.now()), runs } satisfies ConversationAgentRunDocumentV1;
+    }, { backup: true });
+    return document.runs.find(run => run.id === id)!;
+  }
+
+  async confirmProjectedCompletion(id: ConversationAgentRunId, expectedRevision: number,
+    status: 'completed' | 'failed' | 'cancelled', at: IsoTimestamp): Promise<ConversationAgentRunV1> {
+    await this.load();
+    const document = await this.storage.mutateJsonAtomically(projectStoragePaths.entities.conversationAgentRuns, current => {
+      const stored = this.parseOrEmpty(current);
+      const index = stored.runs.findIndex(run => run.id === id);
+      const previous = stored.runs[index];
+      if (!previous || previous.revision !== expectedRevision) {
+        throw new ConversationAgentRunRevisionConflictError(id, expectedRevision, previous?.revision ?? null);
+      }
+      const next = confirmConversationAgentRunProjectedCompletion(previous, status, at);
+      assertConversationAgentRunUpdate(previous, next, { reconciliationAcknowledged: true, projectedCompletionConfirmed: true });
+      const runs = [...stored.runs];
+      runs[index] = next;
+      return { schemaVersion: 1, revision: stored.revision + 1, updatedAt: toIsoTimestamp(this.now()), runs } satisfies ConversationAgentRunDocumentV1;
+    }, { backup: true });
+    return document.runs.find(run => run.id === id)!;
+  }
+
   private async load(): Promise<ConversationAgentRunDocumentV1> {
     const loaded = await this.storage.readJsonWithBackup(
       projectStoragePaths.entities.conversationAgentRuns,
       value => this.parseOrEmpty(value)
     );
+    // A backup can predate a charged call or ownership claim. It is recovery evidence,
+    // not permission to resume execution or overwrite the primary with a new run.
+    if (loaded?.source === 'backup') throw new TypeError('agent_run_storage_reconciliation_required');
     return loaded?.value ?? this.empty();
   }
 

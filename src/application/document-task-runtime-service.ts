@@ -93,7 +93,9 @@ export class DocumentTaskRuntimeService {
       return runtime;
     }
     if (runtime.status !== 'running' || call.status !== 'started') throw conflict('reconciliation_required');
-    await this.assertBindings(runtime);
+    // The write-ahead call already captured and validated its immutable scope.
+    // Recording its result is settlement, not permission for another operation.
+    // Revocation or a later document revision must not erase an executed fact.
     // A thrown write may already have changed the candidate: it is not safe to retry.
     // Callers that know the write never started may explicitly record a settled
     // validation/authorization failure instead of forcing reconciliation.
@@ -155,8 +157,7 @@ export class DocumentTaskRuntimeService {
     if (runtime.toolCalls.some(call => ['started', 'unknown'].includes(call.status))) {
       return this.reconcile(runtime);
     }
-    await this.assertBindings(runtime);
-    if (!/^[a-zA-Z0-9_-]+$/.test(workId)) throw conflict('work_id_invalid');
+    if (!/^[a-zA-Z0-9_-]{1,256}$/u.test(workId)) throw conflict('work_id_invalid');
     return this.save(runtime, {
       status: 'completed',
       checkpoint: { ...runtime.checkpoint, stage: 'complete' },
@@ -164,10 +165,41 @@ export class DocumentTaskRuntimeService {
     });
   }
 
+  /** A registered artifact is a durable fact even when its tool outcome is unknown. */
+  async recordRegisteredWork(scope: DocumentTaskRuntimeScope, workId: string): Promise<DocumentTaskRuntime> {
+    const runtime = await this.require(scope);
+    if (!/^[a-zA-Z0-9_-]{1,256}$/u.test(workId)) throw conflict('work_id_invalid');
+    if (runtime.workRef?.kind === 'registered') {
+      if (runtime.workRef.ref !== workId) throw conflict('runtime_completion_conflict');
+      return runtime;
+    }
+    if (!['running', 'paused', 'failed', 'cancelled', 'needs_reconciliation'].includes(runtime.status)) throw conflict('runtime_not_completable');
+    return this.save(runtime, { workRef: { kind: 'registered', ref: workId } });
+  }
+
+  /** Storage may have committed a write-ahead call whose receipt was lost. */
+  async markNeedsReconciliation(scope: DocumentTaskRuntimeScope): Promise<DocumentTaskRuntime> {
+    const runtime = await this.require(scope);
+    if (runtime.status === 'needs_reconciliation') return runtime;
+    if (['completed', 'failed', 'cancelled'].includes(runtime.status)) throw conflict('runtime_not_resumable');
+    return this.reconcile(runtime);
+  }
+
+  /** Reading an existing artifact completes an analysis without publishing a new Work. */
+  async completeRead(scope: DocumentTaskRuntimeScope): Promise<DocumentTaskRuntime> {
+    const runtime = await this.require(scope);
+    if (runtime.operation !== 'analyze') throw conflict('runtime_not_completable');
+    if (runtime.status === 'completed') return runtime;
+    if (runtime.toolCalls.some(call => ['started', 'unknown'].includes(call.status))) return this.reconcile(runtime);
+    if (!['running', 'paused'].includes(runtime.status) || runtime.toolCalls.length === 0 ||
+        runtime.toolCalls.at(-1)?.status !== 'completed' || !runtime.observations.some(item => item.ok && item.toolId === 'read_document_structure')) throw conflict('runtime_not_completable');
+    return this.save(runtime, { status: 'completed', checkpoint: { ...runtime.checkpoint, stage: 'complete' } });
+  }
+
   canResume(runtime: DocumentTaskRuntime): boolean {
     return ['planning', 'running', 'waiting_input', 'paused'].includes(runtime.status) &&
       !runtime.toolCalls.some(call => ['started', 'unknown'].includes(call.status)) &&
-      Date.parse(this.now()) < Date.parse(runtime.createdAt) + runtime.budget.timeoutMs;
+      Date.parse(this.now()) < (runtime.budget.deadlineAt ?? Date.parse(runtime.createdAt) + runtime.budget.timeoutMs);
   }
 
   private async assertBindings(runtime: DocumentTaskRuntime): Promise<void> {

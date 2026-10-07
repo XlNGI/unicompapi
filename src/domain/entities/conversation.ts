@@ -19,8 +19,10 @@ import {
 import {
   parseDocumentGenerationStatus,
   parseDocumentMessageResult,
+  parseRetainedDocumentMessageResult,
   type DocumentGenerationStatus,
-  type DocumentMessageResult
+  type DocumentMessageResult,
+  type RetainedDocumentMessageResult
 } from './document-generation';
 
 export const conversationStatuses = ['active', 'archived', 'deleted'] as const;
@@ -80,6 +82,7 @@ interface MessageBase {
   readonly reasoningContent?: string;
   readonly documentGenerationStatus?: DocumentGenerationStatus;
   readonly documentResult?: DocumentMessageResult;
+  readonly retainedDocumentResult?: RetainedDocumentMessageResult;
   readonly attachments: readonly ConversationAttachmentReference[];
   readonly attachmentSelection?: 'replace';
   readonly createdAt: IsoTimestamp;
@@ -530,6 +533,25 @@ export function attachDocumentResultToMessage(
   });
 }
 
+/** Attach a verified local file without changing the response's terminal state. */
+export function attachRetainedDocumentResultToMessage(
+  conversation: Conversation,
+  messageId: MessageId,
+  result: RetainedDocumentMessageResult,
+  updatedAt: IsoTimestamp
+): ActiveConversation {
+  return replaceAssistantMessage(conversation, messageId, updatedAt, message => {
+    if (!['failed', 'cancelled'].includes(message.state) || message.role !== 'assistant' || message.documentResult) {
+      throw new InvalidStateTransitionError('message', message.state, 'attach_retained_document_result');
+    }
+    if (message.retainedDocumentResult && JSON.stringify(message.retainedDocumentResult) !== JSON.stringify(result)) {
+      throw new InvariantViolationError('retained document receipt cannot be replaced');
+    }
+    return parseMessage({ ...message, revision: message.revision + 1,
+      retainedDocumentResult: result, updatedAt });
+  });
+}
+
 export function setDocumentGenerationStatusOnMessage(
   conversation: Conversation,
   messageId: MessageId,
@@ -707,6 +729,7 @@ export function parseMessage(value: unknown): Message {
     record,
     'documentResult'
   );
+  const hasRetainedDocumentResult = Object.prototype.hasOwnProperty.call(record, 'retainedDocumentResult');
   const hasDocumentGenerationStatus = Object.prototype.hasOwnProperty.call(
     record,
     'documentGenerationStatus'
@@ -728,6 +751,7 @@ export function parseMessage(value: unknown): Message {
       ...(hasReasoningContent ? ['reasoningContent'] : []),
       ...(hasDocumentGenerationStatus ? ['documentGenerationStatus'] : []),
       ...(hasDocumentResult ? ['documentResult'] : []),
+      ...(hasRetainedDocumentResult ? ['retainedDocumentResult'] : []),
       ...stateKeys[state]
     ],
     'message'
@@ -776,6 +800,8 @@ export function parseMessage(value: unknown): Message {
   const documentResult = hasDocumentResult
     ? parseDocumentMessageResult(record.documentResult)
     : undefined;
+  const retainedDocumentResult = hasRetainedDocumentResult
+    ? parseRetainedDocumentMessageResult(record.retainedDocumentResult) : undefined;
   const documentGenerationStatus = hasDocumentGenerationStatus
     ? parseDocumentGenerationStatus(record.documentGenerationStatus)
     : undefined;
@@ -807,6 +833,7 @@ export function parseMessage(value: unknown): Message {
       ? { documentGenerationStatus }
       : {}),
     ...(documentResult !== undefined ? { documentResult } : {}),
+    ...(retainedDocumentResult !== undefined ? { retainedDocumentResult } : {}),
     attachments,
     ...(record.attachmentSelection === 'replace' ? { attachmentSelection: 'replace' as const } : {}),
     createdAt,
@@ -839,6 +866,10 @@ export function parseMessage(value: unknown): Message {
     throw new TypeError(
       'only completed assistant messages can persist a document result'
     );
+  }
+  if (retainedDocumentResult !== undefined &&
+    (role !== 'assistant' || !['failed', 'cancelled'].includes(state) || documentResult !== undefined)) {
+    throw new TypeError('only stopped assistant messages can retain a document receipt');
   }
   if (state === 'pending') {
     if (role !== 'assistant' || content !== '') {
@@ -877,7 +908,7 @@ export function parseMessage(value: unknown): Message {
     throw new TypeError(`${state} messages must be assistant messages`);
   }
   if (state === 'failed') {
-    const failedAt = parseTerminalTimestamp(record.failedAt, createdAt, updatedAt, 'failedAt', true);
+    const failedAt = parseTerminalTimestamp(record.failedAt, createdAt, updatedAt, 'failedAt', retainedDocumentResult === undefined);
     const failureReason = oneOf(
       record.failureReason,
       messageFailureReasons,
@@ -897,7 +928,7 @@ export function parseMessage(value: unknown): Message {
     createdAt,
     updatedAt,
     'cancelledAt',
-    true
+    retainedDocumentResult === undefined
   );
   return { ...base, role, state, cancelledAt, streamSequence } as CancelledMessage;
 }

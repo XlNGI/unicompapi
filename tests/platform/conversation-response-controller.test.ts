@@ -1,4 +1,5 @@
 import { NativeSearchAuthorizationError, type ConversationNativeSearch } from '../../src/platform/providers/conversation-native-search';
+import { ExecutionBudgetError } from '../../src/application/execution-budget';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { mkdtempSync } from 'node:fs';
 import { rm } from 'node:fs/promises';
@@ -18,6 +19,7 @@ import {
   createConversationWorkflow,
   parseConversationIntentPlan,
   toConnectionId,
+  toConversationAgentRunId,
   toConversationId,
   toConversationResponseDraftId,
   toConversationResponseExecutionId,
@@ -28,7 +30,8 @@ import {
   toProjectId,
   toProviderId,
   type ConversationResponseExecutionReadModelV1,
-  type ConversationResponseExecutionState
+  type ConversationResponseExecutionState,
+  type ConversationAgentRunV1
 } from '../../src/domain';
 import {
   ConversationResponseController,
@@ -205,7 +208,198 @@ function startRequest(clientCommandId = 'client-command-controller') {
   };
 }
 
+function deferred<T>() {
+  let resolve!: (value: T) => void;
+  const promise = new Promise<T>(accept => { resolve = accept; });
+  return { promise, resolve };
+}
+
 describe('ConversationResponseController', () => {
+  it.each(['failed', 'cancelled', 'interrupted'] as const)('waits for the %s owner before checking whether a new request may start', async state => {
+    const value = fixture();
+    let terminalSelected = false;
+    Object.assign(value.runtime.executionCoordinator, { waitForCompletedOperations: async (
+      predicate: (id: ReturnType<typeof toConversationResponseExecutionId>) => Promise<boolean>
+    ) => { terminalSelected = await predicate(toConversationResponseExecutionId('response-execution-controller')); } });
+    vi.mocked(value.runtime.executions.readModel).mockResolvedValue(execution(state));
+    const mayStart = vi.fn(async () => { expect(terminalSelected).toBe(true); return false; });
+    Object.assign(value.runtime, { completion: { canStartNewResponse: mayStart } });
+    const request = { ...startRequest(`blocked-${state}-owner`), conversation: {
+      conversationId: 'conversation-controller', expectedRevision: 1, editedMessageId: null } };
+    expect(await value.controller.start(request)).toMatchObject({ ok: false, error: { code: 'response_reconciliation_required' } });
+    expect(value.runtime.start).not.toHaveBeenCalled();
+    expect(value.service.addUserMessage).not.toHaveBeenCalled();
+  });
+  it('blocks a new response before changing the existing conversation when settlement is frozen', async () => {
+    const value = fixture();
+    Object.assign(value.runtime.executionCoordinator, { waitForCompletedOperations: async () => undefined });
+    Object.assign(value.runtime, { completion: { canStartNewResponse: async () => false } });
+    const request = { ...startRequest('blocked-frozen-parent'), conversation: {
+      conversationId: 'conversation-controller', expectedRevision: 1, editedMessageId: null } };
+    expect(await value.controller.start(request)).toMatchObject({ ok: false, error: { code: 'response_reconciliation_required' } });
+    expect(value.runtime.start).not.toHaveBeenCalled();
+    expect(value.service.addUserMessage).not.toHaveBeenCalled();
+  });
+
+  it('requires a scoped inspection and explicit confirmation and consumes the token once', async () => {
+    const value = fixture();
+    const run: ConversationAgentRunV1 = { schemaVersion: 1, id: toConversationAgentRunId('run-controller'), revision: 2,
+      projectId, conversationId: toConversationId('conversation-controller'), sourceMessageId: toMessageId('message-user-controller'),
+      responseExecutionId: toConversationResponseExecutionId('response-execution-controller'), status: 'needs_reconciliation',
+      reconciliationReason: 'unknown_result', createdAt, updatedAt: createdAt };
+    const snapshot = { run, taskRevisions: [{ id: 'task-controller', revision: 1 }] };
+    const acknowledge = vi.fn(async () => ({ run: { ...run, status: 'cancelled' as const, revision: 3,
+      reconciliationAcknowledgement: { kind: 'closed_without_replay' as const, confirmedAt: createdAt } }, intent: undefined }));
+    Object.assign(value.runtime, { completion: { inspect: async () => snapshot, reconcile: async () => snapshot, acknowledge } });
+    const request = { projectId, responseExecutionId: run.responseExecutionId! };
+    expect(await value.controller.inspectReconciliation({ ...request, projectId: 'different-project' }))
+      .toMatchObject({ ok: false, error: { code: 'project_scope_mismatch' } });
+    expect(await value.controller.inspectReconciliation({ ...request, outputPath: 'C:/unsafe' }))
+      .toMatchObject({ ok: false, error: { code: 'invalid_request' } });
+    const inspected = await value.controller.inspectReconciliation(request);
+    if (!inspected.ok || !inspected.value.inspectToken) throw new Error('Expected a frozen inspection token');
+    const command = { ...request, expectedRunRevision: 2, inspectToken: inspected.value.inspectToken, confirmed: false };
+    expect(await value.controller.acknowledgeReconciliation(command)).toMatchObject({ ok: false, error: { code: 'explicit_confirmation_required' } });
+    expect(acknowledge).not.toHaveBeenCalled();
+    expect(await value.controller.acknowledgeReconciliation({ ...command, confirmed: true }))
+      .toMatchObject({ ok: true, value: { state: 'cancelled', acknowledged: true, reconciliationReason: 'unknown_result' } });
+    expect(acknowledge).toHaveBeenCalledWith(run.responseExecutionId, 2, null, snapshot.taskRevisions);
+    expect(await value.controller.acknowledgeReconciliation({ ...command, confirmed: true }))
+      .toMatchObject({ ok: false, error: { code: 'reconciliation_snapshot_changed' } });
+    expect(acknowledge).toHaveBeenCalledTimes(1);
+    expect(value.runtime.start).not.toHaveBeenCalled();
+  });
+  it('interrupts startup readiness on application shutdown before an execution handle exists', async () => {
+    const value = fixture();
+    const ready = deferred<void>();
+    Object.assign(value.runtime, { ready: ready.promise });
+    const pending = value.controller.start(startRequest('shutdown-before-ready'));
+    await Promise.resolve();
+    expect(value.controller.cancelActiveStarts()).toBe(1);
+    await expect(pending).resolves.toMatchObject({ ok: false, error: { code: 'response_start_cancelled' } });
+    await value.controller.waitForOperations();
+    ready.resolve();
+    await Promise.resolve();
+    expect(value.runtime.start).not.toHaveBeenCalled();
+  });
+  it.each(['timeout', 'cancelled', 'budget_exceeded'] as const)('reports a startup %s without a storage error', async code => {
+    const value = fixture();
+    vi.mocked(value.runtime.start!).mockRejectedValue(new ExecutionBudgetError(code));
+    expect(await value.controller.start(startRequest(`budget-start-${code}`))).toMatchObject({ ok: false, error: {
+      code: code === 'timeout' ? 'response_execution_timeout' : code === 'cancelled' ? 'response_start_cancelled' : 'response_execution_stopped'
+    } });
+  });
+  it('cancels a start while recovery is still pending, without waiting for readiness or allowing late dispatch', async () => {
+    const value = fixture();
+    const ready = deferred<void>();
+    Object.assign(value.runtime, { ready: ready.promise });
+    const request = startRequest('cancel-before-ready');
+    const pending = value.controller.start(request);
+    await Promise.resolve();
+    await expect(value.controller.cancelResponseStart({ projectId, clientCommandId: request.clientCommandId }))
+      .resolves.toEqual({ ok: true, value: { cancelled: true } });
+    await expect(pending).resolves.toMatchObject({ ok: false, error: { code: 'response_start_cancelled' } });
+    ready.resolve();
+    await value.controller.waitForOperations();
+    await expect(value.controller.start(request)).resolves.toMatchObject({ ok: false, error: { code: 'response_start_cancelled' } });
+    expect(value.service.create).not.toHaveBeenCalled();
+    expect(value.runtime.start).not.toHaveBeenCalled();
+    expect(value.errors).toEqual([]);
+  });
+
+  it('rejects cross-project and open-ended cancellation payloads without stopping a current start', async () => {
+    const value = fixture();
+    const ready = deferred<void>();
+    Object.assign(value.runtime, { ready: ready.promise });
+    const request = startRequest('cancel-project-scope');
+    const pending = value.controller.start(request);
+    await Promise.resolve();
+    expect(await value.controller.cancelResponseStart({ projectId: 'project-other', clientCommandId: request.clientCommandId }))
+      .toMatchObject({ ok: false, error: { code: 'project_scope_mismatch' } });
+    expect(await value.controller.cancelResponseStart({ projectId, clientCommandId: request.clientCommandId, path: 'untrusted' }))
+      .toMatchObject({ ok: false, error: { code: 'invalid_request' } });
+    expect(await value.controller.cancelResponseStart({ projectId, clientCommandId: 'unknown-command' }))
+      .toEqual({ ok: true, value: { cancelled: false } });
+    ready.resolve();
+    expect(await pending).toMatchObject({ ok: true });
+    expect(value.runtime.start).toHaveBeenCalledOnce();
+  });
+
+  it('cancels an Agent-native tool preparation and never pins or dispatches its late result', async () => {
+    const value = fixture();
+    const preparation = deferred<undefined>();
+    const prepare = vi.fn(async (_input: { signal?: AbortSignal }) => preparation.promise);
+    const pinDraft = vi.fn(async () => undefined);
+    Object.assign(value.runtime, { documentTools: { prepare, pinDraft, select: vi.fn() } });
+    const request = { ...startRequest('cancel-agent-preparation'), confirmed: undefined };
+    delete (request as { confirmed?: unknown }).confirmed;
+    const pending = value.controller.startAgent(request);
+    await vi.waitFor(() => expect(prepare).toHaveBeenCalledOnce());
+    const signal = prepare.mock.calls[0][0].signal!;
+    expect(signal.aborted).toBe(false);
+    await value.controller.cancelResponseStart({ projectId, clientCommandId: request.clientCommandId });
+    expect(await pending).toMatchObject({ ok: false, error: { code: 'response_start_cancelled' } });
+    expect(signal.aborted).toBe(true);
+    preparation.resolve(undefined);
+    await value.controller.waitForOperations();
+    expect(pinDraft).not.toHaveBeenCalled();
+    expect(value.candidateService.prepareSubmission).not.toHaveBeenCalled();
+    expect(value.runtime.start).not.toHaveBeenCalled();
+  });
+
+  it('pins the Agent-native startup signal before dispatch while retaining select-only compatibility', async () => {
+    const value = fixture();
+    const selection = { kind: 'generation' as const, projectId, conversationId: toConversationId('conversation-controller'),
+      currentUserMessageId: toMessageId('message-user-controller'), userMessageRevision: 0,
+      userMessageHash: 'a'.repeat(64), authorizationStatus: 'approved' as const, bindingHash: 'b'.repeat(64) };
+    const prepare = vi.fn(async () => selection);
+    const pinDraft = vi.fn(async (_input: { signal?: AbortSignal; selection: typeof selection }) => undefined);
+    Object.assign(value.runtime, { documentTools: { prepare, pinDraft, select: vi.fn() } });
+    const request = { ...startRequest('agent-signal-pin'), confirmed: undefined };
+    delete (request as { confirmed?: unknown }).confirmed;
+    expect(await value.controller.startAgent(request)).toMatchObject({ ok: true });
+    expect(prepare).toHaveBeenCalledWith(expect.objectContaining({ signal: expect.any(AbortSignal), draft: expect.objectContaining({ agentNative: true }) }));
+    expect(pinDraft).toHaveBeenCalledWith(expect.objectContaining({ selection, signal: expect.any(AbortSignal) }));
+    const signal = vi.mocked(value.runtime.start!).mock.calls[0][0].signal;
+    expect(pinDraft.mock.calls[0][0]).toMatchObject({ signal });
+    expect(signal?.aborted).toBe(false);
+  });
+
+  it('cancels the AgentRun and a late active execution when cancellation wins the startup race', async () => {
+    const value = fixture();
+    const started = deferred<ConversationResponseExecutionReadModelV1>();
+    vi.mocked(value.runtime.start!).mockImplementation(async () => started.promise);
+    let run: ConversationAgentRunV1 | undefined;
+    const runs = { list: vi.fn(async () => []), create: vi.fn(async (created: ConversationAgentRunV1) => { run = created; }),
+      get: vi.fn(async () => run), save: vi.fn(async (updated: ConversationAgentRunV1) => { run = updated; }) };
+    Object.assign(value.runtime, { agentRuns: runs });
+    const request = { ...startRequest('cancel-agent-dispatch'), confirmed: undefined };
+    delete (request as { confirmed?: unknown }).confirmed;
+    const pending = value.controller.startAgent(request);
+    await vi.waitFor(() => expect(value.runtime.start).toHaveBeenCalledOnce());
+    await value.controller.cancelResponseStart({ projectId, clientCommandId: request.clientCommandId });
+    expect(await pending).toMatchObject({ ok: false, error: { code: 'response_start_cancelled' } });
+    await vi.waitFor(() => expect(run?.status).toBe('cancelled'));
+    started.resolve(execution('pending'));
+    await vi.waitFor(() => expect(value.runtime.executionCoordinator.cancel).toHaveBeenCalledWith('response-execution-controller'));
+    expect(value.runtime.start).toHaveBeenCalledOnce();
+  });
+
+  it('does not cancel a completed execution that arrives after startup cancellation', async () => {
+    const value = fixture();
+    const started = deferred<ConversationResponseExecutionReadModelV1>();
+    vi.mocked(value.runtime.start!).mockImplementation(async () => started.promise);
+    const request = startRequest('cancel-late-completed');
+    const pending = value.controller.start(request);
+    await vi.waitFor(() => expect(value.runtime.start).toHaveBeenCalledOnce());
+    await value.controller.cancelResponseStart({ projectId, clientCommandId: request.clientCommandId });
+    expect(await pending).toMatchObject({ ok: false, error: { code: 'response_start_cancelled' } });
+    started.resolve(execution('completed'));
+    await value.controller.waitForOperations();
+    await Promise.resolve();
+    expect(value.runtime.executionCoordinator.cancel).not.toHaveBeenCalled();
+  });
+
   it('includes replayed task progress in the execution IPC snapshot', async () => {
     const value = fixture();
     const taskProgress = [{
@@ -286,6 +480,97 @@ describe('ConversationResponseController', () => {
     expect(select).not.toHaveBeenCalled();
     expect(value.draftRepository.create).toHaveBeenCalledWith(expect.objectContaining({ agentNative: true }));
     expect(value.runtime.start).toHaveBeenCalledOnce();
+  });
+
+  it('persists a waiting task without drafting, authorizing or dispatching a provider request', async () => {
+    const value = fixture();
+    const agentSession = { sessionId: 'root-session-controller', revision: 2, sourceMessageId: 'message-user-controller',
+      state: 'waiting_user' as const, waiting: { reason: 'input_required' as const, allowedActions: ['reply' as const] },
+      resumeToken: 'resume-controller', deadlineAt: '2026-08-18T00:10:00.000Z', registeredWorkCount: 0 };
+    const continuations = { prepare: vi.fn(async () => ({ agentSession, waiting: true })),
+      bindRun: vi.fn(async () => undefined), bindExecution: vi.fn(async () => undefined), cancel: vi.fn(async () => agentSession) };
+    const prepare = vi.fn(async () => undefined);
+    Object.assign(value.runtime, { continuations, documentTools: { select: vi.fn(), prepare, pinDraft: vi.fn() } });
+    const request = { ...startRequest('waiting-agent-controller'), confirmed: undefined };
+    delete (request as { confirmed?: unknown }).confirmed;
+    const first = await value.controller.startAgent(request);
+    const replay = await value.controller.startAgent(request);
+    expect(first).toMatchObject({ ok: true, value: { waiting: true, agentSession,
+      conversation: { agentSessions: [agentSession] } } });
+    expect(first.ok && first.value).not.toHaveProperty('execution');
+    expect(replay).toEqual(first);
+    expect(continuations.prepare).toHaveBeenCalledOnce();
+    expect(prepare).not.toHaveBeenCalled();
+    expect(value.draftRepository.create).not.toHaveBeenCalled();
+    expect(value.candidateService.prepareSubmission).not.toHaveBeenCalled();
+    expect(value.runtime.start).not.toHaveBeenCalled();
+  });
+
+  it('binds a ready continuation response to the stable root task while leaving native tool routing intact', async () => {
+    const value = fixture();
+    const agentSession = { sessionId: 'root-session-controller', revision: 3, sourceMessageId: 'original-source-controller',
+      state: 'running' as const, deadlineAt: '2026-08-18T00:10:00.000Z', registeredWorkCount: 0 };
+    const continuations = { prepare: vi.fn(async () => ({ agentSession, waiting: false,
+      parentRunId: 'stable-root-controller', reservedRunId: 'reserved-child-controller' })),
+      bindRun: vi.fn(async () => undefined), bindExecution: vi.fn(async () => undefined), cancel: vi.fn(async () => agentSession) };
+    let run: ConversationAgentRunV1 | undefined;
+    const agentRuns = { list: vi.fn(async () => []), create: vi.fn(async (created: ConversationAgentRunV1) => { run = created; }),
+      get: vi.fn(async () => run), save: vi.fn(async (updated: ConversationAgentRunV1) => { run = updated; }) };
+    Object.assign(value.runtime, { continuations, agentRuns });
+    const request = { ...startRequest('continue-agent-controller'), confirmed: undefined };
+    delete (request as { confirmed?: unknown }).confirmed;
+    const result = await value.controller.startAgent({ ...request,
+      conversation: { conversationId: 'conversation-controller', expectedRevision: 1, editedMessageId: null },
+      continuation: { sessionId: agentSession.sessionId, expectedRevision: 2, resumeToken: 'resume-controller', action: 'reply' } });
+    expect(result).toMatchObject({ ok: true, value: { agentSession, execution: { state: 'pending' } } });
+    expect(continuations.prepare).toHaveBeenCalledWith(expect.objectContaining({ input: expect.objectContaining({
+      continuation: { sessionId: agentSession.sessionId, expectedRevision: 2, resumeToken: 'resume-controller', action: 'reply' }
+    }) }));
+    expect(run?.parentRunId).toBe('stable-root-controller');
+    expect(run?.id).toBe('reserved-child-controller');
+    expect(continuations.bindRun).toHaveBeenCalledWith({ sessionId: agentSession.sessionId, runId: run?.id });
+    expect(continuations.bindExecution).toHaveBeenCalledWith({ sessionId: agentSession.sessionId,
+      runId: run?.id, responseExecutionId: 'response-execution-controller' });
+    expect(value.workflowService.beginExecution).not.toHaveBeenCalled();
+    expect(value.runtime.start).toHaveBeenCalledOnce();
+  });
+
+  it('replays a prior continuation response before active execution checks or another message is written', async () => {
+    const value = fixture();
+    const conversation = await value.service.get();
+    const replay = { conversation: { conversationId: conversation.id, revision: conversation.revision, projectId,
+      title: conversation.title, status: conversation.status, storageScope: 'current_project' as const, readOnly: false,
+      messages: [], createdAt, updatedAt: createdAt }, execution: { ...execution(), taskProgress: [] } };
+    const validate = vi.fn(async () => replay);
+    const prepare = vi.fn();
+    Object.assign(value.runtime, { continuations: { validate, prepare } });
+    vi.mocked(value.runtime.executions.listActive).mockResolvedValue([execution()]);
+    const request = { ...startRequest('replayed-continuation'), confirmed: undefined,
+      conversation: { conversationId: conversation.id, expectedRevision: 0, editedMessageId: null },
+      continuation: { sessionId: 'stable-root-controller', expectedRevision: 2, resumeToken: 'prior-token', action: 'reply' } };
+    delete (request as { confirmed?: unknown }).confirmed;
+    expect(await value.controller.startAgent(request)).toMatchObject({ ok: true, value: replay });
+    expect(value.service.addUserMessage).not.toHaveBeenCalled();
+    expect(value.runtime.executions.listActive).not.toHaveBeenCalled();
+    expect(prepare).not.toHaveBeenCalled();
+    expect(value.runtime.start).not.toHaveBeenCalled();
+  });
+
+  it('requires project scope and the current session revision to cancel a waiting task', async () => {
+    const value = fixture();
+    const agentSession = { sessionId: 'root-session-controller', revision: 4, sourceMessageId: 'original-source-controller',
+      state: 'cancelled' as const, deadlineAt: '2026-08-18T00:10:00.000Z', registeredWorkCount: 0 };
+    const cancel = vi.fn(async () => agentSession);
+    Object.assign(value.runtime, { continuations: { cancel } });
+    expect(await value.controller.cancelAgentSession({ projectId: 'other-project', sessionId: agentSession.sessionId, expectedRevision: 3 }))
+      .toMatchObject({ ok: false, error: { code: 'project_scope_mismatch' } });
+    expect(cancel).not.toHaveBeenCalled();
+    expect(await value.controller.cancelAgentSession({ projectId, sessionId: agentSession.sessionId, expectedRevision: 3 }))
+      .toMatchObject({ ok: true, value: agentSession });
+    expect(cancel).toHaveBeenCalledWith({ projectId, sessionId: agentSession.sessionId, expectedRevision: 3 });
+    expect(await value.controller.cancelAgentSession({ projectId, sessionId: agentSession.sessionId, expectedRevision: 3, closeUnknown: true }))
+      .toMatchObject({ ok: true, value: agentSession });
+    expect(cancel).toHaveBeenLastCalledWith({ projectId, sessionId: agentSession.sessionId, expectedRevision: 3, closeUnknown: true });
   });
 
   it('discloses document sources before pinning the response revision', async () => {

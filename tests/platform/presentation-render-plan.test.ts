@@ -96,6 +96,19 @@ describe('Presentation Render Plan v1 validation', () => {
       style: { ...candidate.pages[0]!.elements[0]!.style, tableHeaderFill: 'FFFFFF', tableBodyFill: 'F7F7F5', borderColor: '677078' }
     }] }] };
     expect(validatePresentationRenderPlan(table).filter(item => item.code !== 'layout_overlap')).toEqual([]);
+    const coloredHeader = { ...table, pages: [{ ...table.pages[0]!, elements: [{ ...table.pages[0]!.elements[0]!,
+      style: { ...table.pages[0]!.elements[0]!.style, tableHeaderFill: '193B65', tableHeaderColor: 'FFFFFF' }
+    }] }] };
+    expect(validatePresentationRenderPlan(coloredHeader)).toEqual([]);
+    expect(parsePresentationRenderPlan(coloredHeader).pages[0]!.elements[0]!.style.tableHeaderColor).toBe('FFFFFF');
+    const invalidHeader = { ...coloredHeader, pages: [{ ...coloredHeader.pages[0]!, elements: [{ ...coloredHeader.pages[0]!.elements[0]!,
+      style: { ...coloredHeader.pages[0]!.elements[0]!.style, tableHeaderColor: 'url(invalid)' }
+    }] }] };
+    expect(validatePresentationRenderPlan(invalidHeader).some(item => item.path.endsWith('.tableHeaderColor'))).toBe(true);
+    const headerOnText = { ...candidate, pages: [{ ...candidate.pages[0]!, elements: [{ ...candidate.pages[0]!.elements[0]!,
+      style: { ...candidate.pages[0]!.elements[0]!.style, tableHeaderColor: 'FFFFFF' }
+    }] }] };
+    expect(validatePresentationRenderPlan(headerOnText).some(item => item.path.endsWith('.tableHeaderColor'))).toBe(true);
 
     const chart = { ...candidate, pages: [{ ...candidate.pages[0]!, elements: [{ ...candidate.pages[0]!.elements[0]!, type: 'chart' as const,
       content: { type: 'chart' as const, chartKind: 'bar' as const, title: 'Quarterly movement', data: [{ label: 'Retention', value: 92 }] },

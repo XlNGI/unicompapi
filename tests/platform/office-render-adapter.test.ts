@@ -2,7 +2,8 @@ import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import JSZip from 'jszip';
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
+import { ManagedProcessSupervisor, type ManagedProcessResult } from '../../src/platform/runtime/managed-process';
 import {
   createConfiguredOfficeRenderAdapter,
   createOfficeRenderAdapter,
@@ -18,10 +19,31 @@ import {
 
 const temporaryRoots: string[] = [];
 afterEach(async () => {
+  vi.restoreAllMocks();
   await Promise.all(temporaryRoots.splice(0).map((root) => rm(root, { recursive: true, force: true })));
 });
 
 describe('office render adapter', () => {
+  it('cancels the owned process tree and never starts the PDF converter after Stop', async () => {
+    let started!: () => void;
+    const running = new Promise<void>(resolve => { started = resolve; });
+    let finish!: (result: ManagedProcessResult) => void;
+    const completion = new Promise<ManagedProcessResult>(resolve => { finish = resolve; });
+    const cancel = vi.fn(() => { finish({ code: null, signal: null, stdout: '', stderr: '', terminationReason: 'cancelled' }); return true; });
+    const spawn = vi.spyOn(ManagedProcessSupervisor.prototype, 'start').mockImplementation(() => {
+      started(); return { pid: 100, promise: completion, cancel };
+    });
+    const controller = new AbortController();
+    const render = createOfficeRenderAdapter({ officeExecutable: process.execPath, pdfToPngExecutable: process.execPath });
+    const pending = render('controlled-input.docx', { kind: 'word', signal: controller.signal });
+    const rejected = expect(pending).rejects.toBeInstanceOf(OfficeRenderUnavailableError);
+    await running;
+    controller.abort(); await rejected;
+    expect(cancel).toHaveBeenCalledWith('cancelled');
+    expect(spawn).toHaveBeenCalledTimes(1);
+    expect(spawn.mock.calls[0][0].args[0]).toContain('-env:UserInstallation=file:');
+  });
+
   it('detects rendered text overlap using normalized top and bottom bounds', () => {
     expect(textBoundingBoxesOverlap(
       { left: 10, right: 80, bottom: 10, top: 50 },

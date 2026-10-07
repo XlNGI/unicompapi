@@ -50,6 +50,41 @@ function validIR(): PresentationDesignIRV2 {
 }
 
 describe('production Presentation Design IR v2 contract', () => {
+  it('keeps legacy v2 plans readable and accepts explicit nested v1 semantic groups on the same page', () => {
+    const outline = metricOutline();
+    const baseline = buildFallbackPresentationDesignIR(outline);
+    expect(parsePresentationDesignIR(baseline, { outline }).pages.every(page => page.organization === undefined)).toBe(true);
+    const organization = { schemaVersion: 1 as const, layout: 'metrics' as const, groups: [
+      { groupId: 'headline', role: 'header' as const, contentRefs: ['outline.sections[0].heading'] },
+      { groupId: 'adoption', role: 'metric' as const, contentRefs: ['outline.sections[0].blocks[0].items[0]'] },
+      { groupId: 'retention', role: 'metric' as const, contentRefs: ['outline.sections[0].blocks[0].items[1]'] }
+    ], relationships: [{ kind: 'compare' as const, fromGroupId: 'adoption', toGroupId: 'retention' }] };
+    const value = { ...baseline, pages: baseline.pages.map(page => page.pageNumber === 2 ? { ...page, organization } : page) };
+    expect(parsePresentationDesignIR(value, { outline }).pages[1].organization).toEqual(organization);
+    const wrong = { ...value, pages: value.pages.map(page => page.pageNumber === 1 ? { ...page, organization } : { ...page, organization: undefined }) };
+    expect(validatePresentationDesignIR(wrong, { outline }).map(issue => issue.code)).toContain('invalid_content_reference');
+    const injected = { ...organization, groups: [{ ...organization.groups[0], copiedFact: 'PRIVATE-FACT' }, ...organization.groups.slice(1)] };
+    expect(() => parsePresentationDesignIR({ ...value, pages: value.pages.map(page => page.pageNumber === 2 ? { ...page, organization: injected } : page) }, { outline }))
+      .toThrow(PresentationDesignIRParseError);
+  });
+
+  it('exposes exact closing action, nearest takeaway and title inventory without allowing other prior sections', () => {
+    const outline = parseDocumentOutline(JSON.stringify({ kind: 'ppt', title: 'Closing deck', sections: [
+      { heading: 'Old', level: 1, takeaway: 'Old takeaway', blocks: [{ type: 'paragraph', text: 'Old fact' }] },
+      { heading: 'Recent', level: 1, takeaway: 'Recent takeaway', blocks: [{ type: 'paragraph', text: 'Recent fact' }] },
+      { heading: 'Last', level: 1, action: 'Start now', blocks: [{ type: 'paragraph', text: 'Last fact' }] }
+    ] }));
+    const input = buildPresentationArtDirectionInput({ userRequirement: 'Explain the results', outline });
+    expect(input.outline.pages.at(-1)?.contentRefs).toEqual(['outline.sections[2].action', 'outline.sections[1].takeaway', 'outline.title']);
+    expect(parsePresentationArtDirectionInput(input)).toEqual(input);
+    const closing = input.outline.pages.at(-1)!;
+    const forged = { ...closing, contentRefs: ['outline.sections[0].takeaway', ...closing.contentRefs.slice(1)],
+      content: [{ ref: 'outline.sections[0].takeaway', kind: 'takeaway', text: 'Old takeaway' }, ...closing.content.slice(1)] };
+    expect(() => parsePresentationArtDirectionInput({ ...input, outline: { ...input.outline, pages: [...input.outline.pages.slice(0, -1), forged] } })).toThrow();
+    const changed = { ...closing, content: closing.content.map(item => item.kind === 'takeaway' ? { ...item, text: 'Invented closing fact' } : item) };
+    expect(() => parsePresentationArtDirectionInput({ ...input, outline: { ...input.outline, pages: [...input.outline.pages.slice(0, -1), changed] } })).toThrow();
+  });
+
   it('parses a valid contract and accepts fenced provider JSON', () => {
     const value = validIR();
     expect(parsePresentationDesignIR(JSON.stringify(value))).toEqual(value);
@@ -195,11 +230,19 @@ describe('production Presentation Design IR v2 contract', () => {
     for (const field of ['visualTone', 'typographyDirection', 'pageIntent', 'hierarchy', 'supporting', 'composition', 'focalArea', 'contentRoles', 'image', 'chart', 'visualStrategy']) expect(encoded).toContain(`"${field}"`);
     expect(encoded).toContain('"additionalProperties":false');
     expect(encoded).toContain('"maxLength":600');
+    const pageContract = properties.pages.items as { required: readonly string[]; properties: Record<string, unknown> };
+    expect(pageContract.required).not.toContain('organization');
+    expect(pageContract.properties.organization).toBeDefined();
+    expect(JSON.stringify(pageContract.properties.organization)).toContain('"const":1');
+    expect(encoded).toContain('"maxItems":16');
+    expect(encoded).toContain('"maxItems":32');
     const input = buildPresentationArtDirectionInput({ userRequirement: 'Design this content', outline: metricOutline() });
     const prompt = buildPresentationArtDirectionPrompt(input);
     expect(prompt).toContain(encoded);
     expect(prompt).toContain('untrusted');
     expect(prompt).toContain('outline.sections[0].blocks[0].items[1]');
+    expect(prompt).toContain('Include organization schemaVersion 1');
+    expect(prompt).toContain('standalone header group');
   });
 
   it('rejects missing pages and nested geometry fields without partial acceptance', () => {

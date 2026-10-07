@@ -72,6 +72,8 @@ export interface DocumentTaskRuntimeBudget {
   readonly maxSteps: number;
   readonly budgetUnits: number;
   readonly timeoutMs: number;
+  /** Fixed parent deadline. Older records retain createdAt + timeoutMs compatibility. */
+  readonly deadlineAt?: number;
 }
 
 export interface DocumentTaskRuntime {
@@ -167,6 +169,8 @@ export function parseDocumentTaskRuntime(value: unknown): DocumentTaskRuntime {
   const observations = parseObservations(record.observations);
   const workRef = record.workRef === undefined ? undefined : parseWorkRef(record.workRef);
   const budget = parseBudget(record.budget);
+  if (budget.deadlineAt !== undefined && (budget.deadlineAt <= Date.parse(createdAt) ||
+      budget.deadlineAt - Date.parse(createdAt) > 900_000)) throw new TypeError('Document task runtime deadline is invalid');
   const status = requireEnum(record.status, documentTaskRuntimeStatuses, 'status');
   const registry = createDocumentToolRegistry();
   if (checkpoint.step !== toolCalls.length || toolCalls.length > budget.maxSteps ||
@@ -189,7 +193,10 @@ export function parseDocumentTaskRuntime(value: unknown): DocumentTaskRuntime {
   if ((pending === 'started' && status !== 'running') ||
       (pending === 'unknown' && status !== 'needs_reconciliation') ||
       (status === 'needs_reconciliation' && checkpoint.stage !== 'reconcile') ||
-      (status === 'completed' && (checkpoint.stage !== 'complete' || workRef?.kind !== 'registered')) ||
+      (status === 'completed' && (checkpoint.stage !== 'complete' ||
+        (operation === 'analyze'
+          ? !observations.some(item => item.toolId === 'read_document_structure' && item.ok)
+          : workRef?.kind !== 'registered'))) ||
       (status !== 'completed' && checkpoint.stage === 'complete')) {
     throw new TypeError('Document task runtime status is inconsistent');
   }
@@ -235,26 +242,34 @@ export function updateDocumentTaskRuntime(
 /** Repositories enforce this too; object spreads cannot bypass lifecycle checks. */
 export function assertDocumentTaskRuntimeUpdate(previous: DocumentTaskRuntime, next: DocumentTaskRuntime): void {
   for (const field of ['id', 'projectId', 'conversationId', 'sourceMessageId', 'executionId',
-    'documentKind', 'attachmentRefs', 'pageRefs', 'budget', 'createdAt'] as const) {
+    'documentKind', 'operation', 'attachmentRefs', 'pageRefs', 'budget', 'createdAt'] as const) {
     if (JSON.stringify(previous[field]) !== JSON.stringify(next[field])) throw new TypeError('Runtime binding is immutable');
   }
   const transitions: Readonly<Record<DocumentTaskRuntimeStatus, readonly DocumentTaskRuntimeStatus[]>> = {
-    planning: ['planning', 'running', 'waiting_input', 'paused', 'cancelled', 'failed'],
+    planning: ['planning', 'running', 'waiting_input', 'paused', 'cancelled', 'failed', 'needs_reconciliation'],
     running: ['running', 'waiting_input', 'paused', 'cancelled', 'failed', 'needs_reconciliation', 'completed'],
-    waiting_input: ['waiting_input', 'running', 'paused', 'cancelled', 'failed'],
-    paused: ['paused', 'running', 'cancelled', 'failed', 'completed'],
-    failed: [], cancelled: [], completed: [], needs_reconciliation: []
+    waiting_input: ['waiting_input', 'running', 'paused', 'cancelled', 'failed', 'needs_reconciliation'],
+    paused: ['paused', 'running', 'cancelled', 'failed', 'completed', 'needs_reconciliation'],
+    failed: ['failed'], cancelled: ['cancelled'], completed: [], needs_reconciliation: ['needs_reconciliation']
   };
   const previousWorkRef = previous.workRef;
   const nextWorkRef = next.workRef;
   if (JSON.stringify(previousWorkRef) !== JSON.stringify(nextWorkRef)) {
-    // A candidate may be promoted exactly once, after the platform has
-    // registered the immutable Work. No other lifecycle update may mutate
-    // the binding or replace a registered Work.
-    if (next.status !== 'completed' || nextWorkRef?.kind !== 'registered' ||
+    // A committed Work remains a fact even when the reply/Observation is unknown.
+    // The host may add this receipt once; later transitions cannot replace it.
+    if (!['running', 'paused', 'needs_reconciliation', 'failed', 'cancelled', 'completed'].includes(next.status) ||
+        nextWorkRef?.kind !== 'registered' ||
         previousWorkRef?.kind === 'registered') {
       throw new TypeError('Runtime work reference is immutable');
     }
+  }
+  if (['failed', 'cancelled', 'needs_reconciliation'].includes(previous.status)) {
+    const receiptOnly = previous.status === next.status && previousWorkRef?.kind !== 'registered' &&
+      nextWorkRef?.kind === 'registered' &&
+      JSON.stringify(previous.checkpoint) === JSON.stringify(next.checkpoint) &&
+      JSON.stringify(previous.toolCalls) === JSON.stringify(next.toolCalls) &&
+      JSON.stringify(previous.observations) === JSON.stringify(next.observations);
+    if (!receiptOnly) throw new TypeError('Frozen runtime only accepts a registered Work receipt');
   }
   if (!transitions[previous.status].includes(next.status) || next.revision !== previous.revision + 1 ||
       next.updatedAt < previous.updatedAt || next.checkpoint.step < previous.checkpoint.step ||
@@ -283,12 +298,13 @@ export function assertDocumentTaskRuntimeUpdate(previous: DocumentTaskRuntime, n
 
 function parseBudget(value: unknown): DocumentTaskRuntimeBudget {
   const record = requireRecord(value, 'budget');
-  requireExactKeys(record, ['maxSteps', 'budgetUnits', 'timeoutMs']);
+  requireExactKeys(record, ['maxSteps', 'budgetUnits', 'timeoutMs', 'deadlineAt']);
   const maxSteps = positiveInteger(record.maxSteps, 'budget.maxSteps');
   const budgetUnits = positiveInteger(record.budgetUnits, 'budget.budgetUnits');
   const timeoutMs = positiveInteger(record.timeoutMs, 'budget.timeoutMs');
   if (maxSteps > 32 || budgetUnits > 10_000 || timeoutMs > 900_000) throw new TypeError('Document task runtime budget exceeds limits');
-  return { maxSteps, budgetUnits, timeoutMs };
+  const deadlineAt = record.deadlineAt === undefined ? undefined : positiveInteger(record.deadlineAt, 'budget.deadlineAt');
+  return { maxSteps, budgetUnits, timeoutMs, ...(deadlineAt === undefined ? {} : { deadlineAt }) };
 }
 
 function parseCheckpoint(value: unknown): DocumentTaskRuntimeCheckpoint {

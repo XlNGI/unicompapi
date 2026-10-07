@@ -1,7 +1,12 @@
 import type { Readable } from 'node:stream';
-import { describe, expect, it, vi } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { readDocumentToolContext, readDocumentToolContract } from '../fixtures/document-tool-context';
-import { providerToolsFromContracts } from '../../src/platform/providers/provider-tool-calling';
+import { providerExecutionLifecycleFixture } from '../fixtures/provider-execution-lifecycle';
+import { providerExecutionHash, providerToolsFromContracts } from '../../src/platform/providers/provider-tool-calling';
+import type { DocumentFinalizationToolBridge } from '../../src/platform/providers/provider-document-finalization';
+import * as productionTrace from '../../src/platform/conversation-production-trace';
+import { HostExecutionBudget } from '../../src/application/execution-budget';
+import { createCanonicalToolRegistry } from '../../src/domain/entities/canonical-tool-contract';
 import {
   createProviderConnection,
   createProviderExecutionRouteSnapshot,
@@ -114,6 +119,8 @@ import {
   uniCompApiTextChatParameterSchema,
   uniCompApiTextReasoningParameterSchema,
 } from '../../src/platform';
+
+afterEach(() => vi.restoreAllMocks());
 
 const modelKey = 'tenant-deployment-42';
 const modelContract = createNewApiModelContract(modelKey, {
@@ -760,6 +767,53 @@ describe('NewAPI management and runtime safety', () => {
 });
 
 describe('NewAPI chat adapter', () => {
+  it('keeps a stale generation hash, admits one readback and rejects final tool proposals without another model request', async () => {
+    const diagnostic = vi.spyOn(productionTrace, 'emitProductionDiagnostic');
+    const args = { title: 'Verified title', content: 'Verified body' };
+    const ids = ['first-generation', 'stale-generation', 'stale-final'];
+    let round = 0;
+    const fixture = runtimeFixture(async () => streamResponse(chatStreamEvent({ tool_calls: [{ index: 0,
+      id: ids[round++], type: 'function', function: { name: 'generate_pptx', arguments: JSON.stringify(args) } }] }, 'tool_calls') + 'data: [DONE]\n\n'));
+    const lifecycle = lifecycleFixture();
+    const adapter = new NewApiChatAdapter(fixture.runtime, credentialResolver(), connectionResolver(), schemaResolver(), lifecycle.port, usageSink().port);
+    let phase: 'readback' | 'final' | undefined;
+    const executed: string[] = [];
+    const bridge: DocumentFinalizationToolBridge = {
+      finalizationState: () => phase ? { phase, readBackConfirmed: phase === 'final', actualTotalPages: 6, planningTotalPages: 12 } : undefined,
+      execute: async input => {
+        await input.onExecutionAdmitted?.();
+        executed.push(input.call.name);
+        phase = input.call.name === 'generate_pptx' ? 'readback' : 'final';
+        return { schemaVersion: 1, status: 'success', observation: { verified: true },
+          ...(input.call.name === 'generate_pptx' ? { artifactRefs: [{ kind: 'work', ref: 'verified-work' }] } : {}),
+          metadata: { toolId: input.call.name } };
+      }
+    };
+    const journal = providerExecutionLifecycleFixture();
+    const registry = createCanonicalToolRegistry();
+    const handle = await adapter.submit({ routeSnapshot: routeFor('text_chat'),
+      request: { responseExecutionId: 'response-finalize', invocationAttemptId: 'attempt-finalize', messages: [{ role: 'user', content: 'Generate' }], parameterValues: {} },
+      executionLifecycle: journal.port, toolBridge: bridge,
+      prepareTools: async () => phase === 'final' ? undefined : providerToolsFromContracts([registry.get(phase === 'readback' ? 'read_document_structure' : 'generate_pptx')!]) });
+    await expect(handle.completion).resolves.toMatchObject({ state: 'completed' });
+    expect(executed).toEqual(['generate_pptx', 'read_document_structure']);
+    expect(journal.events.filter(event => event.name === 'toolAdmitted')).toHaveLength(2);
+    expect(journal.events.find(event => event.name === 'modelResult' && (event.input as { round: number }).round === 1)).toMatchObject({ input: {
+      resultHash: providerExecutionHash({ content: '', toolCalls: [{ id: 'stale-generation', name: 'generate_pptx', arguments: args }], finishReason: 'tool_calls' })
+    } });
+    expect(fixture.requests).toHaveLength(3);
+    expect(requestJson(fixture.requests[2])).toMatchObject({ tool_choice: 'none' });
+    expect(requestJson(fixture.requests[2])).not.toHaveProperty('tools');
+    expect(lifecycle.content).toContain('实际 6 页');
+    expect(lifecycle.content).toContain('原规划目标为 12 页');
+    const preparations = diagnostic.mock.calls.filter(([event]) => event.operationId?.startsWith('continuation_'));
+    expect(preparations).toHaveLength(2);
+    expect(preparations.every(([event]) => event.operationId === 'continuation_request_prepare' && event.status === 'completed')).toBe(true);
+    expect(journal.events.filter(event => event.name === 'modelPrepared')).toHaveLength(3);
+    expect(journal.events.filter(event => event.name === 'modelStarted')).toHaveLength(3);
+    expect(journal.events.filter(event => event.name === 'modelResult')).toHaveLength(3);
+  });
+
   it('does not announce a waiting search when the provider rejects the request', async () => {
     const fixture = runtimeFixture(async () => jsonResponse({ error: { code: 'permission_denied', message: 'denied' } }, 403));
     const adapter = new NewApiChatAdapter(fixture.runtime, credentialResolver(), connectionResolver(), schemaResolver(), lifecycleFixture().port, usageSink().port);
@@ -863,7 +917,7 @@ describe('NewAPI chat adapter', () => {
 
     const result = await runChatStream([new TextEncoder().encode(sse)], 'text_reasoning');
 
-    expect(result.terminal).toMatchObject({ state: 'failed', safeCode: 'newapi.tool_loop_limit' });
+    expect(result.terminal).toMatchObject({ state: 'failed', safeCode: 'newapi.tool_loop_tool_bridge_unavailable' });
     expect(result.lifecycle.content).toBe('Partial answer');
     expect(result.lifecycle.reasoningContent).toBe('Reasoning');
     expect(result.lifecycle.states).toEqual(['started', 'failed']);
@@ -1739,6 +1793,321 @@ describe('NewAPI chat adapter', () => {
       completion_tokens: 2,
       total_tokens: 7
     })).toThrow('inconsistent');
+  });
+});
+
+describe('NewAPI durable Provider lifecycle', () => {
+  const request = () => ({ responseExecutionId: 'response-durable-fixture', invocationAttemptId: 'attempt-durable-fixture',
+    messages: [{ role: 'user', content: 'Synthetic private prompt' }], parameterValues: {} });
+  const tools = providerToolsFromContracts([createCanonicalToolRegistry().get('generate_pptx')!]);
+  const firstStream = () => chatStreamEvent({ reasoning_content: 'Synthetic private thought', tool_calls: [{ index: 0, id: 'private-model-call', type: 'function',
+    function: { name: 'generate_pptx', arguments: JSON.stringify({ title: 'Synthetic title', content: 'Synthetic content' }) } }] }, 'tool_calls') + 'data: [DONE]\n\n';
+
+  it.each(['modelPrepared', 'modelStarted'] as const)('refuses HTTP when the %s write-ahead boundary fails', async boundary => {
+    const fixture = runtimeFixture(async () => streamResponse(chatStreamEvent({ content: 'unexpected' }, 'stop') + 'data: [DONE]\n\n'));
+    const adapter = new NewApiChatAdapter(fixture.runtime, credentialResolver(), connectionResolver(), schemaResolver(), lifecycleFixture().port, usageSink().port);
+    const journal = providerExecutionLifecycleFixture(name => { if (name === boundary) throw new Error('private storage path'); });
+    await expect(adapter.submit({ routeSnapshot: routeFor('text_chat'), request: request(), executionLifecycle: journal.port })).rejects.toThrow('execution_journal_failed');
+    expect(fixture.requests).toHaveLength(0);
+    expect(journal.events.at(-1)).toMatchObject({ name: 'modelFailed', input: { round: 0, unknown: false, code: 'journal_failed' } });
+  });
+
+  it('records an explicit HTTP rejection as known failure and never retries it', async () => {
+    const fixture = runtimeFixture(async () => jsonResponse({ error: { code: 'permission_denied', message: 'Denied' } }, 403));
+    const adapter = new NewApiChatAdapter(fixture.runtime, credentialResolver(), connectionResolver(), schemaResolver(), lifecycleFixture().port, usageSink().port);
+    const journal = providerExecutionLifecycleFixture();
+    await expect(adapter.submit({ routeSnapshot: routeFor('text_chat'), request: request(), executionLifecycle: journal.port })).rejects.toThrow();
+    expect(fixture.requests).toHaveLength(1);
+    expect(journal.events.at(-1)).toMatchObject({ name: 'modelFailed', input: { round: 0, unknown: false, code: 'failed' } });
+  });
+
+  it('waits for the Started commit before sending the first byte of HTTP', async () => {
+    let release!: () => void;
+    let entered!: () => void;
+    const began = new Promise<void>(resolve => { entered = resolve; });
+    const gate = new Promise<void>(resolve => { release = resolve; });
+    const fixture = runtimeFixture(async () => streamResponse(chatStreamEvent({ content: 'done' }, 'stop') + 'data: [DONE]\n\n'));
+    const adapter = new NewApiChatAdapter(fixture.runtime, credentialResolver(), connectionResolver(), schemaResolver(), lifecycleFixture().port, usageSink().port);
+    const journal = providerExecutionLifecycleFixture(async name => { if (name === 'modelStarted') { entered(); await gate; } });
+    const pending = adapter.submit({ routeSnapshot: routeFor('text_chat'), request: request(), executionLifecycle: journal.port });
+    await began;
+    expect(fixture.requests).toHaveLength(0);
+    release();
+    const handle = await pending;
+    await expect(handle.completion).resolves.toMatchObject({ state: 'completed' });
+    expect(fixture.requests).toHaveLength(1);
+    expect(journal.events.map(event => event.name)).toEqual(['modelPrepared', 'modelStarted', 'modelResult']);
+    expect(JSON.stringify(journal.events)).not.toContain('Synthetic private prompt');
+  });
+
+  it.each(['modelPrepared', 'modelStarted'] as const)('cancels a stalled %s commit and never sends HTTP after its late completion', async boundary => {
+    let release!: () => void;
+    let entered!: () => void;
+    const began = new Promise<void>(resolve => { entered = resolve; });
+    const gate = new Promise<void>(resolve => { release = resolve; });
+    const fixture = runtimeFixture(async () => streamResponse(chatStreamEvent({ content: 'unexpected' }, 'stop') + 'data: [DONE]\n\n'));
+    const adapter = new NewApiChatAdapter(fixture.runtime, credentialResolver(), connectionResolver(), schemaResolver(), lifecycleFixture().port, usageSink().port);
+    const journal = providerExecutionLifecycleFixture(async name => { if (name === boundary) { entered(); await gate; } });
+    const controller = new AbortController();
+    const pending = adapter.submit({ routeSnapshot: routeFor('text_chat'), request: request(), executionLifecycle: journal.port, signal: controller.signal });
+    await began;
+    controller.abort();
+    await expect(pending).rejects.toThrow('cancelled');
+    release();
+    await Promise.resolve();
+    expect(fixture.requests).toHaveLength(0);
+  });
+
+  it('does not execute tools when the initial model Result cannot be committed', async () => {
+    const fixture = runtimeFixture(async () => streamResponse(firstStream()));
+    const adapter = new NewApiChatAdapter(fixture.runtime, credentialResolver(), connectionResolver(), schemaResolver(), lifecycleFixture().port, usageSink().port);
+    const execute = vi.fn(async () => ({ status: 'success' }));
+    const journal = providerExecutionLifecycleFixture(name => { if (name === 'modelResult') throw new Error('storage unavailable'); });
+    const handle = await adapter.submit({ routeSnapshot: routeFor('text_chat'), request: { ...request(), tools }, toolBridge: { execute }, executionLifecycle: journal.port });
+    await expect(handle.completion).resolves.toMatchObject({ state: 'failed', safeCode: 'newapi.execution_journal_failed' });
+    expect(execute).not.toHaveBeenCalled();
+    expect(fixture.requests).toHaveLength(1);
+    expect(journal.events.at(-1)).toMatchObject({ name: 'modelFailed', input: { unknown: true, code: 'journal_failed' } });
+  });
+
+  it.each(['none', 'observation', 'continuation-prepared'] as const)('journals one committed Work without duplicate writes across %s interruption', async fault => {
+    let round = 0;
+    const fixture = runtimeFixture(async () => streamResponse(round++ === 0 ? firstStream() : chatStreamEvent({ content: 'Done' }, 'stop') + 'data: [DONE]\n\n'));
+    const adapter = new NewApiChatAdapter(fixture.runtime, credentialResolver(), connectionResolver(), schemaResolver(), lifecycleFixture().port, usageSink().port);
+    const execute = vi.fn(async () => ({ schemaVersion: 1, status: 'success', observation: { artifactRegistered: true },
+      artifactRefs: [{ kind: 'work', ref: 'work-committed-local' }], metadata: { toolId: 'generate_pptx' } }));
+    const journal = providerExecutionLifecycleFixture((name, input) => {
+      if (fault === 'observation' && name === 'observationCommitted' || fault === 'continuation-prepared' && name === 'modelPrepared' && (input as { round: number }).round === 1) throw new Error('interrupted journal');
+    });
+    const handle = await adapter.submit({ routeSnapshot: routeFor('text_chat'), request: { ...request(), tools }, toolBridge: { execute }, executionLifecycle: journal.port });
+    await expect(handle.completion).resolves.toMatchObject({ state: fault === 'none' ? 'completed' : 'failed' });
+    expect(execute).toHaveBeenCalledTimes(1);
+    expect(fixture.requests).toHaveLength(fault === 'none' ? 2 : 1);
+    expect(journal.events.find(event => event.name === 'toolResult')).toMatchObject({ input: { registeredWorkIds: ['work-committed-local'], outcomeUnknown: false } });
+    expect(JSON.stringify(journal.events)).not.toMatch(/Synthetic private prompt|Synthetic private thought|Synthetic title|Synthetic content|private-model-call/);
+    if (fault === 'none') expect(journal.events.map(event => event.name)).toEqual([
+      'modelPrepared', 'modelStarted', 'modelResult', 'toolStarted', 'toolResult', 'observationCommitted', 'modelPrepared', 'modelStarted', 'modelResult'
+    ]);
+    if (fault === 'continuation-prepared') expect(journal.events.at(-1)).toMatchObject({ name: 'modelFailed', input: { round: 1, unknown: false } });
+  });
+
+  it('journals every authorized native-search request before its continuation without persisting search content', async () => {
+    let round = 0;
+    const fixture = runtimeFixture(async () => streamResponse((round++ === 0
+      ? chatStreamEvent({ tool_calls: [{ index: 0, id: 'call_search', type: 'function', function: { name: '$web_search', arguments: '{"query":"private query"}' } }] }, 'tool_calls')
+      : chatStreamEvent({ content: 'Public result' }, 'stop')) + 'data: [DONE]\n\n'));
+    const adapter = new NewApiChatAdapter(fixture.runtime, credentialResolver(), connectionResolver(), schemaResolver(), lifecycleFixture().port, usageSink().port);
+    const journal = providerExecutionLifecycleFixture();
+    const handle = await adapter.submit({ routeSnapshot: routeFor('text_chat'), request: { ...request(),
+      nativeSearch: { grantId: 'native-00000000-0000-0000-0000-000000000000', protocol: 'kimi_builtin', mode: 'auto' } },
+      executionLifecycle: journal.port, nativeSearchGuard: async () => undefined, observeSearch: async () => undefined });
+    await expect(handle.completion).resolves.toMatchObject({ state: 'completed' });
+    expect(journal.events.map(event => [event.name, (event.input as { round: number }).round])).toEqual([
+      ['modelPrepared', 0], ['modelStarted', 0], ['modelResult', 0], ['modelPrepared', 1], ['modelStarted', 1], ['modelResult', 1]
+    ]);
+    expect(JSON.stringify(journal.events)).not.toMatch(/private query|Public result|call_search/);
+    expect(fixture.requests).toHaveLength(2);
+  });
+});
+
+describe('NewAPI host execution budget', () => {
+  const request = () => ({ responseExecutionId: 'response-host-budget', invocationAttemptId: 'attempt-host-budget',
+    messages: [{ role: 'user', content: 'Synthetic bounded execution' }], parameterValues: {} });
+  const budgetFor = (duration: number) => new HostExecutionBudget({ startedAt: Date.now(), deadlineAt: Date.now() + duration,
+    maxToolCalls: 8, budgetUnits: 24 });
+  const deadlines = { defaultConnectionTimeoutMs: 900_000, defaultStreamIdleTimeoutMs: 900_000, defaultStreamTotalTimeoutMs: 900_000 };
+
+  it.each([1, 2])('bounds initial preparation pass %s and ignores its late completion before HTTP', async pass => {
+    vi.useFakeTimers();
+    const budget = budgetFor(2_000);
+    const fixture = runtimeFixture(async () => streamResponse(chatStreamEvent({ content: 'Unexpected' }, 'stop') + 'data: [DONE]\n\n'), [], deadlines);
+    const lifecycle = lifecycleFixture();
+    const adapter = new NewApiChatAdapter(fixture.runtime, credentialResolver(), connectionResolver(), schemaResolver(), lifecycle.port, usageSink().port);
+    let captured: AbortSignal | undefined;
+    let release!: (tools: ReturnType<typeof providerToolsFromContracts>) => void;
+    let prepared = 0;
+    const definitions = providerToolsFromContracts([readDocumentToolContract]);
+    try {
+      const pending = adapter.submit({ routeSnapshot: routeFor('text_chat'), request: request(), executionBudget: budget,
+        prepareTools: async signal => {
+          if (++prepared !== pass) return definitions;
+          captured = signal;
+          return new Promise(resolve => { release = resolve; });
+        } });
+      const failed = expect(pending).rejects.toMatchObject({ code: 'timeout', scope: 'execution' });
+      await vi.advanceTimersByTimeAsync(2_001);
+      await failed;
+      expect(captured?.aborted).toBe(true);
+      release(definitions);
+      await vi.advanceTimersByTimeAsync(0);
+      expect(fixture.requests).toHaveLength(0);
+      expect(lifecycle.states).toEqual(['failed']);
+    } finally { budget.dispose(); fixture.runtime.dispose(); vi.useRealTimers(); }
+  });
+
+  it('preserves a child preparation timeout instead of reporting continuation or user cancellation', async () => {
+    vi.useFakeTimers();
+    const budget = budgetFor(90_000);
+    const fixture = runtimeFixture(async () => streamResponse(''), [], deadlines);
+    const fail = vi.fn(async () => undefined);
+    const adapter = new NewApiChatAdapter(fixture.runtime, credentialResolver(), connectionResolver(), schemaResolver(),
+      { ...lifecycleFixture().port, fail }, usageSink().port);
+    let captured: AbortSignal | undefined;
+    try {
+      const pending = adapter.submit({ routeSnapshot: routeFor('text_chat'), request: request(), executionBudget: budget,
+        prepareTools: async signal => { captured = signal; return new Promise(() => undefined); } });
+      const failed = expect(pending).rejects.toMatchObject({ code: 'timeout', scope: 'prepare' });
+      await vi.advanceTimersByTimeAsync(60_001);
+      await failed;
+      expect(captured?.aborted).toBe(true);
+      expect(fail).toHaveBeenCalledWith('response-host-budget', 'newapi.prepare_timeout');
+      expect(fixture.requests).toHaveLength(0);
+    } finally { budget.dispose(); fixture.runtime.dispose(); vi.useRealTimers(); }
+  });
+
+  it('stops a hanging credential lookup and refuses its late HTTP callback', async () => {
+    vi.useFakeTimers();
+    const budget = budgetFor(2_000);
+    const fixture = runtimeFixture(async () => streamResponse(''), [], deadlines);
+    const credentials = credentialResolver();
+    const useCredential = credentials.useCredential.bind(credentials);
+    let resume!: () => Promise<void>;
+    vi.spyOn(credentials, 'useCredential').mockImplementation((_input, operation) => new Promise<never>(() => {
+      resume = async () => { await useCredential(_input, operation); };
+    }));
+    const adapter = new NewApiChatAdapter(fixture.runtime, credentials, connectionResolver(), schemaResolver(), lifecycleFixture().port, usageSink().port);
+    try {
+      const pending = adapter.submit({ routeSnapshot: routeFor('text_chat'), request: request(), executionBudget: budget });
+      const failed = expect(pending).rejects.toMatchObject({ code: 'timeout', scope: 'execution' });
+      await vi.advanceTimersByTimeAsync(2_001);
+      await failed;
+      await expect(resume()).rejects.toMatchObject({ code: 'timeout' });
+      expect(fixture.requests).toHaveLength(0);
+    } finally { vi.restoreAllMocks(); budget.dispose(); fixture.runtime.dispose(); vi.useRealTimers(); }
+  });
+
+  it.each([3, 4])('preserves the child timeout in continuation preparation pass %s', async pass => {
+    vi.useFakeTimers();
+    const budget = budgetFor(360_000);
+    const definitions = providerToolsFromContracts([readDocumentToolContract]);
+    const fixture = runtimeFixture(async () => streamResponse(chatStreamEvent({ tool_calls: [{ index: 0,
+      id: 'read-child-timeout', type: 'function', function: { name: readDocumentToolContract.toolId, arguments: '{}' } }] }, 'tool_calls') + 'data: [DONE]\n\n'), [], deadlines);
+    const lifecycle = lifecycleFixture();
+    const adapter = new NewApiChatAdapter(fixture.runtime, credentialResolver(), connectionResolver(), schemaResolver(), lifecycle.port, usageSink().port);
+    let preparations = 0;
+    let captured: AbortSignal | undefined;
+    let release!: (tools: typeof definitions) => void;
+    try {
+      const handle = await adapter.submit({ routeSnapshot: routeFor('text_chat'), request: request(), executionBudget: budget,
+        toolBridge: { execute: async () => ({ status: 'success' }) }, prepareTools: async signal => {
+          if (++preparations !== pass) return definitions;
+          captured = signal;
+          return new Promise(resolve => { release = resolve; });
+        } });
+      await vi.advanceTimersByTimeAsync(15_001);
+      await expect(handle.completion).resolves.toMatchObject({ state: 'failed', safeCode: 'newapi.prepare_timeout' });
+      expect(captured?.aborted).toBe(true);
+      release(definitions);
+      await vi.advanceTimersByTimeAsync(0);
+      expect(fixture.requests).toHaveLength(1);
+      expect(fixture.runtime.activeRequestCount).toBe(0);
+    } finally { budget.dispose(); fixture.runtime.dispose(); vi.useRealTimers(); }
+  });
+
+  it('bounds first HTTP headers and closes an uncooperative late stream without starting the response', async () => {
+    vi.useFakeTimers();
+    const budget = budgetFor(2_000);
+    let release!: (response: NewApiHttpTransportResponse) => void;
+    const fixture = runtimeFixture(async () => new Promise(resolve => { release = resolve; }), [], deadlines);
+    const lifecycle = lifecycleFixture();
+    const adapter = new NewApiChatAdapter(fixture.runtime, credentialResolver(), connectionResolver(), schemaResolver(), lifecycle.port, usageSink().port);
+    try {
+      const pending = adapter.submit({ routeSnapshot: routeFor('text_chat'), request: request(), executionBudget: budget });
+      const failed = expect(pending).rejects.toMatchObject({ code: 'timeout', scope: 'execution' });
+      await vi.advanceTimersByTimeAsync(2_001);
+      await failed;
+      expect(fixture.requests[0].signal.aborted).toBe(true);
+      release(streamResponse(chatStreamEvent({ content: 'Late answer' }, 'stop') + 'data: [DONE]\n\n'));
+      await vi.advanceTimersByTimeAsync(0);
+      expect(fixture.runtime.activeRequestCount).toBe(0);
+      expect(lifecycle.states).toEqual(['failed']);
+    } finally { budget.dispose(); fixture.runtime.dispose(); vi.useRealTimers(); }
+  });
+
+  it.each([false, true])('bounds the %s continuation stream and keeps partial content', async continuation => {
+    vi.useFakeTimers();
+    const budget = budgetFor(2_000);
+    let round = 0;
+    let release!: () => void;
+    const fixture = runtimeFixture(async () => {
+      if (continuation && round++ === 0) return streamResponse(chatStreamEvent({ tool_calls: [{ index: 0,
+        id: 'read-budget', type: 'function', function: { name: readDocumentToolContract.toolId, arguments: '{}' } }] }, 'tool_calls') + 'data: [DONE]\n\n');
+      return { status: 200, headers: { 'content-type': 'text/event-stream' }, stream: (async function* () {
+        yield new TextEncoder().encode(chatStreamEvent({ content: 'Partial answer' }));
+        await new Promise<void>(resolve => { release = resolve; });
+        yield new TextEncoder().encode(chatStreamEvent({ content: 'Late answer' }, 'stop') + 'data: [DONE]\n\n');
+      })() };
+    }, [], deadlines);
+    const lifecycle = lifecycleFixture();
+    const adapter = new NewApiChatAdapter(fixture.runtime, credentialResolver(), connectionResolver(), schemaResolver(), lifecycle.port, usageSink().port);
+    const execute = vi.fn(async () => ({ status: 'success' }));
+    try {
+      const handle = await adapter.submit({ routeSnapshot: routeFor('text_chat'), request: { ...request(),
+        ...(continuation ? { tools: providerToolsFromContracts([readDocumentToolContract]) } : {}) },
+        ...(continuation ? { toolBridge: { execute } } : {}), executionBudget: budget });
+      await vi.advanceTimersByTimeAsync(2_001);
+      await expect(handle.completion).resolves.toMatchObject({ state: 'failed', safeCode: 'newapi.execution_timeout' });
+      expect(lifecycle.content).toContain('Partial answer');
+      expect(fixture.requests).toHaveLength(continuation ? 2 : 1);
+      expect(execute).toHaveBeenCalledTimes(continuation ? 1 : 0);
+      release();
+      await vi.advanceTimersByTimeAsync(0);
+      expect(lifecycle.content).not.toContain('Late answer');
+      expect(fixture.runtime.activeRequestCount).toBe(0);
+    } finally { budget.dispose(); fixture.runtime.dispose(); vi.useRealTimers(); }
+  });
+
+  it.each([200_000, 360_000])('uses one %s ms parent for 92s tool + 25s model + 91s tool', async duration => {
+    vi.useFakeTimers();
+    const budget = budgetFor(duration);
+    const definition = providerToolsFromContracts([createCanonicalToolRegistry().get('generate_pptx')!]);
+    let round = 0;
+    const call = (id: string) => chatStreamEvent({ tool_calls: [{ index: 0, id, type: 'function',
+      function: { name: 'generate_pptx', arguments: '{"title":"Fixture","content":"Synthetic"}' } }] }, 'tool_calls') + 'data: [DONE]\n\n';
+    const fixture = runtimeFixture(async transportRequest => {
+      if (round++ === 0) return streamResponse(call('generation-one'));
+      if (round === 2) return delayedStreamResponse(transportRequest, [{ afterMs: 25_000, value: call('generation-two') }]);
+      return streamResponse(chatStreamEvent({ content: 'Complete' }, 'stop') + 'data: [DONE]\n\n');
+    }, [], deadlines);
+    const execute = vi.fn(async () => {
+      await new Promise(resolve => setTimeout(resolve, execute.mock.calls.length === 1 ? 92_000 : 91_000));
+      return { status: 'success', observation: { generated: true } };
+    });
+    const adapter = new NewApiChatAdapter(fixture.runtime, credentialResolver(), connectionResolver(), schemaResolver(), lifecycleFixture().port, usageSink().port);
+    try {
+      const handle = await adapter.submit({ routeSnapshot: routeFor('text_chat'), request: request(), executionBudget: budget,
+        prepareTools: async () => definition, toolBridge: { execute } });
+      await vi.advanceTimersByTimeAsync(209_000);
+      await expect(handle.completion).resolves.toMatchObject(duration === 360_000
+        ? { state: 'completed' } : { state: 'failed', safeCode: 'newapi.execution_timeout' });
+      expect(execute).toHaveBeenCalledTimes(2);
+      expect(fixture.requests).toHaveLength(duration === 360_000 ? 3 : 2);
+    } finally { budget.dispose(); fixture.runtime.dispose(); vi.useRealTimers(); }
+  });
+
+  it('keeps a normal chat without Host budget open beyond 120 seconds', async () => {
+    vi.useFakeTimers();
+    const fixture = runtimeFixture(async transportRequest => delayedStreamResponse(transportRequest,
+      [{ afterMs: 150_000, value: chatStreamEvent({ content: 'Long answer' }, 'stop') + 'data: [DONE]\n\n' }]), [], deadlines);
+    const lifecycle = lifecycleFixture();
+    const adapter = new NewApiChatAdapter(fixture.runtime, credentialResolver(), connectionResolver(), schemaResolver(), lifecycle.port, usageSink().port);
+    try {
+      const handle = await adapter.submit({ routeSnapshot: routeFor('text_chat'), request: request() });
+      await vi.advanceTimersByTimeAsync(150_001);
+      await expect(handle.completion).resolves.toMatchObject({ state: 'completed' });
+      expect(lifecycle.content).toBe('Long answer');
+      expect(fixture.requests).toHaveLength(1);
+    } finally { fixture.runtime.dispose(); vi.useRealTimers(); }
   });
 });
 

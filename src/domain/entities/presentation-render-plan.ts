@@ -13,7 +13,18 @@ export interface PresentationRenderPlanGeometry {
 
 export type PresentationRenderSourceReference =
   | { readonly kind: 'outline'; readonly ref: string }
+  | { readonly kind: 'content'; readonly ref: string }
   | { readonly kind: 'generated'; readonly key: 'closing-label' | 'page-number' };
+
+/** Host provenance of the sole Layout IR from which this writer input was projected. */
+export interface PresentationRenderInputIdentity {
+  readonly layoutId: string;
+  readonly layoutDigest: string;
+  readonly contentLineageId: string;
+  readonly contentRevision: number;
+  readonly contentDigest: string;
+  readonly designDigest?: string;
+}
 
 export interface PresentationRenderPlanStyle {
   readonly fontFamily: string;
@@ -24,6 +35,7 @@ export interface PresentationRenderPlanStyle {
   readonly alignment: PresentationRenderAlignment;
   readonly verticalAlignment: PresentationRenderVerticalAlignment;
   readonly tableHeaderFill?: string;
+  readonly tableHeaderColor?: string;
   readonly tableBodyFill?: string;
   readonly borderColor?: string;
   readonly chartColors?: readonly string[];
@@ -72,6 +84,7 @@ export interface PresentationRenderPlanPage {
 /** Final deterministic input to the PPTX writer. It contains coordinates; Design IR does not. */
 export interface PresentationRenderPlan {
   readonly schemaVersion: 1;
+  readonly inputIdentity?: PresentationRenderInputIdentity;
   readonly canvas: { readonly width: number; readonly height: number };
   readonly minimumFontSize: number;
   readonly pages: readonly PresentationRenderPlanPage[];
@@ -140,7 +153,8 @@ export function validatePresentationRenderPlan(
 ): readonly PresentationRenderPlanDiagnostic[] {
   const diagnostics: PresentationRenderPlanDiagnostic[] = [];
   if (!isRecord(value)) return [issue('invalid_render_plan', '$', 'Render Plan must be an object')];
-  checkKeys(value, ['schemaVersion', 'canvas', 'minimumFontSize', 'pages'], '$', diagnostics);
+  checkKeys(value, ['schemaVersion', 'inputIdentity', 'canvas', 'minimumFontSize', 'pages'], '$', diagnostics, ['inputIdentity']);
+  if (value.inputIdentity !== undefined) validateInputIdentity(value.inputIdentity, diagnostics);
   if (value.schemaVersion !== 1) diagnostics.push(issue('invalid_render_plan', '$.schemaVersion', 'schemaVersion must be 1'));
   const canvas = validateCanvas(value.canvas, '$.canvas', diagnostics);
   const planMinFont = isPositiveFinite(value.minimumFontSize, 300) ? value.minimumFontSize : options.minimumFontSize ?? DEFAULT_MINIMUM_FONT_SIZE;
@@ -245,9 +259,11 @@ function validateSource(
   diagnostics: PresentationRenderPlanDiagnostic[]
 ): void {
   if (!isRecord(value)) { diagnostics.push(issue('invalid_source_ref', path, 'source must be an object')); return; }
-  if (value.kind === 'outline') {
+  if (value.kind === 'outline' || value.kind === 'content') {
     checkKeys(value, ['kind', 'ref'], path, diagnostics);
-    if (typeof value.ref !== 'string' || !sourceRefPattern.test(value.ref)) { diagnostics.push(issue('invalid_source_ref', `${path}.ref`, 'Outline source reference is invalid')); return; }
+    const valid = typeof value.ref === 'string' && (value.kind === 'outline' ? sourceRefPattern.test(value.ref) : /^[A-Za-z0-9_:-]{1,128}$/u.test(value.ref));
+    if (!valid) { diagnostics.push(issue('invalid_source_ref', `${path}.ref`, 'Content source reference is invalid')); return; }
+    if (typeof value.ref !== 'string') return;
     if (pageSourceRefs.has(value.ref)) diagnostics.push(issue('invalid_source_ref', `${path}.ref`, 'an Outline source may appear only once per page'));
     pageSourceRefs.add(value.ref);
     if (options.validSourceRefsByPage !== undefined) {
@@ -259,6 +275,19 @@ function validateSource(
     checkKeys(value, ['kind', 'key'], path, diagnostics);
     if (value.key !== 'closing-label' && value.key !== 'page-number') diagnostics.push(issue('invalid_source_ref', `${path}.key`, 'generated source key is unsupported'));
   } else diagnostics.push(issue('invalid_source_ref', `${path}.kind`, 'source kind is unsupported'));
+}
+
+function validateInputIdentity(value: unknown, diagnostics: PresentationRenderPlanDiagnostic[]): void {
+  const path = '$.inputIdentity';
+  if (!isRecord(value)) { diagnostics.push(issue('invalid_render_plan', path, 'inputIdentity must be an object')); return; }
+  checkKeys(value, ['layoutId', 'layoutDigest', 'contentLineageId', 'contentRevision', 'contentDigest', 'designDigest'], path, diagnostics, ['designDigest']);
+  for (const key of ['layoutId', 'contentLineageId'] as const) {
+    if (typeof value[key] !== 'string' || !/^[A-Za-z0-9_:-]{1,128}$/u.test(value[key])) diagnostics.push(issue('invalid_render_plan', `${path}.${key}`, 'identity must be a bounded stable identifier'));
+  }
+  for (const key of ['layoutDigest', 'contentDigest', 'designDigest'] as const) {
+    if ((key !== 'designDigest' || value[key] !== undefined) && (typeof value[key] !== 'string' || !/^[a-f0-9]{64}$/u.test(value[key]))) diagnostics.push(issue('invalid_render_plan', `${path}.${key}`, 'digest must be a SHA-256 hex value'));
+  }
+  if (!isIntegerInRange(value.contentRevision, 1, Number.MAX_SAFE_INTEGER)) diagnostics.push(issue('invalid_render_plan', `${path}.contentRevision`, 'revision must be a positive integer'));
 }
 
 function validateGeometry(value: unknown, path: string, diagnostics: PresentationRenderPlanDiagnostic[]): PresentationRenderPlanGeometry | undefined {
@@ -276,13 +305,16 @@ function validateGeometry(value: unknown, path: string, diagnostics: Presentatio
 
 function validateStyle(value: unknown, path: string, elementType: unknown, diagnostics: PresentationRenderPlanDiagnostic[]): PresentationRenderPlanStyle | undefined {
   if (!isRecord(value)) { diagnostics.push(issue('invalid_render_plan', path, 'style must be an object')); return undefined; }
-  checkKeys(value, ['fontFamily', 'fontSize', 'bold', 'color', 'fill', 'alignment', 'verticalAlignment', 'tableHeaderFill', 'tableBodyFill', 'borderColor', 'chartColors', 'mutedColor', 'showLegend', 'showValues'], path, diagnostics,
-    ['fill', 'tableHeaderFill', 'tableBodyFill', 'borderColor', 'chartColors', 'mutedColor', 'showLegend', 'showValues']);
+  checkKeys(value, ['fontFamily', 'fontSize', 'bold', 'color', 'fill', 'alignment', 'verticalAlignment', 'tableHeaderFill', 'tableHeaderColor', 'tableBodyFill', 'borderColor', 'chartColors', 'mutedColor', 'showLegend', 'showValues'], path, diagnostics,
+    ['fill', 'tableHeaderFill', 'tableHeaderColor', 'tableBodyFill', 'borderColor', 'chartColors', 'mutedColor', 'showLegend', 'showValues']);
   if (typeof value.fontFamily !== 'string' || value.fontFamily.trim().length === 0 || value.fontFamily.length > 128) diagnostics.push(issue('invalid_render_plan', `${path}.fontFamily`, 'fontFamily is invalid'));
   if (!isPositiveFinite(value.fontSize, 300)) diagnostics.push(issue('invalid_render_plan', `${path}.fontSize`, 'fontSize must be positive and bounded'));
   if (typeof value.bold !== 'boolean') diagnostics.push(issue('invalid_render_plan', `${path}.bold`, 'bold must be boolean'));
-  for (const key of ['color', 'fill', 'tableHeaderFill', 'tableBodyFill', 'borderColor', 'mutedColor'] as const) {
+  for (const key of ['color', 'fill', 'tableHeaderFill', 'tableHeaderColor', 'tableBodyFill', 'borderColor', 'mutedColor'] as const) {
     if (value[key] !== undefined && !isColor(value[key])) diagnostics.push(issue('invalid_render_plan', `${path}.${key}`, `${key} must be a six digit hex color`));
+  }
+  if (value.tableHeaderColor !== undefined && elementType !== 'table') {
+    diagnostics.push(issue('invalid_render_plan', `${path}.tableHeaderColor`, 'table header color is only allowed on table elements'));
   }
   if (!enumHas(alignments, value.alignment)) diagnostics.push(issue('invalid_render_plan', `${path}.alignment`, 'alignment is invalid'));
   if (!enumHas(verticalAlignments, value.verticalAlignment)) diagnostics.push(issue('invalid_render_plan', `${path}.verticalAlignment`, 'verticalAlignment is invalid'));

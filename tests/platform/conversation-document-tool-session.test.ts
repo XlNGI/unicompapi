@@ -17,12 +17,16 @@ import { JsonFileReferenceRepository, JsonWorkRepository } from '../../src/platf
 import { JsonProjectConversationRepository } from '../../src/platform/repositories/json-project-conversation-repository';
 import { JsonDocumentTaskRuntimeRepository } from '../../src/platform/repositories/json-document-task-runtime-repository';
 import { RegisteredPresentationReader } from '../../src/platform/documents/registered-presentation-reader';
+import { DocumentTaskRuntimeService } from '../../src/application/document-task-runtime-service';
 import {
   buildDocumentReadToolInstruction, ConversationDocumentToolSessionService,
-  type ConversationDocumentToolSession
+  type ConversationDocumentToolSession, type ConversationDocumentMutationToolSelection
 } from '../../src/platform/documents/conversation-document-tool-session';
 import { sanitizeControlledToolResult } from '../../src/platform/providers/provider-tool-calling';
 import { getProductionTraceStore, withProductionTrace } from '../../src/platform/conversation-production-trace';
+import * as productionTrace from '../../src/platform/conversation-production-trace';
+import { DocumentIdentityIndexStore } from '../../src/platform/documents/document-identity-index-store';
+import { DocumentMutationHeadStore } from '../../src/platform/documents/document-mutation-head-store';
 
 const roots: string[] = [];
 const services: ConversationDocumentToolSessionService[] = [];
@@ -58,7 +62,7 @@ async function fixture(texts = ['封面：验收演示文稿', '第二页独有�
   }
   await conversations.create(conversation);
   await save(addUserMessage(conversation, { id: toMessageId('original-request'), content: '生成 PPT', createdAt: now }));
-  async function register(title = '验证文档', pageTexts = texts) {
+  async function register(title = '验证文档', pageTexts = texts, attach = true) {
     const index = ++version;
     const zip = new JSZip();
     zip.file('ppt/presentation.xml', `<p:presentation xmlns:p="http://schemas.openxmlformats.org/presentationml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships"><p:sldSz cx="12192000" cy="6858000"/><p:sldIdLst>${pageTexts.map((_, i) => `<p:sldId id="${256 + i}" r:id="rId${i + 1}"/>`).join('')}</p:sldIdLst></p:presentation>`);
@@ -75,14 +79,16 @@ async function fixture(texts = ['封面：验收演示文稿', '第二页独有�
       sourceExecutionId: toExecutionId(`generation-${index}`), state: 'available',
       locator: { kind: 'project', relativePath: `files/documents/${fileName}` }, sizeBytes: buffer.length,
       checksumSha256: createHash('sha256').update(buffer).digest('hex'), createdAt: now, updatedAt: now };
-    const work: Work = { schemaVersion: 1, id: toWorkId(`work:${index}`), projectId, fileId: file.id,
+    const work: Work = { schemaVersion: 1, id: toWorkId(attach ? `work:${index}` : `work-generated-${index}`), projectId, fileId: file.id,
       sourceTaskId: toTaskId(`task-${index}`), sourceExecutionId: file.sourceExecutionId!, mediaKind: 'document', name: title, createdAt: now };
     await files.save(file);
     await works.save(work);
     const messageId = toMessageId(`document-result-${index}`);
-    await save(addCompletedAssistantMessage(conversation, { id: messageId,
-      content: '陈旧的大纲伪事实：所有页都为九百万元', createdAt: now }));
-    await save(attachDocumentResultToMessage(conversation, messageId, { kind: 'ppt', workId: work.id, fileName, sizeBytes: buffer.length }, now));
+    if (attach) {
+      await save(addCompletedAssistantMessage(conversation, { id: messageId,
+        content: '陈旧的大纲伪事实：所有页都为九百万元', createdAt: now }));
+      await save(attachDocumentResultToMessage(conversation, messageId, { kind: 'ppt', workId: work.id, fileName, sizeBytes: buffer.length }, now));
+    }
     return { work, file, fileName, absolutePath, buffer, messageId };
   }
   const first = await register();
@@ -107,6 +113,367 @@ function execute(session: ConversationDocumentToolSession, args: Record<string, 
 }
 
 describe('production registered document read sessions', () => {
+  it('admits a legacy whole-document regeneration with a parent Work as an independent first identity', async () => {
+    const data = await fixture();
+    await data.works.save({ ...data.first.work, parentWorkId: toWorkId('legacy-prior-version') });
+    const service = new ConversationDocumentToolSessionService({ rootDirectory: data.rootDirectory, projectId,
+      conversations: data.conversations, mutation: { renderPreview: async () => ({ previewCount: 3, diagnostics: [] }) } });
+    services.push(service);
+    const first = await service.select(await data.question('修改当前 PPT')) as ConversationDocumentMutationToolSelection;
+    expect(first).toMatchObject({ kind: 'mutation', identity: { workId: data.first.work.id, revision: 1 } });
+    const second = await service.select(await data.question('修改当前 PPT')) as ConversationDocumentMutationToolSelection;
+    expect(second.identity).toEqual(first.identity);
+  });
+
+  it('refuses to reseed a lost first-admission identity when the durable head or seed still references the Work', async () => {
+    const data = await fixture();
+    const service = new ConversationDocumentToolSessionService({ rootDirectory: data.rootDirectory, projectId,
+      conversations: data.conversations, mutation: { renderPreview: async () => ({ previewCount: 3, diagnostics: [] }) } });
+    services.push(service);
+    const first = await service.select(await data.question('修改当前 PPT')) as ConversationDocumentMutationToolSelection;
+    const heads = new DocumentMutationHeadStore(data.storage);
+    const head = await heads.get(first.documentLineageId);
+    const primary = path.join(data.rootDirectory, 'entities', 'presentation-identity-index',
+      `work-${createHash('sha256').update(data.first.work.id).digest('hex')}.json`);
+    await rm(primary);
+    await expect(service.select(await data.question('修改当前 PPT'))).rejects.toMatchObject({ code: 'identity_unresolved' });
+    expect(await new DocumentIdentityIndexStore(data.storage).getForWork(data.first.work.id)).toBeUndefined();
+    expect(await heads.get(first.documentLineageId)).toEqual(head);
+    expect(await readFile(data.first.absolutePath)).toEqual(data.first.buffer);
+  });
+
+  it('projects an executed read from durable receipts and verifies its actual file after close', async () => {
+    const data = await fixture();
+    const { session } = await data.session();
+    await session.prepareTools(new AbortController().signal);
+    expect(await execute(session, {})).toMatchObject({ status: 'success' });
+    await session.close();
+    const [runtime] = await new JsonDocumentTaskRuntimeRepository(data.storage, projectId).list();
+    expect(runtime.status).toBe('completed');
+    expect(runtime.workRef).toBeUndefined();
+    const facts = await data.service.collectResponseFacts(runtime.executionId);
+    expect(facts).toMatchObject({ pendingToolCallCount: 0, unpersistedObservationCount: 0, unknownResult: false, toolFailed: false,
+      documentTasks: [{ active: true, readBackConfirmed: true, deliveryConfirmed: false, runtime: { id: runtime.id, status: 'completed' } }] });
+    expect(await data.works.list(projectId)).toHaveLength(1);
+    await writeFile(data.first.absolutePath, 'changed actual file');
+    expect((await data.service.collectResponseFacts(runtime.executionId)).documentTasks[0].readBackConfirmed).toBe(false);
+    expect((await data.service.collectResponseFacts('unrelated-response')).documentTasks).toEqual([]);
+  });
+
+  it('keeps an unused prepared task inactive without claiming it was completed', async () => {
+    const data = await fixture();
+    const { session } = await data.session();
+    await session.prepareTools(new AbortController().signal);
+    await session.close();
+    const [runtime] = await new JsonDocumentTaskRuntimeRepository(data.storage, projectId).list();
+    const facts = await data.service.collectResponseFacts(runtime.executionId);
+    expect(facts.documentTasks).toMatchObject([{ active: false, readBackConfirmed: false, runtime: { status: 'paused', toolCalls: [] } }]);
+    expect(facts.unknownResult).toBe(false);
+  });
+
+  it('projects failed Observation persistence as unknown and never replays the read', async () => {
+    const data = await fixture();
+    const { session } = await data.session();
+    await session.prepareTools(new AbortController().signal);
+    vi.spyOn(DocumentTaskRuntimeService.prototype, 'recordObservation').mockRejectedValueOnce(new Error('storage unavailable'));
+    expect(await execute(session, {}, 'uncertain-receipt')).toMatchObject({ status: 'unknown' });
+    await session.close();
+    const [runtime] = await new JsonDocumentTaskRuntimeRepository(data.storage, projectId).list();
+    expect(await data.service.collectResponseFacts(runtime.executionId)).toMatchObject({ unknownResult: true, unpersistedObservationCount: 1,
+      documentTasks: [{ active: true, runtime: { status: 'needs_reconciliation', toolCalls: [{ status: 'unknown' }] } }] });
+    expect(await execute(session, {}, 'never-replay')).not.toMatchObject({ status: 'success' });
+    expect((await new JsonDocumentTaskRuntimeRepository(data.storage, projectId).list())[0].toolCalls).toHaveLength(1);
+  });
+
+  it('persists an unknown write-ahead receipt even when no call record can be read back', async () => {
+    const data = await fixture();
+    const { session } = await data.session();
+    await session.prepareTools(new AbortController().signal);
+    vi.spyOn(DocumentTaskRuntimeService.prototype, 'beginToolCall').mockRejectedValueOnce(new Error('write-ahead receipt unavailable'));
+    expect(await execute(session, {}, 'write-ahead-missing')).toMatchObject({ status: 'unknown' });
+    await session.close();
+    const [runtime] = await new JsonDocumentTaskRuntimeRepository(data.storage, projectId).list();
+    expect(await data.service.collectResponseFacts(runtime.executionId)).toMatchObject({ unknownResult: true,
+      documentTasks: [{ runtime: { status: 'needs_reconciliation', toolCalls: [] } }] });
+  });
+
+  it('separates registered generation, actual readback, and persisted delivery facts', async () => {
+    const diagnostic = vi.spyOn(productionTrace, 'emitProductionDiagnostic');
+    const data = await fixture();
+    const service = new ConversationDocumentToolSessionService({ rootDirectory: data.rootDirectory, projectId, conversations: data.conversations,
+      generatePptx: { compiler: { compile: () => ({ kind: 'ppt', title: '新的生成事实', sections: [
+        { heading: '文档事实', level: 1, blocks: [{ type: 'paragraph', text: '核验新生成文件' }] }
+      ] }), recover: () => { throw new Error('unused'); } }, executor: { run: async () => {
+        const result = await data.register('新的生成事实', ['新封面', '新事实'], false);
+        return { taskId: result.work.sourceTaskId, executionId: result.work.sourceExecutionId, workId: result.work.id,
+          fileName: result.fileName, sizeBytes: result.buffer.length };
+      } }, revalidateAuthorization: async () => true } });
+    services.push(service);
+    const selection = await service.select(await data.question('立即生成关于海洋的PPT'));
+    const session = await service.createSession({ selection: selection!, responseExecutionId: 'new-artifact-facts' });
+    sessions.push(session);
+    await session.prepareTools(new AbortController().signal);
+    const preparation = diagnostic.mock.calls.filter(([event]) => event.code === 'tool_authorization');
+    expect(preparation).toEqual([[{ code: 'tool_authorization', status: 'completed', operationId: 'available_tools_prepared',
+      facts: { tool: 'write_document', purpose: 'tool', count: 1 } }]]);
+    expect(await session.bridge.execute({ call: { id: 'generate-facts', name: 'generate_pptx', arguments: { title: '新的生成事实', content: '## 文档事实\n核验新生成文件' } },
+      signal: new AbortController().signal })).toMatchObject({ status: 'success' });
+    expect(session.bridge.finalizationState?.()).toMatchObject({ phase: 'readback', readBackConfirmed: false });
+    await session.close();
+    expect(session.bridge.finalizationState?.()).toBeUndefined();
+    const first = await service.collectResponseFacts('new-artifact-facts');
+    expect(first.documentTasks).toMatchObject([{ active: true, readBackConfirmed: true, deliveryConfirmed: false,
+      runtime: { status: 'completed', workRef: { kind: 'registered', ref: 'work-generated-2' } },
+      registeredWork: { id: 'work-generated-2', projectId, sourceTaskRuntimeId: first.documentTasks[0].runtime.id } }]);
+    const work = (await data.works.get(toWorkId('work-generated-2')))!;
+    const file = (await data.files.get(work.fileId))!;
+    const messageId = toMessageId('new-artifact-delivery');
+    await data.save(addCompletedAssistantMessage(data.conversation, { id: messageId, content: '文档已生成', createdAt: now }));
+    await data.save(attachDocumentResultToMessage(data.conversation, messageId, { kind: 'ppt', workId: work.id,
+      fileName: path.basename(file.locator.kind === 'project' ? file.locator.relativePath : ''), sizeBytes: file.sizeBytes! }, now));
+    expect((await service.collectResponseFacts('new-artifact-facts')).documentTasks[0].deliveryConfirmed).toBe(true);
+    await data.files.save({ ...file, state: 'missing' });
+    const lostFile = (await service.collectResponseFacts('new-artifact-facts')).documentTasks[0];
+    expect(lostFile.registeredWork?.id).toBe(work.id);
+    expect(lostFile.readBackConfirmed).toBe(false);
+  });
+
+  it('adds a late registered Work to the frozen task after cancellation without replaying generation', async () => {
+    const data = await fixture();
+    let release!: () => void;
+    const gate = new Promise<void>(resolve => { release = resolve; });
+    const run = vi.fn(async () => {
+      await gate;
+      const result = await data.register('迟到作品', ['迟到封面', '已登记事实'], false);
+      return { taskId: result.work.sourceTaskId, executionId: result.work.sourceExecutionId, workId: result.work.id,
+        fileName: result.fileName, sizeBytes: result.buffer.length };
+    });
+    const service = new ConversationDocumentToolSessionService({ rootDirectory: data.rootDirectory, projectId, conversations: data.conversations,
+      generatePptx: { compiler: { compile: () => ({ kind: 'ppt', title: '迟到作品', sections: [
+        { heading: '迟到事实', level: 1, blocks: [{ type: 'paragraph', text: '已登记事实' }] }
+      ] }), recover: () => { throw new Error('unused'); } }, executor: { run }, revalidateAuthorization: async () => true } });
+    services.push(service);
+    const selection = await service.select(await data.question('立即生成关于海洋的PPT'));
+    const session = await service.createSession({ selection: selection!, responseExecutionId: 'late-artifact-facts' });
+    sessions.push(session);
+    await session.prepareTools(new AbortController().signal);
+    const pending = session.bridge.execute({ call: { id: 'generate-late', name: 'generate_pptx', arguments: { title: '迟到作品', content: '## 迟到事实\n已登记事实' } },
+      signal: new AbortController().signal });
+    await vi.waitFor(() => expect(run).toHaveBeenCalledTimes(1));
+    await session.cancel?.();
+    expect(await pending).toMatchObject({ status: 'unknown' });
+    expect(session.bridge.finalizationState?.()).toBeUndefined();
+    await session.close();
+    release();
+    await vi.waitFor(async () => {
+      const facts = await service.collectResponseFacts('late-artifact-facts');
+      expect(facts).toMatchObject({ unknownResult: true, documentTasks: [{ readBackConfirmed: true, deliveryConfirmed: false,
+        registeredWork: { id: 'work-generated-2' }, runtime: { status: 'needs_reconciliation', toolCalls: [{ status: 'unknown' }] } }] });
+    });
+    expect(run).toHaveBeenCalledTimes(1);
+  });
+
+  it('pins the read parent deadline to the durable runtime and never renews it on preparation', async () => {
+    const data = await fixture();
+    const { session } = await data.session();
+    const budget = session.executionBudget!;
+    const [runtime] = await new JsonDocumentTaskRuntimeRepository(data.storage, projectId).list();
+    expect(budget.policy).toEqual({ startedAt: Date.parse(runtime.createdAt),
+      deadlineAt: Date.parse(runtime.createdAt) + 180_000, maxToolCalls: 8, budgetUnits: 8 });
+    await session.prepareTools(new AbortController().signal);
+    const deadline = budget.policy.deadlineAt;
+    const wallClock = Date.now();
+    vi.spyOn(Date, 'now').mockReturnValue(wallClock + 1000);
+    await session.prepareTools(new AbortController().signal);
+    expect(budget.policy.deadlineAt).toBe(deadline);
+    expect(budget.remainingMs()).toBeLessThanOrEqual(deadline - wallClock - 1000);
+    await session.close();
+    expect(budget.stopReason).toBeUndefined();
+  });
+
+  it('links cancellation from execution lookup to its existing parent owner', async () => {
+    const data = await fixture();
+    const selection = await data.service.select(await data.question());
+    const responseExecutionId = 'read-lookup-cancellation';
+    await data.service.registerExecution({ selection: selection!, responseExecutionId });
+    const controller = new AbortController();
+    const session = (await data.service.forExecution({ responseExecutionId, signal: controller.signal }))!;
+    sessions.push(session);
+    controller.abort();
+    expect(session.executionBudget?.signal.aborted).toBe(true);
+    expect(session.executionBudget?.stopReason).toBe('cancelled');
+    expect(await execute(session, {}, 'after-lookup-cancel')).toMatchObject({ status: 'cancelled' });
+  });
+
+  it('inherits the original root deadline and remaining counters before creating a document session', async () => {
+    const data = await fixture();
+    const startedAt = Date.now() - 60_000;
+    const policy = { startedAt, deadlineAt: startedAt + 180_000, maxToolCalls: 2, budgetUnits: 2 };
+    const getInheritedExecutionContext = vi.fn(async () => ({ policy }));
+    const service = new ConversationDocumentToolSessionService({ rootDirectory: data.rootDirectory, projectId,
+      conversations: data.conversations, getInheritedExecutionContext });
+    services.push(service);
+    const selection = (await service.select(await data.question()))!;
+    await service.registerExecution({ selection, responseExecutionId: 'inherited-read-session' });
+    const session = (await service.forExecution({ responseExecutionId: 'inherited-read-session' }))!;
+    expect(getInheritedExecutionContext).toHaveBeenCalledWith('inherited-read-session');
+    expect(session.executionBudget?.policy).toEqual(policy);
+    const runtime = (await new JsonDocumentTaskRuntimeRepository(data.storage, projectId).list())[0];
+    expect(runtime.budget).toMatchObject({ maxSteps: 2, budgetUnits: 2, deadlineAt: policy.deadlineAt });
+    expect(session.executionBudget!.remainingMs()).toBeLessThanOrEqual(120_000);
+    await session.prepareTools(new AbortController().signal);
+    expect(await execute(session, {}, 'inherited-first')).toMatchObject({ status: 'success' });
+    expect(await execute(session, {}, 'inherited-second')).toMatchObject({ status: 'success' });
+    expect(await execute(session, {}, 'inherited-third')).toMatchObject({ status: 'failed', diagnostics: [{ code: 'tool_call_limit' }] });
+    expect(session.executionBudget!.snapshot('tool_call_limit')).toMatchObject({ toolCallsUsed: 2, costUnitsUsed: 2 });
+    expect((await new JsonDocumentTaskRuntimeRepository(data.storage, projectId).list())[0].toolCalls).toHaveLength(2);
+  });
+
+  it.each(['startup', 'lease'] as const)('stops an inherited document budget when the %s signal is revoked', async source => {
+    const data = await fixture();
+    const startup = new AbortController();
+    const lease = new AbortController();
+    const startedAt = Date.now() - 1000;
+    const service = new ConversationDocumentToolSessionService({ rootDirectory: data.rootDirectory, projectId,
+      conversations: data.conversations, getInheritedExecutionContext: async () => ({
+        policy: { startedAt, deadlineAt: startedAt + 180000, maxToolCalls: 2, budgetUnits: 2 }, signal: lease.signal
+      }) });
+    services.push(service);
+    const selection = (await service.select(await data.question()))!;
+    await service.registerExecution({ selection, responseExecutionId: `inherited-signal-${source}`, signal: startup.signal });
+    const session = (await service.forExecution({ responseExecutionId: `inherited-signal-${source}` }))!;
+    await session.prepareTools(new AbortController().signal);
+    (source === 'startup' ? startup : lease).abort();
+    expect(session.executionBudget?.stopReason).toBe('cancelled');
+    expect(await execute(session, {}, `after-inherited-${source}`)).toMatchObject({ status: 'cancelled' });
+    expect((await new JsonDocumentTaskRuntimeRepository(data.storage, projectId).list())[0].toolCalls).toHaveLength(0);
+  });
+
+  it.each(['deadline', 'units', 'calls'] as const)('rejects an inherited %s policy exceeding the local document capability', async field => {
+    const data = await fixture();
+    const startedAt = Date.now() - 1000;
+    const policy = { startedAt, deadlineAt: startedAt + 180000, maxToolCalls: 8, budgetUnits: 8 };
+    if (field === 'deadline') policy.deadlineAt += 1;
+    if (field === 'units') policy.budgetUnits += 1;
+    if (field === 'calls') policy.maxToolCalls += 1;
+    const service = new ConversationDocumentToolSessionService({ rootDirectory: data.rootDirectory, projectId,
+      conversations: data.conversations, getInheritedExecutionContext: async () => ({ policy }) });
+    services.push(service);
+    const create = vi.spyOn(service, 'createSession');
+    const selection = (await service.select(await data.question()))!;
+    await expect(service.registerExecution({ selection, responseExecutionId: `excess-inherited-${field}` }))
+      .rejects.toThrow('invalid_inherited_execution_budget');
+    expect(create).not.toHaveBeenCalled();
+    expect(await service.forExecution({ responseExecutionId: `excess-inherited-${field}` })).toBeUndefined();
+    expect(await new JsonDocumentTaskRuntimeRepository(data.storage, projectId).list()).toHaveLength(0);
+  });
+
+  it('cancels a stalled root-context lookup on shutdown before a document task can be created', async () => {
+    const data = await fixture();
+    let resolve!: (value: undefined) => void;
+    const context = new Promise<undefined>(accept => { resolve = accept; });
+    const getInheritedExecutionContext = vi.fn(async () => context);
+    const service = new ConversationDocumentToolSessionService({ rootDirectory: data.rootDirectory, projectId,
+      conversations: data.conversations, getInheritedExecutionContext });
+    services.push(service);
+    const create = vi.spyOn(service, 'createSession');
+    const selection = (await service.select(await data.question()))!;
+    const pending = service.registerExecution({ selection, responseExecutionId: 'stalled-inherited-context' });
+    const stopped = expect(pending).rejects.toMatchObject({ code: 'cancelled' });
+    await vi.waitFor(() => expect(getInheritedExecutionContext).toHaveBeenCalledOnce());
+    await service.dispose();
+    await stopped;
+    resolve(undefined);
+    await Promise.resolve();
+    expect(create).not.toHaveBeenCalled();
+    expect(await new JsonDocumentTaskRuntimeRepository(data.storage, projectId).list()).toHaveLength(0);
+  });
+
+  it('does not renew an inherited deadline that already expired before session registration', async () => {
+    const data = await fixture();
+    const startedAt = Date.now() - 180000;
+    const service = new ConversationDocumentToolSessionService({ rootDirectory: data.rootDirectory, projectId,
+      conversations: data.conversations, getInheritedExecutionContext: async () => ({
+        policy: { startedAt, deadlineAt: startedAt + 100000, maxToolCalls: 2, budgetUnits: 2 }
+      }) });
+    services.push(service);
+    const create = vi.spyOn(service, 'createSession');
+    const selection = (await service.select(await data.question()))!;
+    await expect(service.registerExecution({ selection, responseExecutionId: 'expired-root-deadline' }))
+      .rejects.toMatchObject({ code: 'timeout' });
+    expect(create).not.toHaveBeenCalled();
+    expect(await new JsonDocumentTaskRuntimeRepository(data.storage, projectId).list()).toHaveLength(0);
+  });
+
+  it('cleans a refused root-context admission without leaking an execution registration', async () => {
+    const data = await fixture();
+    const startedAt = Date.now() - 1000;
+    const getInheritedExecutionContext = vi.fn(async () => ({
+      policy: { startedAt, deadlineAt: startedAt + 180000, maxToolCalls: 2, budgetUnits: 2 }
+    })).mockRejectedValueOnce(new Error('Root lease refused'));
+    const service = new ConversationDocumentToolSessionService({ rootDirectory: data.rootDirectory, projectId,
+      conversations: data.conversations, getInheritedExecutionContext });
+    services.push(service);
+    const selection = (await service.select(await data.question()))!;
+    await expect(service.registerExecution({ selection, responseExecutionId: 'root-admission-retry' })).rejects.toThrow('Root lease refused');
+    expect(await new JsonDocumentTaskRuntimeRepository(data.storage, projectId).list()).toHaveLength(0);
+    await service.registerExecution({ selection, responseExecutionId: 'root-admission-retry' });
+    expect(await service.forExecution({ responseExecutionId: 'root-admission-retry' })).toBeDefined();
+    expect(getInheritedExecutionContext).toHaveBeenCalledTimes(2);
+  });
+
+  it('records parent Stop diagnostics when cancellation arrives outside the initial trace context', async () => {
+    const data = await fixture();
+    const request = await data.question();
+    const selection = await data.service.select(request);
+    const scope = { rootDirectory: data.rootDirectory, projectId, conversationId: request.conversation.id,
+      sourceMessageId: request.currentUserMessageId, traceId: 'parent-budget-audit' };
+    const session = await withProductionTrace(scope, () => data.service.createSession({ selection: selection!, responseExecutionId: 'budget-audit-execution' }));
+    sessions.push(session);
+    session.executionBudget!.cancel('cancelled');
+    await vi.waitFor(async () => {
+      const events = await getProductionTraceStore(scope).list({ conversationId: request.conversation.id });
+      expect(events).toContainEqual(expect.objectContaining({ operationId: 'execution_budget', status: 'cancelled',
+        facts: expect.objectContaining({ stopReason: 'cancelled', timeoutScope: 'execution', toolCallsUsed: 0, costUnitsUsed: 0 }) }));
+      expect(JSON.stringify(events)).not.toContain(data.rootDirectory);
+      expect(JSON.stringify(events)).not.toContain('二百万元');
+    });
+  });
+
+  it('uses one bounded parent policy for combined Agent generation and mutation branches', async () => {
+    const data = await fixture();
+    const service = new ConversationDocumentToolSessionService({ rootDirectory: data.rootDirectory, projectId,
+      conversations: data.conversations,
+      generatePptx: { compiler: { compile: () => ({ kind: 'ppt', title: '预算合成', sections: [
+        { heading: '预算内容', level: 1, blocks: [{ type: 'paragraph', text: '测试内容' }] }
+      ] }), recover: () => { throw new Error('not invoked'); } }, executor: { run: async () => { throw new Error('not invoked'); } }, revalidateAuthorization: async () => true },
+      mutation: { renderPreview: async () => ({ previewCount: 3, diagnostics: [] }) } });
+    services.push(service);
+    const request = await data.question('继续处理当前 PPT');
+    const message = request.conversation.messages.at(-1)!;
+    const draft = createConversationResponseDraft({ id: toConversationResponseDraftId('combined-parent-budget'), projectId,
+      conversationId: request.conversation.id, conversationRevision: request.conversation.revision,
+      userMessageId: message.id, userMessageRevision: message.revision, agentNative: true, productFeature: 'text_chat', createdAt: now });
+    const selection = await service.prepare({ conversation: request.conversation, draft });
+    expect(selection).toMatchObject({ kind: 'agent', mutation: { kind: 'mutation' } });
+    const session = await service.createSession({ selection: selection!, responseExecutionId: 'combined-budget-execution' });
+    expect(session.bridge.finalizationState).toBeUndefined();
+    sessions.push(session);
+    const budget = session.executionBudget!;
+    expect(budget.policy).toMatchObject({ maxToolCalls: 12, budgetUnits: 32 });
+    expect(budget.policy.deadlineAt - budget.policy.startedAt).toBe(540_000);
+    const runtimes = await new JsonDocumentTaskRuntimeRepository(data.storage, projectId).list();
+    expect(runtimes).toHaveLength(2);
+    expect(budget.policy.startedAt).toBe(Math.min(...runtimes.map(item => Date.parse(item.createdAt))));
+    expect(runtimes.every(item => item.budget.timeoutMs === 540_000)).toBe(true);
+    const tools = await session.prepareTools(new AbortController().signal);
+    expect(tools?.some(tool => tool.function.name === 'generate_pptx')).toBe(true);
+    expect(tools?.some(tool => tool.function.name === 'update_element')).toBe(true);
+    await session.cancel?.();
+    expect(budget.stopReason).toBe('cancelled');
+    await expect(session.prepareTools(new AbortController().signal)).rejects.toMatchObject({ code: 'cancelled' });
+  });
+
   it('pins host-only metadata without reading bytes or including document content in the first prompt', async () => {
     const data = await fixture();
     const reader = vi.spyOn(RegisteredPresentationReader.prototype, 'read');
@@ -370,7 +737,19 @@ describe('production registered document read sessions', () => {
     expect(await execute(second, {})).toMatchObject({ status: 'failed' });
     await first.close();
     expect(await data.service.forExecution({ responseExecutionId: 'response-bound' })).toBeUndefined();
-    await expect(first.prepareTools(new AbortController().signal)).rejects.toMatchObject({ name: 'AbortError' });
+    await expect(first.prepareTools(new AbortController().signal)).rejects.toMatchObject({ code: 'cancelled' });
+  });
+
+  it('aborts a pending session factory on shutdown without waiting for the task deadline', async () => {
+    const data = await fixture();
+    const selection = (await data.service.select(await data.question()))!;
+    const create = vi.spyOn(data.service, 'createSession').mockImplementation(() => new Promise(() => undefined));
+    const registration = data.service.registerExecution({ selection, responseExecutionId: 'shutdown-pending-factory' });
+    const stopped = expect(registration).rejects.toMatchObject({ code: 'cancelled' });
+    await vi.waitFor(() => expect(create).toHaveBeenCalled());
+    await data.service.dispose();
+    await stopped;
+    expect(await data.service.forExecution({ responseExecutionId: 'shutdown-pending-factory' })).toBeUndefined();
   });
 
   it('supports cancellation and never starts a read after a cancelled request', async () => {
@@ -511,7 +890,7 @@ describe('production registered document read sessions', () => {
     vi.spyOn(JsonFileReferenceRepository.prototype, 'get').mockResolvedValue(data.first.file);
     const reader = vi.spyOn(RegisteredPresentationReader.prototype, 'read');
     const pending = session.prepareTools(new AbortController().signal);
-    const timedOut = expect(pending).rejects.toMatchObject({ code: 'document_page_unavailable' });
+    const timedOut = expect(pending).rejects.toMatchObject({ code: 'timeout', scope: 'prepare' });
     await vi.advanceTimersByTimeAsync(contract.execution.timeoutMs + 1);
     await timedOut;
     finish(data.conversation);

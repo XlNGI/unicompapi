@@ -4,6 +4,7 @@ import os from 'node:os';
 import path from 'node:path';
 import AdmZip from 'adm-zip';
 import { afterEach, describe, expect, it } from 'vitest';
+import { ExecutionBudgetError } from '../../src/application/execution-budget';
 import {
   ConversationApplicationService,
   ConversationStreamingService,
@@ -159,6 +160,15 @@ async function storeCompletedAssistantMessage(input: {
 }
 
 describe('document generation controller', () => {
+  it.each(['timeout', 'cancelled', 'budget_exceeded'] as const)('keeps %s distinct from storage failure', async code => {
+    const application = { prepare: async () => { throw new ExecutionBudgetError(code); } } as unknown as DocumentGenerationApplicationService;
+    const controller = new DocumentGenerationController({
+      getSession: () => ({ projectId: toProjectId('budget-project'), projectName: 'Budget test', rootDirectory: process.cwd() }),
+      getApplication: () => application, openPath: async () => ''
+    });
+    const result = await controller.prepareGeneration({ conversationId: 'budget-conversation', expectedRevision: 0, messageId: 'budget-message', kind: 'ppt' });
+    expect(result).toMatchObject({ ok: false, error: { code: code === 'cancelled' ? 'generation_cancelled' : 'generation_failed' } });
+  });
   it('only exposes message-based generation that can be cancelled and deduplicated', async () => {
     const { controller } = await createEnvironment();
     expect(controller).not.toHaveProperty('generateFromConversation');

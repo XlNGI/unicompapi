@@ -75,7 +75,7 @@ describe('presentation page features and Layout Constraint Model v1', () => {
       semanticRole: 'comparison',
       blockCount: 5,
       metricCount: 2,
-      evidenceCount: 2,
+      evidenceCount: 3,
       chartCount: 1,
       tableCount: 1,
       hasChart: true,
@@ -86,6 +86,9 @@ describe('presentation page features and Layout Constraint Model v1', () => {
       contentDensity: 'dense'
     });
     expect(features.units.map(unit => unit.sourceRef)).toContain('outline.sections[0].blocks[1].items[1]');
+    // An explicitly declared evidence paragraph retains that narrower role
+    // even when the same ref is also included in generic body content.
+    expect(features.units.find(unit => unit.sourceRef === 'outline.sections[0].blocks[0]')?.role).toBe('evidence');
     expect(features.textLength).toBeGreaterThan(100);
     expect(extractPresentationPageFeatures(outline, page)).toEqual(features);
   });

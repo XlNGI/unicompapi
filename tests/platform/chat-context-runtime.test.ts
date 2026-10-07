@@ -1,4 +1,5 @@
 import { mkdtemp, readFile, rm } from 'node:fs/promises';
+import { createHash } from 'node:crypto';
 import os from 'node:os';
 import path from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
@@ -11,10 +12,14 @@ import {
   createConversation,
   createConversationResponseExecution,
   createConversationResponseStreamEvent,
+  createConversationAgentRun,
+  attachConversationAgentRunExecution,
+  markConversationAgentRunNeedsReconciliation,
   setDocumentGenerationStatusOnMessage,
   startAssistantMessageStreaming,
   toConnectionId,
   toConversationId,
+  toConversationAgentRunId,
   toConversationResponseDraftId,
   toConversationResponseExecutionId,
   toConversationResponseStreamEventId,
@@ -34,6 +39,10 @@ import {
   type DocumentGenerationStatus
 } from '../../src/domain';
 import { ConversationIntentOrchestrator, ConversationWorkflowService } from '../../src/application';
+import { ConversationAgentSessionService } from '../../src/application/conversation-agent-session-service';
+import { JsonConversationAgentSessionRepository } from '../../src/platform/repositories/json-conversation-agent-session-repository';
+import { JsonConversationAgentRunRepository } from '../../src/platform/repositories/json-conversation-agent-run-repository';
+import { JsonConversationCompletionJournal } from '../../src/platform/repositories/json-conversation-completion-journal';
 import { JsonConversationResponseExecutionRepository, JsonConversationWorkflowRepository, JsonProjectConversationRepository } from '../../src/platform/repositories';
 import { NodeProjectStorage } from '../../src/platform/storage';
 import { ConversationDocumentInputStore } from '../../src/platform/documents/conversation-document-inputs';
@@ -52,7 +61,7 @@ afterEach(async () => {
 
 async function createLocalDocumentRecoveryFixture(options: {
   readonly documentStatus?: DocumentGenerationStatus;
-  readonly responseState?: 'completed' | 'streaming' | 'interrupted';
+  readonly responseState?: 'completed' | 'streaming' | 'interrupted' | 'pending';
   readonly assistantCompleted?: boolean;
   readonly mismatchedResponseSource?: boolean;
   readonly storedInputs?: 'valid' | 'missing' | 'invalid';
@@ -110,13 +119,13 @@ async function createLocalDocumentRecoveryFixture(options: {
     }
   }), createConversationResponseStreamEvent({ id: toConversationResponseStreamEventId('event-local-created'), responseExecutionId: executionId,
     sequence: 1, type: 'execution_created', occurredAt: t0 }));
-  await executions.appendEvents([
+  if (options.responseState !== 'pending') await executions.appendEvents([
     createConversationResponseStreamEvent({ id: toConversationResponseStreamEventId('event-local-started'), responseExecutionId: executionId,
       sequence: 2, type: 'stream_started', occurredAt: t0 }),
     createConversationResponseStreamEvent({ id: toConversationResponseStreamEventId('event-local-content'), responseExecutionId: executionId,
       sequence: 3, type: 'content_delta', contentDelta: content, occurredAt: t0 })
   ]);
-  if (options.responseState !== 'streaming') {
+  if (options.responseState !== 'streaming' && options.responseState !== 'pending') {
     await executions.appendEvent(createConversationResponseStreamEvent({
       id: toConversationResponseStreamEventId('event-local-terminal'), responseExecutionId: executionId, sequence: 4,
       ...(options.responseState === 'interrupted'
@@ -138,11 +147,114 @@ async function createLocalDocumentRecoveryFixture(options: {
   }
   const runtime = createChatContextRuntime({ userDataDirectory: userData,
     getSession: () => ({ projectId, projectName: '恢复本地文档', rootDirectory: projectRoot }) });
-  return { runtime, projectRoot, projectId, storage, conversationId, assistantId, executionId, conversations, executions,
+  return { runtime, projectRoot, projectId, storage, conversationId, assistantId, sourceId, executionId, conversations, executions,
     workflows, workflow, originalInput, previousAssistantId, previousWorkId };
 }
 
 describe('chat-context composition runtime', () => {
+  async function prepareRoot(fixture: Awaited<ReturnType<typeof createLocalDocumentRecoveryFixture>>, now: () => number) {
+    const at = () => new Date(now()).toISOString();
+    const sessions = new JsonConversationAgentSessionRepository(fixture.storage, fixture.projectId, at);
+    const runs = new JsonConversationAgentRunRepository(fixture.storage, fixture.projectId, at);
+    const root = createConversationAgentRun({ id: toConversationAgentRunId('production-recovery-root'), projectId: fixture.projectId,
+      conversationId: fixture.conversationId, sourceMessageId: fixture.sourceId, createdAt: toIsoTimestamp(at()) });
+    await runs.create(root);
+    const source = { kind: 'message' as const, id: fixture.sourceId, version: 0, contentHash: 'a'.repeat(64) };
+    const service = new ConversationAgentSessionService({ repository: sessions, ownerId: 'other-live-host', now, leaseTtlMs: 1000,
+      hash: value => createHash('sha256').update(value).digest('hex'), nextResumeToken: () => 'production-recovery-resume-token',
+      recheckContinuation: async () => undefined });
+    await service.open({ run: root, budget: { startedAt: now(), deadlineAt: now() + 360_000, maxToolCalls: 8, budgetUnits: 24 }, inputReferences: [source] });
+    const preparedChild = createConversationAgentRun({ id: toConversationAgentRunId('production-recovery-child'),
+      projectId: fixture.projectId, conversationId: fixture.conversationId, sourceMessageId: fixture.sourceId, parentRunId: root.id,
+      createdAt: toIsoTimestamp(at()) });
+    await runs.create(preparedChild);
+    const child = attachConversationAgentRunExecution(preparedChild, fixture.executionId, toIsoTimestamp(at()));
+    await runs.save(child, preparedChild.revision);
+    await service.admitInitialSegment({ sessionId: root.id, run: child, inputReference: source });
+    await service.bindExecution(child.id, fixture.executionId);
+    return { sessions, runs, service, root, child };
+  }
+
+  it('does not interrupt or settle a response, workflow or child held by another live root owner', async () => {
+    const fixture = await createLocalDocumentRecoveryFixture({ responseState: 'streaming', assistantCompleted: false });
+    const clock = Date.now(), root = await prepareRoot(fixture, () => clock);
+    try {
+      const before = await root.sessions.get(root.root.id), workflow = await fixture.workflows.get(fixture.workflow.id);
+      const child = await root.runs.get(root.child.id);
+      const result = await fixture.runtime.conversations.get({ conversationId: fixture.conversationId });
+      expect(result).toMatchObject({ ok: true, value: { messages: expect.arrayContaining([
+        expect.objectContaining({ messageId: fixture.assistantId, state: 'streaming' })
+      ]) } });
+      expect((await fixture.executions.get(fixture.executionId))?.state).toBe('streaming');
+      expect(await fixture.workflows.get(fixture.workflow.id)).toEqual(workflow);
+      expect(await root.runs.get(root.child.id)).toEqual(child);
+      expect(await root.sessions.get(root.root.id)).toEqual(before);
+      await fixture.runtime.waitForMutations();
+    } finally { root.service.dispose(); }
+  });
+
+  it('rejects another live host explicit reconciliation and acknowledgement before writing any prepared child WAL', async () => {
+    const fixture = await createLocalDocumentRecoveryFixture({ responseState: 'streaming', assistantCompleted: false });
+    const clock = Date.now(), root = await prepareRoot(fixture, () => clock);
+    try {
+      const child = markConversationAgentRunNeedsReconciliation(root.child, 'unknown_result', root.child.updatedAt);
+      await root.runs.save(child, root.child.revision);
+      const before = await root.sessions.get(root.root.id);
+      const runtime = createChatContextRuntime({ userDataDirectory: path.join(fixture.projectRoot, 'test-foreign-reconcile-user'), executionNow: () => clock,
+        getSession: () => ({ projectId: fixture.projectId, projectName: '外部所有者测试', rootDirectory: fixture.projectRoot }) });
+      const query = { projectId: fixture.projectId, responseExecutionId: fixture.executionId };
+      const inspected = await runtime.responses.inspectReconciliation(query);
+      expect(inspected.ok).toBe(true);
+      if (!inspected.ok) throw new Error(inspected.error.code);
+      expect(await runtime.responses.reconcileReconciliation(query)).toMatchObject({ ok: false, error: { code: 'continuation_conflict' } });
+      expect(await runtime.responses.acknowledgeReconciliation({ ...query, expectedRunRevision: child.revision,
+        inspectToken: inspected.value.inspectToken, confirmed: true })).toMatchObject({ ok: false, error: { code: 'continuation_conflict' } });
+      expect(await new JsonConversationCompletionJournal(fixture.storage, fixture.projectId).get(fixture.executionId)).toBeUndefined();
+      expect(await root.runs.get(child.id)).toEqual(child); expect(await root.sessions.get(root.root.id)).toEqual(before);
+      expect((await fixture.executions.get(fixture.executionId))?.state).toBe('streaming');
+      await runtime.waitForMutations();
+    } finally { root.service.dispose(); }
+  });
+
+  it('retires a proven unsubmitted response locally and keeps the original root waiting for explicit continuation', async () => {
+    const fixture = await createLocalDocumentRecoveryFixture({ responseState: 'pending', assistantCompleted: false });
+    let clock = Date.now();
+    const root = await prepareRoot(fixture, () => clock);
+    root.service.dispose(); clock += 1500;
+    const runtime = createChatContextRuntime({ userDataDirectory: path.join(fixture.projectRoot, 'test-second-user'), executionNow: () => clock,
+      getSession: () => ({ projectId: fixture.projectId, projectName: '续接测试', rootDirectory: fixture.projectRoot }) });
+    const result = await runtime.conversations.get({ conversationId: fixture.conversationId });
+    expect(result).toMatchObject({ ok: true, value: { agentSessions: [expect.objectContaining({ state: 'waiting_user',
+      waiting: { reason: 'continuation_required', allowedActions: ['continue'] }, resumeToken: expect.any(String) })] } });
+    expect((await fixture.executions.get(fixture.executionId))?.state).toBe('failed');
+    expect((await root.runs.get(root.child.id))?.status).toBe('failed');
+    const saved = (await root.sessions.get(root.root.id))!;
+    expect(saved.status).toBe('waiting_user');
+    expect(saved.budget).toMatchObject({ deadlineAt: clock - 1500 + 360_000, toolCallsUsed: 0, costUnitsUsed: 0 });
+    expect(saved.childSegments).toHaveLength(2);
+    expect((await new JsonConversationCompletionJournal(fixture.storage, fixture.projectId).get(fixture.executionId))?.stage).toBe('applied');
+    expect((await fixture.executions.listEvents(fixture.executionId)).map(event => event.type)).toEqual(['execution_created', 'stream_failed']);
+    await runtime.waitForMutations();
+  });
+
+  it('freezes prior streaming evidence even if its canonical model WAL is missing', async () => {
+    const fixture = await createLocalDocumentRecoveryFixture({ responseState: 'streaming', assistantCompleted: false });
+    let clock = Date.now();
+    const root = await prepareRoot(fixture, () => clock);
+    root.service.dispose(); clock += 1500;
+    const runtime = createChatContextRuntime({ userDataDirectory: path.join(fixture.projectRoot, 'test-missing-wal-user'), executionNow: () => clock,
+      getSession: () => ({ projectId: fixture.projectId, projectName: '缺失边界测试', rootDirectory: fixture.projectRoot }) });
+    const result = await runtime.conversations.get({ conversationId: fixture.conversationId });
+    expect(result).toMatchObject({ ok: true,
+      value: { agentSessions: [expect.objectContaining({ state: 'needs_reconciliation' })] } });
+    if (!result.ok) throw new Error(result.error.code);
+    expect(result.value.agentSessions?.[0]).not.toHaveProperty('resumeToken');
+    expect((await root.sessions.get(root.root.id))?.status).toBe('needs_reconciliation');
+    expect((await root.runs.get(root.child.id))?.status).toBe('needs_reconciliation');
+    expect((await fixture.executions.listEvents(fixture.executionId)).filter(event => event.safeCode === 'conversation.recovery_prepared_not_submitted')).toEqual([]);
+    await runtime.waitForMutations();
+  });
+
   it.each(['validating_outline', 'generating_file', 'interrupted'] as const)(
     'recovers completed provider text during %s as a local Office retry while preserving delivered work', async (state) => {
       const fixture = await createLocalDocumentRecoveryFixture({ documentStatus: { state, kind: 'ppt' } });

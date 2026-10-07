@@ -32,6 +32,7 @@ import {
 import { NodeProjectStorage } from '../storage';
 import type { StorageProjectSession } from './storage-ipc-controller';
 import { emitProductionEvent, withProductionTrace } from '../conversation-production-trace';
+import { ExecutionBudgetError } from '../../application/execution-budget';
 
 export interface DocumentGenerationControllerDependencies {
   getSession(): StorageProjectSession | undefined;
@@ -142,7 +143,7 @@ export class DocumentGenerationController {
           };
         } catch (error) {
           await emitProductionEvent({ code: 'task_complete', status:
-            error instanceof DocumentGenerationApplicationError && error.code === 'cancelled' ? 'cancelled' : 'failed',
+            (error instanceof DocumentGenerationApplicationError || error instanceof ExecutionBudgetError) && error.code === 'cancelled' ? 'cancelled' : 'failed',
             facts: { documentKind: input.kind } });
           throw error;
         }
@@ -238,6 +239,11 @@ export class DocumentGenerationController {
         }
         if (error instanceof DocumentGenerationApplicationError) {
           return mapApplicationError(error);
+        }
+        if (error instanceof ExecutionBudgetError) {
+          return error.code === 'cancelled'
+            ? failure('generation_cancelled', '文档生成已停止。')
+            : failure('generation_failed', error.code === 'timeout' ? '文档执行达到时限，请查看执行记录。' : '文档执行已停止，请查看执行记录。');
         }
         if (error instanceof ConversationApplicationError) {
           return failure(

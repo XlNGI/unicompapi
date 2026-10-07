@@ -11,6 +11,19 @@ const base = { outline, documentIR: buildDocumentIRFromOutline({ outline, operat
 afterEach(() => vi.useRealTimers());
 
 describe('bounded Application Art Direction stage', () => {
+  it.each([true, false])('rejects conflicting compatibility content before planning or fallback (planner=%s)', async enabled => {
+    const request = vi.fn(async () => buildFallbackPresentationDesignIR(outline));
+    await expect(planPresentationArtDirection({ ...base, outline: { ...outline, title: 'Unvalidated replacement' },
+      signal: new AbortController().signal, ...(enabled ? { request } : {}) })).rejects.toThrow('content_snapshot_conflict');
+    expect(request).not.toHaveBeenCalled();
+  });
+  it('rejects an altered legacy IR view rather than accepting a second source of facts', async () => {
+    const request = vi.fn(async () => buildFallbackPresentationDesignIR(outline));
+    await expect(planPresentationArtDirection({ ...base, documentIR: { ...base.documentIR,
+      content: { ...base.documentIR.content!, title: 'A second source' } }, signal: new AbortController().signal,
+      request })).rejects.toThrow('conflicts with canonical content');
+    expect(request).not.toHaveBeenCalled();
+  });
   it('projects semantic inputs, validates one response, and preserves content facts', async () => {
     const original = JSON.stringify(outline);
     const design = buildFallbackPresentationDesignIR(outline);
@@ -88,5 +101,15 @@ describe('bounded Application Art Direction stage', () => {
     parent.abort();
     await rejected;
     expect(childSignal?.aborted).toBe(true);
+  });
+
+  it('does not invoke a planner when Stop arrives before its queued callback', async () => {
+    const parent = new AbortController();
+    const request = vi.fn(async () => buildFallbackPresentationDesignIR(outline));
+    const pending = planPresentationArtDirection({ ...base, signal: parent.signal, request });
+    const rejected = expect(pending).rejects.toMatchObject({ name: 'AbortError' });
+    parent.abort();
+    await rejected;
+    expect(request).not.toHaveBeenCalled();
   });
 });

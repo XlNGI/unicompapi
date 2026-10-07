@@ -263,7 +263,7 @@ const canonicalToolCatalog = [
   },
   {
     toolId: 'generate_pptx',
-    description: 'Generate a verified PowerPoint presentation from business content. The runtime owns the project, output location, revision, authorization and publication.',
+    description: 'Generate a verified PowerPoint presentation from business content. Supply valid structured outline JSON or Markdown with a title and a separate heading for each body-page section. The host adds a cover and a closing page, so plan the body sections toward requestedTotalPages minus two without padding blank or duplicated content. requestedTotalPages is a planning target; a page_plan_incomplete observation asks for at most one improved body plan and does not turn the target into a hard acceptance rule. The host enforces explicit user page constraints. After success use the registered file and permitted readback or delivery step, never regenerate solely for a target deviation. The runtime owns project, output location, revision, authorization and publication.',
     exposure: 'provider',
     input: {
       type: 'object', additionalProperties: false,
@@ -288,7 +288,7 @@ const canonicalToolCatalog = [
       requiresExistingDocument: false, requiresDocumentIR: false, requiresWrite: true,
       requiresRevision: false, requiresAuthorization: true, allowedOperations: ['create']
     },
-    diagnostics: { traceType: 'write_document', failureCodes: [...commonFailureCodes, 'generation_failed', 'verification_failed', 'page_count_mismatch', 'idempotent_replay'] }
+    diagnostics: { traceType: 'write_document', failureCodes: [...commonFailureCodes, 'invalid_outline', 'ir_conflict', 'resource_limit', 'page_plan_incomplete', 'generation_failed', 'verification_failed', 'page_count_mismatch', 'page_count_deviation', 'idempotent_replay'] }
   },
   {
     toolId: 'apply_document_patch', description: 'Controlled apply_document_patch operation', exposure: 'internal', input: internalInput,
@@ -339,7 +339,8 @@ export interface ToolExecutionContext {
   readonly revision?: number;
   readonly operation: DocumentOperation;
   readonly capabilities: readonly CanonicalToolId[];
-  readonly projectContext: { readonly projectId: string; readonly workId?: string };
+  /** Controlled Host identities; none of these fields are model-supplied tool arguments. */
+  readonly projectContext: { readonly projectId: string; readonly workId?: string; readonly responseExecutionId?: string };
   readonly authorization: ToolAuthorizationContext;
   readonly abortSignal: AbortSignal;
   readonly taskContext: {

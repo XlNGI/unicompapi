@@ -1,6 +1,11 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { readDocumentToolContext, readDocumentToolContract } from '../fixtures/document-tool-context';
-import { providerToolsFromContracts } from '../../src/platform/providers/provider-tool-calling';
+import { providerExecutionLifecycleFixture } from '../fixtures/provider-execution-lifecycle';
+import { providerExecutionHash, providerToolsFromContracts } from '../../src/platform/providers/provider-tool-calling';
+import type { DocumentFinalizationToolBridge } from '../../src/platform/providers/provider-document-finalization';
+import { HostExecutionBudget } from '../../src/application/execution-budget';
+import { createCanonicalToolRegistry } from '../../src/domain/entities/canonical-tool-contract';
+import { ConversationExecutionCoordinator } from '../../src/platform/providers/conversation-execution-coordinator';
 import {
   createProviderConnection,
   createProviderExecutionRouteSnapshot,
@@ -152,7 +157,8 @@ describe('response-specific document tool dispatch', () => {
     const outcome = await fixture.bridge.submit({ routeSnapshot: routeSnapshot('text_chat'),
       request: originalRequest, beforeRequestStarted: async () => undefined });
     expect(outcome).toEqual({ kind: 'accepted_async', providerOperationId: 'dynamic-operation' });
-    expect(forExecution).toHaveBeenCalledWith({ responseExecutionId: originalRequest.responseExecutionId });
+    expect(forExecution).toHaveBeenCalledWith({ responseExecutionId: originalRequest.responseExecutionId,
+      signal: expect.any(AbortSignal) });
     expect(submit.mock.calls[0]?.[0]).toMatchObject({ prepareTools: session.prepareTools, toolBridge: session.bridge,
       request: { tools: undefined } });
     expect(originalRequest.tools).toHaveLength(1);
@@ -214,11 +220,12 @@ describe('response-specific document tool dispatch', () => {
 });
 
 function textDispatchFixture(overrides: Partial<Parameters<typeof createConversationTextDispatchBridge>[0]>) {
-  const register = vi.fn((_operation: { completion: Promise<unknown> }) => undefined);
+  const coordinator = new ConversationExecutionCoordinator();
+  const register = vi.spyOn(coordinator, 'register');
   const bridge = createConversationTextDispatchBridge({
     deepSeekRuntime: {}, newApiRuntime: {}, credentialVault: {}, providerRegistry: {},
     providerPackages: { resolveAdapter: () => undefined }, usage: {}, lifecycle: {}, conversations: {},
-    coordinator: { register }, ...overrides
+    coordinator, ...overrides
   } as unknown as Parameters<typeof createConversationTextDispatchBridge>[0]);
   return { bridge, register };
 }
@@ -627,6 +634,320 @@ describe('DeepSeek chat adapter', () => {
       localReplayAvailable: true,
       action: 'user_retry_required'
     });
+  });
+});
+
+describe('DeepSeek durable Provider lifecycle', () => {
+  it('keeps the original stale model result hash, admits only generation/readback and sends one tool-free final request', async () => {
+    const fixture = chatFixture();
+    const args = { title: 'Verified title', content: 'Verified body' };
+    const call = (id: string) => ({ index: 0, id, type: 'function', function: { name: 'generate_pptx', arguments: JSON.stringify(args) } });
+    fixture.transport.responses.push(...['first-generation', 'stale-generation', 'stale-final'].map(id => streamResponse([
+      chunk({ delta: { tool_calls: [call(id)] }, finishReason: 'tool_calls' }), '[DONE]'
+    ])));
+    let phase: 'readback' | 'final' | undefined;
+    const executed: string[] = [];
+    const bridge: DocumentFinalizationToolBridge = {
+      finalizationState: () => phase ? { phase, readBackConfirmed: phase === 'final', actualTotalPages: 6, planningTotalPages: 12 } : undefined,
+      execute: async input => {
+        await input.onExecutionAdmitted?.();
+        executed.push(input.call.name);
+        phase = input.call.name === 'generate_pptx' ? 'readback' : 'final';
+        return { schemaVersion: 1, status: 'success', observation: { verified: true },
+          ...(input.call.name === 'generate_pptx' ? { artifactRefs: [{ kind: 'work', ref: 'verified-work' }] } : {}),
+          metadata: { toolId: input.call.name } };
+      }
+    };
+    const journal = providerExecutionLifecycleFixture();
+    const registry = createCanonicalToolRegistry();
+    const handle = await fixture.adapter.submit({ routeSnapshot: routeSnapshot('text_chat'), request: dispatchRequest({}),
+      executionLifecycle: journal.port, toolBridge: bridge,
+      prepareTools: async () => phase === 'final' ? undefined : providerToolsFromContracts([registry.get(phase === 'readback' ? 'read_document_structure' : 'generate_pptx')!]) });
+    await expect(handle.completion).resolves.toMatchObject({ state: 'completed' });
+    expect(executed).toEqual(['generate_pptx', 'read_document_structure']);
+    expect(journal.events.filter(event => event.name === 'toolAdmitted')).toHaveLength(2);
+    expect(journal.events.find(event => event.name === 'modelResult' && (event.input as { round: number }).round === 1)).toMatchObject({ input: {
+      resultHash: providerExecutionHash({ content: '', toolCalls: [{ id: 'stale-generation', name: 'generate_pptx', arguments: args }], finishReason: 'tool_calls' })
+    } });
+    expect(fixture.transport.requests).toHaveLength(3);
+    expect(bodyOf(fixture.transport.requests[2])).toMatchObject({ tool_choice: 'none' });
+    expect(bodyOf(fixture.transport.requests[2])).not.toHaveProperty('tools');
+    expect(fixture.lifecycle.events.join('\n')).toContain('实际 6 页');
+    expect(fixture.lifecycle.events.join('\n')).toContain('原规划目标为 12 页');
+  });
+
+  it.each(['modelPrepared', 'modelStarted'] as const)('refuses HTTP when the %s write-ahead boundary fails', async boundary => {
+    const fixture = chatFixture();
+    const journal = providerExecutionLifecycleFixture(name => { if (name === boundary) throw new Error('private storage path'); });
+    await expect(fixture.adapter.submit({ routeSnapshot: routeSnapshot('text_chat'), request: dispatchRequest({}), executionLifecycle: journal.port })).rejects.toThrow('execution_journal_failed');
+    expect(fixture.transport.requests).toHaveLength(0);
+    expect(journal.events.at(-1)).toMatchObject({ name: 'modelFailed', input: { round: 0, unknown: false, code: 'journal_failed' } });
+  });
+
+  it('records an explicit HTTP rejection as known failure without retry', async () => {
+    const fixture = chatFixture();
+    fixture.transport.responses.push(jsonResponse({ error: { message: 'Denied' } }, 401));
+    const journal = providerExecutionLifecycleFixture();
+    await expect(fixture.adapter.submit({ routeSnapshot: routeSnapshot('text_chat'), request: dispatchRequest({}), executionLifecycle: journal.port })).rejects.toThrow();
+    expect(fixture.transport.requests).toHaveLength(1);
+    expect(journal.events.at(-1)).toMatchObject({ name: 'modelFailed', input: { round: 0, unknown: false, code: 'failed' } });
+  });
+
+  it('waits for the Started commit before HTTP and excludes prompt and reasoning from durable summaries', async () => {
+    const fixture = chatFixture();
+    fixture.transport.responses.push(streamResponse([
+      chunk({ delta: { reasoning_content: 'private thought' } }),
+      chunk({ delta: { content: 'public answer' }, finishReason: 'stop' }), '[DONE]'
+    ]));
+    let release!: () => void;
+    let entered!: () => void;
+    const began = new Promise<void>(resolve => { entered = resolve; });
+    const gate = new Promise<void>(resolve => { release = resolve; });
+    const journal = providerExecutionLifecycleFixture(async name => { if (name === 'modelStarted') { entered(); await gate; } });
+    const pending = fixture.adapter.submit({ routeSnapshot: routeSnapshot('text_chat'), request: dispatchRequest({}), executionLifecycle: journal.port });
+    await began;
+    expect(fixture.transport.requests).toHaveLength(0);
+    release();
+    const handle = await pending;
+    await expect(handle.completion).resolves.toMatchObject({ state: 'completed' });
+    expect(journal.events.map(event => event.name)).toEqual(['modelPrepared', 'modelStarted', 'modelResult']);
+    expect(JSON.stringify(journal.events)).not.toMatch(/Synthetic user message|private thought|public answer/);
+  });
+
+  it.each(['modelPrepared', 'modelStarted'] as const)('cancels a stalled %s commit without a late HTTP request', async boundary => {
+    const fixture = chatFixture();
+    let release!: () => void;
+    let entered!: () => void;
+    const began = new Promise<void>(resolve => { entered = resolve; });
+    const gate = new Promise<void>(resolve => { release = resolve; });
+    const journal = providerExecutionLifecycleFixture(async name => { if (name === boundary) { entered(); await gate; } });
+    const controller = new AbortController();
+    const pending = fixture.adapter.submit({ routeSnapshot: routeSnapshot('text_chat'), request: dispatchRequest({}), executionLifecycle: journal.port, signal: controller.signal });
+    await began;
+    controller.abort();
+    await expect(pending).rejects.toThrow('cancelled');
+    release();
+    await Promise.resolve();
+    expect(fixture.transport.requests).toHaveLength(0);
+  });
+
+  it('records an uncertain model response and forbids tools if Result persistence fails', async () => {
+    const fixture = chatFixture();
+    fixture.transport.responses.push(streamResponse([
+      chunk({ delta: { tool_calls: [{ index: 0, id: 'private-model-call', type: 'function', function: { name: 'generate_pptx', arguments: '{"title":"Title","content":"Content"}' } }] }, finishReason: 'tool_calls' }), '[DONE]'
+    ]));
+    const execute = vi.fn(async () => ({ status: 'success' }));
+    const journal = providerExecutionLifecycleFixture(name => { if (name === 'modelResult') throw new Error('private failed commit'); });
+    const tools = providerToolsFromContracts([createCanonicalToolRegistry().get('generate_pptx')!]);
+    const handle = await fixture.adapter.submit({ routeSnapshot: routeSnapshot('text_chat'), request: { ...dispatchRequest({}), tools }, toolBridge: { execute }, executionLifecycle: journal.port });
+    await expect(handle.completion).resolves.toMatchObject({ state: 'failed', safeCode: 'deepseek.execution_journal_failed' });
+    expect(execute).not.toHaveBeenCalled();
+    expect(fixture.transport.requests).toHaveLength(1);
+    expect(journal.events.at(-1)).toMatchObject({ name: 'modelFailed', input: { unknown: true, code: 'journal_failed' } });
+  });
+
+  it('commits the first tool Observation before preparing its continuation and does not replay committed Work', async () => {
+    const fixture = chatFixture();
+    fixture.transport.responses.push(streamResponse([
+      chunk({ delta: { tool_calls: [{ index: 0, id: 'private-model-call', type: 'function', function: { name: 'generate_pptx', arguments: '{"title":"Title","content":"Content"}' } }] }, finishReason: 'tool_calls' }), '[DONE]'
+    ]), streamResponse([chunk({ delta: { content: 'done' }, finishReason: 'stop' }), '[DONE]']));
+    const execute = vi.fn(async () => ({ schemaVersion: 1, status: 'success', observation: { artifactRegistered: true },
+      artifactRefs: [{ kind: 'work', ref: 'work-committed-local' }], metadata: { toolId: 'generate_pptx' } }));
+    const journal = providerExecutionLifecycleFixture();
+    const tools = providerToolsFromContracts([createCanonicalToolRegistry().get('generate_pptx')!]);
+    const handle = await fixture.adapter.submit({ routeSnapshot: routeSnapshot('text_chat'), request: { ...dispatchRequest({}), tools }, toolBridge: { execute }, executionLifecycle: journal.port });
+    await expect(handle.completion).resolves.toMatchObject({ state: 'completed' });
+    expect(execute).toHaveBeenCalledTimes(1);
+    expect(fixture.transport.requests).toHaveLength(2);
+    expect(journal.events.map(event => event.name)).toEqual([
+      'modelPrepared', 'modelStarted', 'modelResult', 'toolStarted', 'toolResult', 'observationCommitted', 'modelPrepared', 'modelStarted', 'modelResult'
+    ]);
+    expect(journal.events.find(event => event.name === 'toolResult')).toMatchObject({ input: { registeredWorkIds: ['work-committed-local'], outcomeUnknown: false } });
+    expect(JSON.stringify(journal.events)).not.toMatch(/Synthetic user message|private-model-call|"Title"|"Content"/);
+  });
+});
+
+describe('DeepSeek host execution budget', () => {
+  const budgetFor = (duration: number) => new HostExecutionBudget({ startedAt: Date.now(), deadlineAt: Date.now() + duration,
+    maxToolCalls: 8, budgetUnits: 24 });
+  const deadlines = { defaultConnectionTimeoutMs: 900_000, defaultStreamIdleTimeoutMs: 900_000, defaultStreamTotalTimeoutMs: 900_000 };
+
+  it.each([1, 2])('bounds initial preparation pass %s and ignores its late completion before HTTP', async pass => {
+    vi.useFakeTimers();
+    const budget = budgetFor(2_000);
+    const fixture = chatFixture(deadlines);
+    let captured: AbortSignal | undefined;
+    let release!: (tools: ReturnType<typeof providerToolsFromContracts>) => void;
+    let prepared = 0;
+    const definitions = providerToolsFromContracts([readDocumentToolContract]);
+    try {
+      const pending = fixture.adapter.submit({ routeSnapshot: routeSnapshot('text_chat'), request: dispatchRequest({}), executionBudget: budget,
+        prepareTools: async signal => {
+          if (++prepared !== pass) return definitions;
+          captured = signal;
+          return new Promise(resolve => { release = resolve; });
+        } });
+      const failed = expect(pending).rejects.toMatchObject({ code: 'timeout', scope: 'execution' });
+      await vi.advanceTimersByTimeAsync(2_001);
+      await failed;
+      expect(captured?.aborted).toBe(true);
+      release(definitions);
+      await vi.advanceTimersByTimeAsync(0);
+      expect(fixture.transport.requests).toHaveLength(0);
+      expect(fixture.lifecycle.events).toEqual(['fail:deepseek.execution_timeout']);
+    } finally { budget.dispose(); fixture.runtime.dispose(); vi.useRealTimers(); }
+  });
+
+  it('preserves the child preparation timeout scope', async () => {
+    vi.useFakeTimers();
+    const budget = budgetFor(90_000);
+    const fixture = chatFixture(deadlines);
+    let captured: AbortSignal | undefined;
+    try {
+      const pending = fixture.adapter.submit({ routeSnapshot: routeSnapshot('text_chat'), request: dispatchRequest({}), executionBudget: budget,
+        prepareTools: async signal => { captured = signal; return new Promise(() => undefined); } });
+      const failed = expect(pending).rejects.toMatchObject({ code: 'timeout', scope: 'prepare' });
+      await vi.advanceTimersByTimeAsync(60_001);
+      await failed;
+      expect(captured?.aborted).toBe(true);
+      expect(fixture.lifecycle.events).toEqual(['fail:deepseek.prepare_timeout']);
+      expect(fixture.transport.requests).toHaveLength(0);
+    } finally { budget.dispose(); fixture.runtime.dispose(); vi.useRealTimers(); }
+  });
+
+  it('stops a hanging credential lookup and refuses its late HTTP callback', async () => {
+    vi.useFakeTimers();
+    const budget = budgetFor(2_000);
+    const fixture = chatFixture(deadlines);
+    let resume!: () => Promise<void>;
+    vi.spyOn(fixture.credentials, 'useCredential').mockImplementation((_input, operation) => new Promise<never>(() => {
+      resume = async () => { await operation(credential); };
+    }));
+    try {
+      const pending = fixture.adapter.submit({ routeSnapshot: routeSnapshot('text_chat'), request: dispatchRequest({}), executionBudget: budget });
+      const failed = expect(pending).rejects.toMatchObject({ code: 'timeout', scope: 'execution' });
+      await vi.advanceTimersByTimeAsync(2_001);
+      await failed;
+      await expect(resume()).rejects.toMatchObject({ code: 'timeout' });
+      expect(fixture.transport.requests).toHaveLength(0);
+    } finally { budget.dispose(); fixture.runtime.dispose(); vi.useRealTimers(); }
+  });
+
+  it.each([3, 4])('preserves the child timeout in continuation preparation pass %s', async pass => {
+    vi.useFakeTimers();
+    const budget = budgetFor(360_000);
+    const fixture = chatFixture(deadlines);
+    const definitions = providerToolsFromContracts([readDocumentToolContract]);
+    fixture.transport.responses.push(streamResponse([chunk({ delta: { tool_calls: [{ index: 0,
+      id: 'read-child-timeout', type: 'function', function: { name: readDocumentToolContract.toolId, arguments: '{}' } }] }, finishReason: 'tool_calls' }), '[DONE]']));
+    let preparations = 0;
+    let captured: AbortSignal | undefined;
+    let release!: (tools: typeof definitions) => void;
+    try {
+      const handle = await fixture.adapter.submit({ routeSnapshot: routeSnapshot('text_chat'), request: dispatchRequest({}), executionBudget: budget,
+        toolBridge: { execute: async () => ({ status: 'success' }) }, prepareTools: async signal => {
+          if (++preparations !== pass) return definitions;
+          captured = signal;
+          return new Promise(resolve => { release = resolve; });
+        } });
+      await vi.advanceTimersByTimeAsync(15_001);
+      await expect(handle.completion).resolves.toMatchObject({ state: 'failed', safeCode: 'deepseek.prepare_timeout' });
+      expect(captured?.aborted).toBe(true);
+      release(definitions);
+      await vi.advanceTimersByTimeAsync(0);
+      expect(fixture.transport.requests).toHaveLength(1);
+      expect(fixture.runtime.activeRequestCount).toBe(0);
+    } finally { budget.dispose(); fixture.runtime.dispose(); vi.useRealTimers(); }
+  });
+
+  it('bounds first HTTP headers and closes an uncooperative late stream without starting the response', async () => {
+    vi.useFakeTimers();
+    const budget = budgetFor(2_000);
+    const fixture = chatFixture(deadlines);
+    let release!: (response: DeepSeekHttpTransportResponse) => void;
+    vi.spyOn(fixture.transport, 'send').mockImplementation(async request => {
+      fixture.transport.requests.push(request);
+      return new Promise(resolve => { release = resolve; });
+    });
+    try {
+      const pending = fixture.adapter.submit({ routeSnapshot: routeSnapshot('text_chat'), request: dispatchRequest({}), executionBudget: budget });
+      const failed = expect(pending).rejects.toMatchObject({ code: 'timeout', scope: 'execution' });
+      await vi.advanceTimersByTimeAsync(2_001);
+      await failed;
+      expect(fixture.transport.requests[0].signal.aborted).toBe(true);
+      release(streamResponse([chunk({ delta: { content: 'Late answer' }, finishReason: 'stop' }), '[DONE]']));
+      await vi.advanceTimersByTimeAsync(0);
+      expect(fixture.runtime.activeRequestCount).toBe(0);
+      expect(fixture.lifecycle.events).toEqual(['fail:deepseek.execution_timeout']);
+    } finally { budget.dispose(); fixture.runtime.dispose(); vi.useRealTimers(); }
+  });
+
+  it.each([false, true])('bounds the %s continuation stream and retains partial content', async continuation => {
+    vi.useFakeTimers();
+    const budget = budgetFor(2_000);
+    const fixture = chatFixture(deadlines);
+    let release!: () => void;
+    if (continuation) fixture.transport.responses.push(streamResponse([chunk({ delta: { tool_calls: [{ index: 0,
+      id: 'read-budget', type: 'function', function: { name: readDocumentToolContract.toolId, arguments: '{}' } }] }, finishReason: 'tool_calls' }), '[DONE]']));
+    fixture.transport.responses.push({ status: 200, headers: { 'content-type': 'text/event-stream' }, stream: (async function* () {
+      yield new TextEncoder().encode(`data: ${chunk({ delta: { content: 'Partial answer' } })}\n\n`);
+      await new Promise<void>(resolve => { release = resolve; });
+      yield new TextEncoder().encode(`data: ${chunk({ delta: { content: 'Late answer' }, finishReason: 'stop' })}\n\ndata: [DONE]\n\n`);
+    })() });
+    const execute = vi.fn(async () => ({ status: 'success' }));
+    try {
+      const handle = await fixture.adapter.submit({ routeSnapshot: routeSnapshot('text_chat'), request: { ...dispatchRequest({}),
+        ...(continuation ? { tools: providerToolsFromContracts([readDocumentToolContract]) } : {}) },
+        ...(continuation ? { toolBridge: { execute } } : {}), executionBudget: budget });
+      await vi.advanceTimersByTimeAsync(2_001);
+      await expect(handle.completion).resolves.toMatchObject({ state: 'failed', safeCode: 'deepseek.execution_timeout' });
+      expect(fixture.lifecycle.events).toContain('content:Partial answer');
+      expect(fixture.transport.requests).toHaveLength(continuation ? 2 : 1);
+      expect(execute).toHaveBeenCalledTimes(continuation ? 1 : 0);
+      release();
+      await vi.advanceTimersByTimeAsync(0);
+      expect(fixture.lifecycle.events).not.toContain('content:Late answer');
+      expect(fixture.runtime.activeRequestCount).toBe(0);
+    } finally { budget.dispose(); fixture.runtime.dispose(); vi.useRealTimers(); }
+  });
+
+  it.each([200_000, 360_000])('uses one %s ms parent for 92s tool + 25s model + 91s tool', async duration => {
+    vi.useFakeTimers();
+    const budget = budgetFor(duration);
+    const fixture = chatFixture(deadlines);
+    const definitions = providerToolsFromContracts([createCanonicalToolRegistry().get('generate_pptx')!]);
+    const wireCall = (id: string) => chunk({ delta: { tool_calls: [{ index: 0, id, type: 'function',
+      function: { name: 'generate_pptx', arguments: '{"title":"Fixture","content":"Synthetic"}' } }] }, finishReason: 'tool_calls' });
+    fixture.transport.responses.push(streamResponse([wireCall('generation-one'), '[DONE]']),
+      delayedByteStreamResponse([{ afterMs: 25_000, value: `data: ${wireCall('generation-two')}\n\ndata: [DONE]\n\n` }]),
+      streamResponse([chunk({ delta: { content: 'Complete' }, finishReason: 'stop' }), '[DONE]']));
+    const execute = vi.fn(async () => {
+      await new Promise(resolve => setTimeout(resolve, execute.mock.calls.length === 1 ? 92_000 : 91_000));
+      return { status: 'success', observation: { generated: true } };
+    });
+    try {
+      const handle = await fixture.adapter.submit({ routeSnapshot: routeSnapshot('text_chat'), request: dispatchRequest({}), executionBudget: budget,
+        prepareTools: async () => definitions, toolBridge: { execute } });
+      await vi.advanceTimersByTimeAsync(209_000);
+      await expect(handle.completion).resolves.toMatchObject(duration === 360_000
+        ? { state: 'completed' } : { state: 'failed', safeCode: 'deepseek.execution_timeout' });
+      expect(execute).toHaveBeenCalledTimes(2);
+      expect(fixture.transport.requests).toHaveLength(duration === 360_000 ? 3 : 2);
+    } finally { budget.dispose(); fixture.runtime.dispose(); vi.useRealTimers(); }
+  });
+
+  it('keeps normal chat without a Host budget open beyond 120 seconds', async () => {
+    vi.useFakeTimers();
+    const fixture = chatFixture(deadlines);
+    fixture.transport.responses.push(delayedByteStreamResponse([{ afterMs: 150_000,
+      value: `data: ${chunk({ delta: { content: 'Long answer' }, finishReason: 'stop' })}\n\ndata: [DONE]\n\n` }]));
+    try {
+      const handle = await fixture.adapter.submit({ routeSnapshot: routeSnapshot('text_chat'), request: dispatchRequest({}) });
+      await vi.advanceTimersByTimeAsync(150_001);
+      await expect(handle.completion).resolves.toMatchObject({ state: 'completed' });
+      expect(fixture.lifecycle.events).toContain('content:Long answer');
+      expect(fixture.transport.requests).toHaveLength(1);
+    } finally { fixture.runtime.dispose(); vi.useRealTimers(); }
   });
 });
 

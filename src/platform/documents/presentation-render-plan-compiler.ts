@@ -7,13 +7,18 @@ import {
   parsePresentationRenderPlan,
   type PresentationRenderPlan,
   type PresentationRenderPlanDiagnostic,
-  type PresentationRenderPlanElement,
-  type PresentationRenderPlanStyle
+  type PresentationRenderPlanElement
 } from '../../domain/entities/presentation-render-plan';
-import type { DocumentOutline, DocumentOutlineBlock } from '../../domain/entities/document-generation';
+import type { DocumentOutline } from '../../domain/entities/document-generation';
+import { buildDocumentContentSnapshot, parseDocumentContentSnapshot, documentContentSnapshotToOutline,
+  documentContentReferenceIndex, type DocumentContentSnapshotV1, type DocumentContentResolvedRef } from '../../domain/entities/document-content-snapshot';
+import type { ProductionPresentationLayoutIR } from '../../domain/entities/presentation-layout-ir';
+import { canonicalizeLayoutJson } from '../../domain/entities/presentation-layout-ir';
+import { buildProductionPresentationLayoutIR, derivePresentationRenderPlanFromLayoutIR } from './presentation-layout-ir-adapter';
 import { buildPresentationLayoutConstraintModel } from './presentation-page-features';
 import { solvePresentationLayoutWithRepair, type PresentationLayoutPageResult, type PresentationLayoutRepairAction } from './presentation-layout-engine';
 import type { PresentationTemplateTokens } from './presentation-template';
+import { compilePresentationElementStyle, resolvePresentationPageStyle } from './presentation-style-compiler';
 import type {
   PresentationDesignCompilationSnapshot as LegacyCompatibleSnapshot,
   PresentationDesignStrategy
@@ -59,6 +64,8 @@ export interface PresentationDesignCompilationSnapshot extends LegacyCompatibleS
 }
 
 export interface PresentationDesignCompilation {
+  readonly contentSnapshot?: DocumentContentSnapshotV1;
+  readonly layoutIR?: ProductionPresentationLayoutIR;
   readonly designIR?: ProductionPresentationDesignIR;
   readonly plan?: PresentationRenderPlan;
   readonly constraints?: ReturnType<typeof buildPresentationLayoutConstraintModel>['constraints'];
@@ -74,9 +81,19 @@ export interface PresentationDesignCompilation {
 export function compilePresentationRenderPlan(
   outline: DocumentOutline,
   candidate: unknown,
-  tokens: PresentationTemplateTokens
+  tokens: PresentationTemplateTokens,
+  options: { readonly contentSnapshot?: DocumentContentSnapshotV1 } = {}
 ): PresentationDesignCompilation {
   if (outline.kind !== 'ppt') return failed('invalid_outline', 'skipped', 'skipped');
+  let contentSnapshot: DocumentContentSnapshotV1;
+  try {
+    contentSnapshot = options.contentSnapshot ? parseDocumentContentSnapshot(options.contentSnapshot) : buildDocumentContentSnapshot({ outline });
+    const projection = documentContentSnapshotToOutline(contentSnapshot);
+    if (JSON.stringify(canonicalizeLayoutJson(outline)) !== JSON.stringify(canonicalizeLayoutJson(projection))) {
+      return failed('content_snapshot_conflict', 'skipped', 'skipped');
+    }
+    outline = projection;
+  } catch { return failed('invalid_content_snapshot', 'skipped', 'skipped'); }
   let designIR: ProductionPresentationDesignIR;
   try {
     designIR = parsePresentationDesignIR(candidate, {
@@ -103,8 +120,9 @@ export function compilePresentationRenderPlan(
         }
       }
     });
-  } catch {
-    return failed('invalid_layout_constraints', 'failed', 'skipped', designIR);
+  } catch (error) {
+    return failed(error instanceof TypeError && error.message.startsWith('content_organization_')
+      ? 'invalid_content_organization' : 'invalid_layout_constraints', 'failed', 'skipped', designIR);
   }
   const layout = solvePresentationLayoutWithRepair(model.features, model.constraints);
   if (layout.status !== 'success') {
@@ -114,7 +132,7 @@ export function compilePresentationRenderPlan(
 
   let candidatePlan: PresentationRenderPlan;
   try {
-    candidatePlan = buildRenderPlan(outline, designIR, model.features, layout.constraints, layout.pages, tokens);
+    candidatePlan = buildRenderPlan(contentSnapshot, designIR, model.features, layout.constraints, layout.pages, tokens);
   } catch {
     return {
       designIR, constraints: layout.constraints, features: model.features, layouts: layout.pages,
@@ -126,19 +144,24 @@ export function compilePresentationRenderPlan(
     sourceRefs: page.units.filter(unit => unit.sourceRef !== 'generated.page-number').map(unit => unit.sourceRef)
   }));
   try {
-    const plan = parsePresentationRenderPlan(candidatePlan, {
+    const solved = parsePresentationRenderPlan(candidatePlan, {
       expectedPageCount: designIR.pages.length,
       minimumFontSize: layout.constraints.themeTokens.typography.minimumFontSize,
       validSourceRefsByPage
     });
+    const layoutIR = buildProductionPresentationLayoutIR({ renderPlan: solved, content: contentSnapshot, design: designIR,
+      repairs: layout.repairs, diagnostics: layout.diagnostics,
+      organizations: layout.pages.flatMap(page => page.contentOrganization ? [{ pageNumber: page.pageNumber, organization: page.contentOrganization }] : []) });
+    const plan = derivePresentationRenderPlanFromLayoutIR(layoutIR, contentSnapshot);
     return {
-      designIR, plan, constraints: layout.constraints, features: model.features, layouts: layout.pages,
+      contentSnapshot, designIR, layoutIR, plan, constraints: layout.constraints, features: model.features, layouts: layout.pages,
       diagnostics: [], layoutStatus: 'success', renderPlanStatus: 'valid', repairCount: layout.repairCount, repairs: layout.repairs
     };
   } catch (error) {
     const diagnostics = error instanceof Error && 'diagnostics' in error
       ? (error as Error & { diagnostics: readonly PresentationRenderPlanDiagnostic[] }).diagnostics.map(item => ({ code: item.code, path: item.path, message: item.message, pageNumber: pageNumberFromPath(item.path) }))
-      : [{ code: 'invalid_render_plan' }];
+      : [{ code: error instanceof TypeError && /^(?:layout|content|invalid)_[a-z0-9_]{1,70}$/u.test(error.message)
+        ? error.message : 'invalid_render_plan' }];
     return {
       designIR, constraints: layout.constraints, features: model.features, layouts: layout.pages, diagnostics,
       layoutStatus: 'success', renderPlanStatus: 'invalid', repairCount: layout.repairCount, repairs: layout.repairs
@@ -212,39 +235,35 @@ function legacyStrategy(composition: PresentationLayoutPageResult['composition']
 }
 
 function buildRenderPlan(
-  outline: DocumentOutline,
+  content: DocumentContentSnapshotV1,
   design: ProductionPresentationDesignIR,
   features: ReturnType<typeof buildPresentationLayoutConstraintModel>['features'],
   constraints: ReturnType<typeof buildPresentationLayoutConstraintModel>['constraints'],
   layouts: readonly PresentationLayoutPageResult[],
   tokens: PresentationTemplateTokens
 ): PresentationRenderPlan {
+  const references = documentContentReferenceIndex(content);
   const pages = layouts.map(layout => {
     const designPage = design.pages.find(page => page.pageNumber === layout.pageNumber)!;
     const featurePage = features.find(page => page.pageNumber === layout.pageNumber)!;
-    const constraintPage = constraints.pages.find(page => page.pageNumber === layout.pageNumber)!;
+    const pageStyle = resolvePresentationPageStyle({ design: design.globalDesign, page: designPage,
+      tokens: { ...tokens, fontFamily: constraints.themeTokens.typography.fontFamily } });
     const elements = layout.placements.map((placement): PresentationRenderPlanElement => {
       const unit = featurePage.units.find(item => item.sourceRef === placement.sourceRef);
       if (!unit) throw new TypeError('layout_source_unresolved');
       const content = placement.sourceRef === 'generated.page-number'
         ? { type: 'text' as const, text: String(layout.pageNumber) }
-        : resolveContent(outline, placement.sourceRef);
+        : resolveContent(references, placement.sourceRef);
       const source = placement.sourceRef === 'generated.page-number'
         ? { kind: 'generated' as const, key: 'page-number' as const }
         : { kind: 'outline' as const, ref: placement.sourceRef };
-      const emphasized = placement.sourceRef === constraintPage.designIntent.emphasis.target;
-      const color = renderColor(placement, design, tokens, emphasized);
-      const style: PresentationRenderPlanStyle = {
-        fontFamily: constraints.themeTokens.typography.fontFamily,
-        fontSize: placement.fontSize,
-        bold: placement.sourceRef !== 'generated.page-number' && (emphasized || placement.hierarchy === 'primary' || placement.role === 'title'),
-        color,
-        alignment: placement.alignment === 'start' ? 'left' : placement.alignment === 'end' ? 'right' : placement.alignment,
-        verticalAlignment: placement.sourceRef === 'generated.page-number' || placement.hierarchy === 'primary' ? 'middle' : 'top',
-        ...(content.type === 'table' ? { tableHeaderFill: tokens.surface, tableBodyFill: tokens.background, borderColor: tokens.muted } : {}),
+      const style = {
+        ...compilePresentationElementStyle({ pageStyle, contentType: content.type, sourceRef: placement.sourceRef,
+          generated: placement.sourceRef === 'generated.page-number', hierarchy: placement.hierarchy,
+          role: placement.role, fontSize: placement.fontSize,
+          alignment: placement.alignment === 'start' ? 'left' : placement.alignment === 'end' ? 'right' : placement.alignment,
+          verticalAlignment: placement.sourceRef === 'generated.page-number' || placement.hierarchy === 'primary' ? 'middle' : 'top' }),
         ...(content.type === 'chart' ? {
-          chartColors: [tokens.accent, tokens.secondaryAccent, tokens.muted],
-          mutedColor: tokens.muted,
           showLegend: content.chartKind === 'pie' && content.data.length <= 6,
           showValues: content.data.length <= 4 && designPage.density !== 'dense'
         } : {})
@@ -259,7 +278,7 @@ function buildRenderPlan(
         zIndex: placement.zIndex
       };
     });
-    return { pageNumber: layout.pageNumber, pageRole: designPage.pageRole, backgroundColor: tokens.background, elements };
+    return { pageNumber: layout.pageNumber, pageRole: designPage.pageRole, backgroundColor: pageStyle.backgroundColor, elements };
   });
   return {
     schemaVersion: 1,
@@ -269,40 +288,15 @@ function buildRenderPlan(
   };
 }
 
-function resolveContent(outline: DocumentOutline, ref: string): PresentationRenderPlanElement['content'] {
-  if (ref === 'outline.title') return { type: 'text', text: outline.title };
-  const field = /^outline\.sections\[(\d+)\]\.(heading|takeaway|action)$/u.exec(ref);
-  if (field) {
-    const section = outline.sections[Number(field[1])];
-    const text = section?.[field[2] as 'heading' | 'takeaway' | 'action'];
-    if (typeof text === 'string') return { type: 'text', text };
-  }
-  const blockRef = /^outline\.sections\[(\d+)\]\.blocks\[(\d+)\](?:\.items\[(\d+)\])?$/u.exec(ref);
-  if (!blockRef) throw new TypeError('layout_source_unresolved');
-  const block: DocumentOutlineBlock | undefined = outline.sections[Number(blockRef[1])]?.blocks[Number(blockRef[2])];
+function resolveContent(references: Readonly<Record<string, DocumentContentResolvedRef>>, ref: string): PresentationRenderPlanElement['content'] {
+  const resolved = references[ref];
+  if (resolved?.text !== undefined) return { type: 'text', text: resolved.text };
+  const block = resolved?.payload;
   if (!block) throw new TypeError('layout_source_unresolved');
-  if (blockRef[3] !== undefined) {
-    const items = block.type === 'bullets' || block.type === 'numbered' ? block.items : undefined;
-    const text = items?.[Number(blockRef[3])];
-    if (typeof text !== 'string') throw new TypeError('layout_source_unresolved');
-    return { type: 'text', text };
-  }
   if (block.type === 'paragraph' || block.type === 'quote') return { type: 'text', text: block.text };
   if (block.type === 'table') return { type: 'table', header: [...block.header], rows: block.rows.map(row => [...row]) };
   if (block.type === 'chart') return { type: 'chart', chartKind: block.chartKind, ...(block.title ? { title: block.title } : {}), data: block.data.map(point => ({ ...point })) };
   throw new TypeError('layout_source_unresolved');
-}
-
-function renderColor(
-  placement: PresentationLayoutPageResult['placements'][number],
-  design: ProductionPresentationDesignIR,
-  tokens: PresentationTemplateTokens,
-  emphasized: boolean
-): string {
-  const direction = design.globalDesign.colorDirection;
-  if (emphasized && direction !== 'monochrome' && direction !== 'neutral') return tokens.accent;
-  if (placement.hierarchy === 'supporting' && direction === 'restrained') return tokens.muted;
-  return tokens.text;
 }
 
 function failed(

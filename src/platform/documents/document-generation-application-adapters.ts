@@ -1,3 +1,4 @@
+import { createHash, randomUUID } from 'node:crypto';
 import {
   DocumentDraftCompilationError,
   DocumentGenerationApplicationError,
@@ -21,7 +22,8 @@ import { PresentationLayoutError } from './office-document-generator';
 
 export class PlatformDocumentDraftCompiler implements DocumentDraftCompilerPort {
   compileIR(input: Parameters<NonNullable<DocumentDraftCompilerPort['compileIR']>>[0]) {
-    return buildDocumentIRFromOutline(input);
+    return buildDocumentIRFromOutline({ ...input, identityScope: `doc-${input.identitySeed === undefined
+      ? randomUUID() : createHash('sha256').update(input.identitySeed).digest('hex')}` });
   }
 
   compile(input: Parameters<DocumentDraftCompilerPort['compile']>[0]) {
@@ -63,7 +65,8 @@ export class PlatformDocumentGenerationExecutor
             ? result.file.locator.relativePath.split('/').pop() ?? result.work.name
             : result.work.name,
         sizeBytes: result.file.sizeBytes ?? 0,
-        ...(result.validatedOutline ? { validatedOutline: result.validatedOutline } : {})
+        ...(result.validatedOutline ? { validatedOutline: result.validatedOutline } : {}),
+        ...(result.pageCountAssessment ? { pageCountAssessment: result.pageCountAssessment } : {})
       };
     } catch (error) {
       if (error instanceof PresentationLayoutError) {
@@ -74,7 +77,8 @@ export class PlatformDocumentGenerationExecutor
       }
       if (error instanceof DocumentGenerationError) {
         throw new DocumentGenerationApplicationError(
-          error.code === 'cancelled'
+          error.code === 'invalid_plan' ? 'invalid_structure'
+          : error.code === 'cancelled'
             ? 'cancelled'
             : error.code === 'page_count_mismatch'
               ? 'page_count_mismatch'

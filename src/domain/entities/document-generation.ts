@@ -94,6 +94,40 @@ export interface DocumentMessageResult {
   readonly validatedContent?: string;
 }
 
+/** A locally verified artifact retained after the response stopped or failed. */
+export interface RetainedDocumentMessageResult {
+  readonly workId: WorkId;
+  readonly fileName: string;
+  readonly kind: 'ppt';
+  readonly sizeBytes: number;
+  readonly actualPageCount: number;
+  /** Total-page planning goal from the host's successful publication receipt. */
+  readonly planningTargetTotalPages?: number;
+}
+
+export function parseRetainedDocumentMessageResult(value: unknown): RetainedDocumentMessageResult {
+  if (!isRecord(value)) throw new TypeError('message.retainedDocumentResult must be an object');
+  requireExactKeys(value, ['workId', 'fileName', 'kind', 'sizeBytes', 'actualPageCount',
+    ...(value.planningTargetTotalPages === undefined ? [] : ['planningTargetTotalPages'])]);
+  const result = parseDocumentMessageResult({ workId: value.workId, fileName: value.fileName,
+    kind: value.kind, sizeBytes: value.sizeBytes });
+  if (result.kind !== 'ppt' || result.sizeBytes < 1 || /[\u0000-\u001f\\/]/u.test(result.fileName)) {
+    throw new TypeError('message.retainedDocumentResult artifact is invalid');
+  }
+  const pageCount = (input: unknown): number => {
+    if (!Number.isSafeInteger(input) || (input as number) < 1 ||
+      (input as number) > presentationDocumentPageLimits.maximumPages) {
+      throw new TypeError('message.retainedDocumentResult page count is invalid');
+    }
+    return input as number;
+  };
+  return { workId: result.workId, fileName: result.fileName, kind: 'ppt', sizeBytes: result.sizeBytes,
+    actualPageCount: pageCount(value.actualPageCount),
+    ...(value.planningTargetTotalPages === undefined ? {} : {
+      planningTargetTotalPages: pageCount(value.planningTargetTotalPages)
+    }) };
+}
+
 export const documentGenerationStates = [
   'generating_content',
   'validating_outline',

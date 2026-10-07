@@ -27,6 +27,7 @@ const operations = [
   'prepareResponseSubmission',
   'submitResponse',
   'startResponse',
+  'cancelResponseStart',
   'startWorkflow',
   'answerWorkflow',
   'confirmWorkflow',

@@ -28,7 +28,8 @@ describe('document generation runtime bridge', () => {
       return structuredClone(runtime);
     });
     const complete = vi.fn(async () => { runtime.status = 'completed'; });
-    const service = { start: vi.fn(), require: vi.fn(async () => runtime), beginToolCall, recordObservation, complete, setStatus: vi.fn() } as unknown as ConstructorParameters<typeof DocumentGenerationRuntimeBridge>[0];
+    const service = { start: vi.fn(), require: vi.fn(async () => runtime), beginToolCall, recordObservation,
+      recordRegisteredWork: vi.fn(async () => runtime), complete, setStatus: vi.fn() } as unknown as ConstructorParameters<typeof DocumentGenerationRuntimeBridge>[0];
     const bridge = new DocumentGenerationRuntimeBridge(service, {
       id: toDocumentTaskRuntimeId('runtime-1'), projectId: toProjectId('project-1'), conversationId: toConversationId('conversation-1'), executionId: 'execution-1'
     }, 'execution-1');
@@ -54,6 +55,7 @@ describe('document generation runtime bridge', () => {
     const service = {
       require: vi.fn(async () => runtime),
       beginToolCall: vi.fn(async () => ({ runtime: { checkpoint: { step: 1 } }, execute: true })),
+      recordRegisteredWork: vi.fn(async () => runtime),
       setStatus: vi.fn(async () => undefined)
     } as unknown as ConstructorParameters<typeof DocumentGenerationRuntimeBridge>[0];
     const bridge = new DocumentGenerationRuntimeBridge(service, {

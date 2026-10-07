@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto';
 import {
   canonicalToolInputSchema,
   createCanonicalToolRegistry,
@@ -6,6 +7,7 @@ import {
   type CanonicalToolId,
   type CanonicalToolRegistry
 } from '../../domain/entities/canonical-tool-contract';
+import { ExecutionBudgetError, HostExecutionBudget, type ExecutionStage } from '../../application/execution-budget';
 
 export interface ControlledProviderToolDefinition {
   readonly type: 'function';
@@ -127,6 +129,8 @@ export interface ControlledProviderToolBridge {
   execute(input: {
     readonly call: ControlledProviderToolCall;
     readonly signal: AbortSignal;
+    /** Trusted Host admission receipt; never supplied by model-authored arguments or result metadata. */
+    readonly onExecutionAdmitted?: () => Promise<void>;
   }): Promise<Readonly<Record<string, unknown>>>;
 }
 
@@ -150,6 +154,58 @@ export interface ControlledProviderToolRoundResponse {
   readonly finishReason: string;
 }
 
+/** Host-only durable boundaries. This port is never included in Provider JSON. */
+export interface ProviderExecutionLifecyclePort {
+  modelPrepared(input: { readonly round: number; readonly requestHash: string; readonly messageCount: number; readonly toolCount: number }): Promise<void>;
+  modelStarted(input: { readonly round: number }): Promise<void>;
+  modelResult(input: { readonly round: number; readonly resultHash: string; readonly contentLength: number; readonly finishReason: string; readonly toolCallCount: number }): Promise<void>;
+  modelFailed(input: { readonly round: number; readonly unknown: boolean; readonly code: 'cancelled' | 'timeout' | 'transport' | 'invalid_response' | 'journal_failed' | 'failed' }): Promise<void>;
+  toolStarted(input: { readonly round: number; readonly stepRef: string; readonly toolId: string; readonly argumentsHash: string }): Promise<void>;
+  toolAdmitted?(input: { readonly round: number; readonly stepRef: string }): Promise<void>;
+  toolResult(input: { readonly round: number; readonly stepRef: string; readonly resultHash: string; readonly status: 'success' | 'failed' | 'unknown'; readonly outcomeUnknown: boolean; readonly registeredWorkIds?: readonly string[]; readonly failureCode?: string; readonly admissionPhase?: 'rejected' | 'admitted' | 'replayed' | 'unknown' }): Promise<void>;
+  observationCommitted(input: { readonly round: number; readonly stepRef: string; readonly observationHash: string }): Promise<void>;
+}
+
+export class ProviderExecutionJournalError extends Error {
+  constructor() { super('execution_journal_failed'); this.name = 'ProviderExecutionJournalError'; }
+}
+
+/** Only the digest crosses the durable metadata boundary, never the source data. */
+export function providerExecutionHash(value: unknown): string {
+  return createHash('sha256').update(value instanceof Uint8Array ? value : stableJson(value)).digest('hex');
+}
+
+export async function persistProviderExecutionBoundary(
+  operation: (() => Promise<void>) | undefined,
+  budget?: HostExecutionBudget,
+  signal?: AbortSignal
+): Promise<void> {
+  if (!operation) return;
+  const stopError = () => signal?.reason instanceof ExecutionBudgetError ? signal.reason : new ExecutionBudgetError('cancelled');
+  if (signal?.aborted) throw stopError();
+  let removeAbort = () => undefined;
+  const stopped = new Promise<never>((_resolve, reject) => {
+    if (!signal) return;
+    const stop = () => reject(stopError());
+    signal.addEventListener('abort', stop, { once: true });
+    removeAbort = () => { signal.removeEventListener('abort', stop); };
+  });
+  try {
+    const pending = budget ? budget.run('prepare', () => operation()) : operation();
+    await Promise.race([pending, stopped]);
+  } catch (error) {
+    if (error instanceof ExecutionBudgetError) throw error;
+    throw new ProviderExecutionJournalError();
+  } finally { removeAbort(); }
+}
+
+function registeredWorkRefs(result: Readonly<Record<string, unknown>>): readonly string[] {
+  if (!Array.isArray(result.artifactRefs)) return [];
+  return [...new Set(result.artifactRefs.filter((item): item is { kind: 'work'; ref: string } =>
+    isRecord(item) && item.kind === 'work' && typeof item.ref === 'string' && /^[a-z0-9][a-z0-9._:-]{0,127}$/iu.test(item.ref)
+  ).map(item => item.ref))];
+}
+
 /** Production Provider rounds share one bounded call, progress and failure loop. */
 export async function runControlledProviderToolRounds<
   TMessage,
@@ -161,7 +217,9 @@ export async function runControlledProviderToolRounds<
   readonly signal: AbortSignal;
   readonly shouldContinue: (response: TResponse) => boolean;
   readonly maxRounds?: number;
-  readonly requestNext: (messages: readonly TMessage[]) => Promise<TResponse>;
+  readonly executionBudget?: HostExecutionBudget;
+  readonly executionLifecycle?: ProviderExecutionLifecyclePort;
+  readonly requestNext: (messages: readonly TMessage[], signal: AbortSignal) => Promise<TResponse>;
   readonly appendAssistant: (response: TResponse, messages: TMessage[]) => void;
   readonly appendTool: (call: ControlledProviderToolCall, result: Readonly<Record<string, unknown>>, messages: TMessage[]) => void;
   readonly toLoopError: (code: ControlledProviderToolLoopErrorCode) => Error;
@@ -172,31 +230,60 @@ export async function runControlledProviderToolRounds<
   }
   const controller = createControlledProviderToolLoopController({
     signal: input.signal,
-    maxToolCalls: 64
+    maxToolCalls: input.executionBudget?.policy.maxToolCalls ?? 64,
+    executionBudget: input.executionBudget
   });
   let response = input.initialResponse;
   let rounds = 0;
   try {
     while (input.shouldContinue(response)) {
-      if (!input.bridge || !response.toolCalls?.length) {
-        throw input.toLoopError('budget_exceeded');
-      }
+      if (!input.bridge) throw input.toLoopError('tool_bridge_unavailable');
+      if (!response.toolCalls?.length) throw input.toLoopError('invalid_tool_calls');
       controller.assertCanProceed();
       controller.recordToolCalls(response.toolCalls);
       rounds += 1;
-      if (rounds > maxRounds) throw input.toLoopError('budget_exceeded');
+      if (rounds > maxRounds) throw input.toLoopError('tool_loop_limit_exceeded');
       input.appendAssistant(response, input.messages);
-      for (const call of response.toolCalls) {
+      for (const [ordinal, call] of response.toolCalls.entries()) {
         controller.assertCanProceed();
-        const raw = await input.bridge.execute({ call, signal: input.signal });
+        const round = rounds - 1;
+        const stepRef = `provider-tool-${round}-${ordinal}`;
+        await controller.run('prepare', () => persistProviderExecutionBoundary(input.executionLifecycle && (() => input.executionLifecycle!.toolStarted({
+          round, stepRef, toolId: call.name, argumentsHash: providerExecutionHash(call.arguments)
+        }))));
+        controller.assertCanProceed();
+        let admitted = false;
+        const raw = await controller.run('tool', signal => input.bridge!.execute({ call, signal,
+          onExecutionAdmitted: async () => {
+            if (admitted) throw new ProviderExecutionJournalError();
+            await persistProviderExecutionBoundary(input.executionLifecycle?.toolAdmitted && (() => input.executionLifecycle!.toolAdmitted!({ round, stepRef })), input.executionBudget, signal);
+            admitted = true;
+          }
+        }));
         const result = sanitizeControlledToolResult(raw);
+        const diagnostic = Array.isArray(raw.diagnostics) ? raw.diagnostics.find(item => isRecord(item) && typeof item.code === 'string' && /^[a-z0-9_-]{1,80}$/iu.test(item.code)) : undefined;
+        const failureCode = isRecord(diagnostic) ? diagnostic.code as string : undefined;
+        const admissionPhase = admitted ? 'admitted' : result.status === 'unknown' ? 'unknown'
+          : isRecord(raw.metadata) && raw.metadata.replayed === true ? 'replayed' : 'rejected';
+        await persistProviderExecutionBoundary(input.executionLifecycle && (() => input.executionLifecycle!.toolResult({
+          round, stepRef, resultHash: providerExecutionHash(raw),
+          status: result.status === 'failed' || result.status === 'unknown' ? result.status : 'success',
+          outcomeUnknown: result.status === 'unknown', registeredWorkIds: registeredWorkRefs(raw), admissionPhase,
+          ...(failureCode ? { failureCode } : {})
+        })), undefined, controller.signal);
         controller.recordToolResult(result);
         input.appendTool(call, result, input.messages);
+        await controller.run('prepare', () => persistProviderExecutionBoundary(input.executionLifecycle && (() => input.executionLifecycle!.observationCommitted({
+          round, stepRef, observationHash: providerExecutionHash(result)
+        }))));
+        controller.assertCanProceed();
       }
-      response = await input.requestNext(input.messages);
+      response = await controller.run('model', signal => input.requestNext(input.messages, signal));
     }
+    controller.assertCanProceed();
     return response;
   } catch (error) {
+    if (error instanceof ExecutionBudgetError && error.scope === 'execution') throw input.toLoopError(error.code);
     if (error instanceof ControlledProviderToolLoopError) {
       throw input.toLoopError(error.code);
     }
@@ -283,9 +370,13 @@ export type ControlledProviderToolLoopErrorCode =
   | 'cancelled'
   | 'timeout'
   | 'budget_exceeded'
+  | 'tool_call_limit'
   | 'no_progress'
   | 'failure_limit'
-  | 'unknown_result';
+  | 'unknown_result'
+  | 'tool_bridge_unavailable'
+  | 'invalid_tool_calls'
+  | 'tool_loop_limit_exceeded';
 
 /**
  * Runtime safety limits for the provider/tool handshake. These are deliberately
@@ -305,6 +396,7 @@ export interface ControlledProviderToolLoopController {
   recordToolCalls(calls: readonly ControlledProviderToolCall[]): void;
   recordToolResult(result: Readonly<Record<string, unknown>>): void;
   recordToolFailure(): void;
+  run<T>(stage: ExecutionStage, operation: (signal: AbortSignal) => Promise<T>): Promise<T>;
   dispose(): void;
 }
 
@@ -314,6 +406,7 @@ export function createControlledProviderToolLoopController(input: {
   readonly totalTimeoutMs?: number;
   readonly maxToolCalls?: number;
   readonly maxFailures?: number;
+  readonly executionBudget?: HostExecutionBudget;
 }): ControlledProviderToolLoopController {
   const totalTimeoutMs = input.totalTimeoutMs ?? 120_000;
   const maxToolCalls = input.maxToolCalls ?? 64;
@@ -324,41 +417,39 @@ export function createControlledProviderToolLoopController(input: {
     throw new Error('controlled tool loop limits are invalid');
   }
   const startedAt = Date.now();
+  const budget = input.executionBudget ?? new HostExecutionBudget({ startedAt, deadlineAt: startedAt + totalTimeoutMs,
+    maxToolCalls, budgetUnits: 1_000_000 }, { signal: input.signal,
+      onDiagnostic: diagnostic => { if (diagnostic.stopReason === 'timeout') input.onTimeout?.(); } });
   let totalCalls = 0;
   let consecutiveFailures = 0;
-  let timedOut = false;
   let disposed = false;
   const seenProgress = new Set<string>();
-  const timeout = setTimeout(() => {
-    timedOut = true;
-    try { input.onTimeout?.(); } catch { /* abort is best effort; assertCanProceed still fails closed */ }
-  }, totalTimeoutMs);
-  const onAbort = () => { clearTimeout(timeout); };
-  input.signal.addEventListener('abort', onAbort, { once: true });
+  const onAbort = () => budget.cancel('cancelled');
+  if (input.executionBudget) input.signal.addEventListener('abort', onAbort, { once: true });
+  if (input.signal.aborted) onAbort();
 
   const assertCanProceed = (): void => {
     if (disposed) throw new ControlledProviderToolLoopError('cancelled');
-    if (input.signal.aborted) throw new ControlledProviderToolLoopError('cancelled');
-    if (timedOut || Date.now() - startedAt >= totalTimeoutMs) {
-      timedOut = true;
-      try { input.onTimeout?.(); } catch { /* fail closed below */ }
-      throw new ControlledProviderToolLoopError('timeout');
-    }
+    try { budget.assertCanProceed(); }
+    catch (error) { if (error instanceof ExecutionBudgetError) throw new ControlledProviderToolLoopError(error.code); throw error; }
   };
   return {
-    signal: input.signal,
+    signal: budget.signal,
     assertCanProceed,
+    run: (stage, operation) => budget.run(stage, operation),
     recordToolCalls(calls) {
       assertCanProceed();
       if (calls.length < 1 || calls.length > maxTools) {
-        throw new ControlledProviderToolLoopError('budget_exceeded');
+        throw new ControlledProviderToolLoopError('invalid_tool_calls');
       }
       totalCalls += calls.length;
       if (totalCalls > maxToolCalls) {
-        throw new ControlledProviderToolLoopError('budget_exceeded');
+        budget.cancel('tool_call_limit');
+        throw new ControlledProviderToolLoopError('tool_call_limit');
       }
       const key = stableJson(calls.map(call => ({ id: call.id, name: call.name, arguments: call.arguments })));
       if (seenProgress.has(key)) {
+        budget.cancel('no_progress');
         throw new ControlledProviderToolLoopError('no_progress');
       }
       seenProgress.add(key);
@@ -367,11 +458,13 @@ export function createControlledProviderToolLoopController(input: {
       assertCanProceed();
       const status = result.status;
       if (status === 'unknown') {
+        budget.cancel('unknown_result');
         throw new ControlledProviderToolLoopError('unknown_result');
       }
       if (status === 'failed') {
         consecutiveFailures += 1;
         if (consecutiveFailures >= maxFailures) {
+          budget.cancel('failure_limit');
           throw new ControlledProviderToolLoopError('failure_limit');
         }
         return;
@@ -382,13 +475,14 @@ export function createControlledProviderToolLoopController(input: {
       assertCanProceed();
       consecutiveFailures += 1;
       if (consecutiveFailures >= maxFailures) {
+        budget.cancel('failure_limit');
         throw new ControlledProviderToolLoopError('failure_limit');
       }
     },
     dispose() {
       if (disposed) return;
       disposed = true;
-      clearTimeout(timeout);
+      if (!input.executionBudget) budget.dispose();
       input.signal.removeEventListener('abort', onAbort);
     }
   };

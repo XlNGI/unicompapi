@@ -61,6 +61,7 @@ export interface PresentationLayoutPage {
   readonly boxes: readonly PresentationLayoutBox[];
 }
 
+/** Legacy normalized scene-box input for temporary workflows; production uses ProductionPresentationLayoutIR. */
 export interface PresentationLayoutIR {
   readonly schemaVersion: 1;
   readonly pages: readonly PresentationLayoutPage[];
@@ -103,6 +104,7 @@ export function buildPresentationDesignIR(plan: PresentationPlan): PresentationD
   };
 }
 
+/** Compatibility-only geometry path. Adapt its already computed boxes at the production boundary; do not solve them again. */
 export function buildPresentationLayoutIR(plan: PresentationPlan, options: { readonly autoAdjust?: boolean; readonly maxAdjustments?: number } = {}): PresentationLayoutIR {
   const diagnostics: PresentationLayoutDiagnostic[] = [];
   const adjustments: PresentationLayoutAdjustment[] = [];

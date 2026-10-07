@@ -159,13 +159,13 @@ describe('generated registered PPT physical-file readback', () => {
       return actual!.apply(this, input);
     });
     const preparation = data.session.prepareTools(data.signal);
-    const rejected = expect(preparation).rejects.toMatchObject({ name: 'AbortError' });
+    const rejected = expect(preparation).rejects.toMatchObject({ code: 'cancelled' });
     await vi.waitFor(() => expect(data.reader).toHaveBeenCalled());
     await data.session.cancel!();
     await rejected;
     release();
     await new Promise(resolve => setTimeout(resolve, 30));
-    expect(await data.session.prepareTools(data.signal)).toBeUndefined();
+    await expect(data.session.prepareTools(data.signal)).rejects.toMatchObject({ code: 'cancelled' });
     await expect(data.read()).resolves.toMatchObject({ status: 'cancelled' });
     expect(data.run).toHaveBeenCalledTimes(1);
     expect(await data.works.list(projectId)).toHaveLength(1);

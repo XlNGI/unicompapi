@@ -52,15 +52,16 @@ describe('document production trace integration', () => {
     expect(result.sizeBytes).toBeGreaterThan(0);
     const events = await getProductionTraceStore(scope).list({ conversationId });
     expect(events.map(event => `${event.operationId}:${event.status}`)).toEqual([
+      'local-document-generation:started',
       'document-outline:started', 'document-outline:completed',
       'presentation-art-direction:started', 'presentation-art-direction:completed',
       'presentation-design-fallback:completed',
       'document-file-write:started', 'document-layout:started', 'document-layout:completed',
-      'presentation-layout-summary:started', 'presentation-layout-summary:completed',
-      'presentation-layout-diagnostic-1:started', 'presentation-layout-diagnostic-1:completed',
-      'presentation-layout-page-1:started', 'presentation-layout-page-1:completed',
-      'presentation-layout-page-2:started', 'presentation-layout-page-2:completed',
-      'presentation-layout-page-3:started', 'presentation-layout-page-3:completed', 'document-file-write:completed',
+      'presentation-layout-summary:completed',
+      'presentation-layout-diagnostic-1:completed',
+      'presentation-layout-page-1:completed',
+      'presentation-layout-page-2:completed',
+      'presentation-layout-page-3:completed', 'document-file-write:completed',
       'document-output-structure:started', 'document-output-structure:completed',
       'document-temporary-hash:started', 'document-temporary-hash:completed',
       'document-atomic-publish:started', 'document-atomic-publish:completed',

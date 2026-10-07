@@ -1,11 +1,11 @@
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { mkdtemp, rm } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { getProductionTraceStore, withProductionTrace } from '../../src/platform/conversation-production-trace';
 
 const traceRoots: string[] = [];
-afterEach(async () => { await Promise.all(traceRoots.splice(0).map((root) => rm(root, { recursive: true, force: true }))); });
+afterEach(async () => { vi.restoreAllMocks(); await Promise.all(traceRoots.splice(0).map((root) => rm(root, { recursive: true, force: true }))); });
 import {
   addUserMessage,
   beginAssistantMessage,
@@ -19,10 +19,112 @@ import {
   type Conversation,
   type ProjectConversationRepository
 } from '../../src/domain';
+import { createProviderExecutionRouteSnapshot, toProviderExecutionRouteSnapshotId, toProviderId, toConnectionId,
+  toModelId, toProtocolBindingId, toUsageSchemaId } from '../../src/domain';
+import { HostExecutionBudget } from '../../src/application/execution-budget';
+import { ConversationExecutionCoordinator } from '../../src/platform/providers/conversation-execution-coordinator';
+import { createConversationTextDispatchBridge, type ConversationTextSubmissionRuntimes } from '../../src/platform/providers/conversation-text-submission';
+import { DeepSeekChatAdapter, DEEPSEEK_PROVIDER_PACKAGE_ID, DEEPSEEK_PROVIDER_PACKAGE_VERSION,
+  DEEPSEEK_CHAT_ADAPTER_ID, DEEPSEEK_CHAT_ADAPTER_VERSION, DEEPSEEK_CHAT_PROTOCOL_ID,
+  DEEPSEEK_CHAT_PROTOCOL_VERSION } from '../../src/platform/providers/deepseek';
 import {
   createConversationLinkedLifecycle,
   type ConversationResponseExecutionLifecycle
 } from '../../src/platform';
+
+function startingDispatchFixture(forExecution: NonNullable<ConversationTextSubmissionRuntimes['documentToolCalling']>['forExecution'],
+  settleExecution?: Parameters<typeof createConversationTextDispatchBridge>[0]['settleExecution']) {
+  const coordinator = new ConversationExecutionCoordinator(25);
+  const bridge = createConversationTextDispatchBridge({ coordinator, documentToolCalling: { forExecution },
+    providerPackages: { resolveAdapter: () => undefined }, providerRegistry: {}, credentialVault: {},
+    deepSeekRuntime: {}, newApiRuntime: {}, usage: {}, lifecycle: {}, conversations: {}, settleExecution
+  } as unknown as Parameters<typeof createConversationTextDispatchBridge>[0]);
+  const routeSnapshot = createProviderExecutionRouteSnapshot({ id: toProviderExecutionRouteSnapshotId('starting-route'),
+    projectId: toProjectId('starting-project'), packageId: DEEPSEEK_PROVIDER_PACKAGE_ID,
+    packageVersion: DEEPSEEK_PROVIDER_PACKAGE_VERSION, adapterKey: DEEPSEEK_CHAT_ADAPTER_ID, adapterVersion: DEEPSEEK_CHAT_ADAPTER_VERSION,
+    providerId: toProviderId('starting-provider'), connectionId: toConnectionId('starting-connection'), connectionRevision: 1,
+    connectionConfigVersionId: 'starting-config', endpointPolicyId: 'starting-endpoint', endpointPolicyRevision: 1,
+    credentialVersionId: 'starting-credential-version', modelId: toModelId('starting-model'), providerModelKey: 'starting-model-key',
+    modelRevision: 1, profileId: 'starting-profile', profileRevision: 1, protocolBindingId: toProtocolBindingId('starting-binding'),
+    protocolBindingRevision: 1, productFeature: 'text_chat', internalPurpose: 'text_execution', featureMappingVersion: 1,
+    parameterSchemaId: 'starting-parameters', parameterSchemaRevision: 1, resultSchemaId: 'starting-results', resultSchemaRevision: 1,
+    usageSchemaId: toUsageSchemaId('starting-usage'), usageSchemaRevision: 1, constraintSetId: 'starting-constraints', constraintSetRevision: 1,
+    runtimePolicyId: 'starting-policy', runtimePolicyRevision: 1, runtimeAuthorizationClaimId: 'starting-claim',
+    createdAt: toIsoTimestamp('2026-10-03T00:00:00.000Z') });
+  const responseExecutionId = toConversationResponseExecutionId('starting-execution');
+  return { coordinator, responseExecutionId, run: () => bridge.submit({ routeSnapshot,
+    request: { responseExecutionId, protocolId: DEEPSEEK_CHAT_PROTOCOL_ID, protocolVersion: DEEPSEEK_CHAT_PROTOCOL_VERSION },
+    beforeRequestStarted: async () => undefined }) };
+}
+
+describe('conversation dispatch starting cancellation', () => {
+  it.each(['timeout', 'cancelled'] as const)('retains the real %s reason across normal handle close and durable settlement', async reason => {
+    const startedAt = Date.now();
+    const budget = new HostExecutionBudget({ startedAt, deadlineAt: startedAt + 90_000, maxToolCalls: 8, budgetUnits: 8 });
+    const settle = vi.fn(async () => undefined);
+    const data = startingDispatchFixture(async () => ({ executionBudget: budget,
+      close: async () => budget.dispose(), bridge: { execute: async () => ({ status: 'success' }) },
+      prepareTools: async () => undefined }), settle);
+    let finish!: () => void;
+    vi.spyOn(DeepSeekChatAdapter.prototype, 'submit').mockResolvedValue({ providerOperationId: 'owned-stop-handle',
+      completion: new Promise<void>(resolve => { finish = resolve; }) } as unknown as Awaited<ReturnType<DeepSeekChatAdapter['submit']>>);
+    expect(await data.run()).toMatchObject({ kind: 'accepted_async' });
+    budget.cancel(reason);
+    finish();
+    await vi.waitFor(() => expect(settle).toHaveBeenCalledWith(data.responseExecutionId, false,
+      { toolCallsUsed: 0, costUnitsUsed: 0 }, reason));
+    expect(budget.signal.aborted).toBe(true);
+  });
+  it('returns promptly for Stop during a hanging session factory and revokes its late session', async () => {
+    let finish!: (value: Awaited<ReturnType<NonNullable<ConversationTextSubmissionRuntimes['documentToolCalling']>['forExecution']>>) => void;
+    const factory = vi.fn((_input: Parameters<NonNullable<ConversationTextSubmissionRuntimes['documentToolCalling']>['forExecution']>[0]) =>
+      new Promise<Awaited<ReturnType<NonNullable<ConversationTextSubmissionRuntimes['documentToolCalling']>['forExecution']>>>(resolve => { finish = resolve; }));
+    const submit = vi.spyOn(DeepSeekChatAdapter.prototype, 'submit');
+    const data = startingDispatchFixture(factory);
+    const pending = data.run();
+    await vi.waitFor(() => expect(factory).toHaveBeenCalledOnce());
+    const factorySignal = factory.mock.calls[0][0]?.signal;
+    await data.coordinator.cancel(data.responseExecutionId);
+    expect(factorySignal?.aborted).toBe(true);
+    await expect(pending).resolves.toMatchObject({ kind: 'failed_before_submission', safeCode: expect.stringContaining('cancelled') });
+    const close = vi.fn(async () => undefined);
+    const cancel = vi.fn(async () => undefined);
+    finish({ bridge: { execute: async () => ({ status: 'success' }) }, prepareTools: async () => undefined, close, cancel });
+    await vi.waitFor(() => expect(close).toHaveBeenCalledOnce());
+    expect(cancel).toHaveBeenCalledOnce();
+    expect(submit).not.toHaveBeenCalled();
+  });
+
+  it('forwards one parent owner and stops before HTTP headers resolve, then cancels a late handle', async () => {
+    const startedAt = Date.now();
+    const budget = new HostExecutionBudget({ startedAt, deadlineAt: startedAt + 90_000, maxToolCalls: 8, budgetUnits: 8 });
+    const close = vi.fn(async () => budget.dispose());
+    const cancelSession = vi.fn(async () => undefined);
+    const data = startingDispatchFixture(async () => ({ executionBudget: budget, close, cancel: cancelSession,
+      bridge: { execute: async () => ({ status: 'success' }) }, prepareTools: async () => undefined }));
+    let finish!: () => void;
+    let adapterSignal: AbortSignal | undefined;
+    const cancel = vi.spyOn(DeepSeekChatAdapter.prototype, 'cancel').mockResolvedValue(true);
+    const submit = vi.spyOn(DeepSeekChatAdapter.prototype, 'submit').mockImplementation(input => {
+      expect(input.executionBudget).toBe(budget);
+      adapterSignal = input.signal;
+      return new Promise(resolve => {
+        const handle = { providerOperationId: 'late-starting-handle', completion: Promise.resolve() } as unknown as Awaited<ReturnType<DeepSeekChatAdapter['submit']>>;
+        finish = () => resolve(handle);
+      });
+    });
+    const pending = data.run();
+    await vi.waitFor(() => expect(submit).toHaveBeenCalledOnce());
+    await data.coordinator.cancel(data.responseExecutionId);
+    expect(adapterSignal?.aborted).toBe(true);
+    expect(budget.stopReason).toBe('cancelled');
+    await expect(pending).resolves.toMatchObject({ kind: 'failed_before_submission', safeCode: expect.stringContaining('cancelled') });
+    expect(close).toHaveBeenCalledOnce();
+    expect(cancelSession).toHaveBeenCalled();
+    finish();
+    await vi.waitFor(() => expect(cancel).toHaveBeenCalledWith('late-starting-handle'));
+  });
+});
 
 describe('createConversationLinkedLifecycle', () => {
   it.each([false, true])('publishes completion only after the conversation is saved (save failure: %s)', async (failSave) => {

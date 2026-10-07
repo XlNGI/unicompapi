@@ -1,4 +1,7 @@
 import { randomUUID } from 'node:crypto';
+import { ExecutionBudgetError } from '../../application/execution-budget';
+import { ConversationCompletionError, type ConversationCompletionCoordinator } from '../../application/conversation-completion-coordinator';
+import { projectConversationParentRun } from './conversation-parent-run-projection';
 import { NativeSearchAuthorizationError, type ConversationNativeSearch } from '../providers/conversation-native-search';
 import { FeatureSubmissionError } from '../providers/provider-feature-candidates';
 import { isConversationImageRequest, declinesConversationImageInput } from '../../application/conversation-image-request';
@@ -18,6 +21,8 @@ import {
   toMessageId,
   toProjectContextId,
   type ConversationIntentPlan,
+  type ConversationWorkflowV1,
+  type Conversation,
   type ConversationAgentRunRepository,
   type ConversationResponseDraftRepository,
   type ConversationResponseDraftV1,
@@ -40,7 +45,8 @@ import type {
   ConversationResponseExecutionDto,
   ConversationResponsePreparationDto,
   ConversationResponseStartDto,
-  ConversationResponseStreamEventDto
+  ConversationResponseStreamEventDto, ConversationParentRunDto, ReconciliationInspectionDto,
+  ConversationAgentResponseStartDto, ConversationAgentSessionDto
 } from '../../shared/chat-context-ipc';
 import {
   chatContextRequestParsers,
@@ -62,7 +68,7 @@ import { declinesWebResearch } from '../../application/conversation-intent-orche
 import type { ConversationDocumentPageContextService } from '../documents/conversation-document-page-context';
 import { emitProductionEvent, withProductionTrace } from '../conversation-production-trace';
 import { buildDocumentOutlinePrompt } from '../../shared/document-outline-contract';
-import type { ConversationDocumentToolSessionService } from '../documents/conversation-document-tool-session';
+import type { ConversationDocumentToolSelection, ConversationDocumentToolSessionService } from '../documents/conversation-document-tool-session';
 
 export interface ConversationResponseControllerRuntime {
   readonly nativeSearch?: ConversationNativeSearch;
@@ -76,11 +82,30 @@ export interface ConversationResponseControllerRuntime {
   readonly streamChannel: ControlledConversationResponseStreamChannel;
   readonly workflowService?: ConversationWorkflowService;
   readonly agentRuns?: ConversationAgentRunRepository;
+  readonly completion?: Pick<ConversationCompletionCoordinator, 'settle' | 'canStartNewResponse' | 'inspect' | 'reconcile' | 'acknowledge' | 'waitForOperations'>;
+  readonly continuations?: {
+    /** Read-only replay and scope checks run before adding another user message. */
+    validate?(input: { readonly conversation: Conversation; readonly input: StartResponseRequest;
+      readonly signal: AbortSignal }): Promise<ConversationAgentResponseStartDto | undefined>;
+    /** Host validates the token and reserves the original session before provider dispatch. */
+    prepare(input: { readonly conversation: Conversation;
+      readonly userMessageId: string; readonly input: StartResponseRequest; readonly signal: AbortSignal;
+    }): Promise<{ readonly agentSession: ConversationAgentSessionDto;
+      readonly workflow?: ConversationWorkflowV1; readonly waiting: boolean; readonly parentRunId?: string;
+      readonly reservedRunId?: string }>;
+    bindRun(input: { readonly sessionId: string; readonly runId: string }): Promise<void>;
+    bindExecution(input: { readonly sessionId: string; readonly runId: string; readonly responseExecutionId: string }): Promise<void>;
+    cancel(input: { readonly sessionId: string; readonly expectedRevision: number; readonly closeUnknown?: boolean }): Promise<ConversationAgentSessionDto>;
+    /** Settles a reserved continuation that never reached an execution handle. */
+    abandon?(input: { readonly sessionId: string; readonly cancelled: boolean }): Promise<void>;
+  };
   readonly attachments?: Pick<ConversationAttachmentContextService, 'pin' | 'resolve'>;
   readonly documentPages?: Pick<ConversationDocumentPageContextService, 'resolve'>;
-  readonly documentTools?: Pick<ConversationDocumentToolSessionService, 'select' | 'pinDraft'>;
+  readonly documentTools?: Pick<ConversationDocumentToolSessionService, 'select' | 'pinDraft'> &
+    Partial<Pick<ConversationDocumentToolSessionService, 'prepare'>>;
   /** Completes startup recovery before accessing persisted response state or executing writes. */
   readonly ready: Promise<void>;
+  refreshRecovery?(scope: { readonly conversationId?: string; readonly responseExecutionId?: string }): Promise<void>;
   submit?(input: {
     readonly subject: FeatureCandidateSubjectV1;
     readonly routeSelectionToken: string;
@@ -90,6 +115,7 @@ export interface ConversationResponseControllerRuntime {
     readonly subject: FeatureCandidateSubjectV1;
     readonly routeSelectionToken: string;
     readonly confirmation: SubmissionUserConfirmationV1;
+    readonly signal?: AbortSignal;
   }): Promise<ConversationResponseExecutionReadModelV1>;
 }
 
@@ -106,8 +132,13 @@ export class ConversationResponseController {
   private readonly operations = new Set<Promise<unknown>>();
   private readonly startCommands = new Map<
     string,
-    Promise<ChatContextIpcResult<ConversationResponseStartDto>>
+    Promise<ChatContextIpcResult<ConversationAgentResponseStartDto>>
   >();
+  private readonly startAbortControllers = new Map<string, AbortController>();
+  private readonly reconciliationInspections = new Map<string, {
+    projectId: string; responseExecutionId: string; runId: string; runRevision: number; intentRevision: number | null; expiresAt: number;
+    taskRevisions: readonly { readonly id: string; readonly revision: number }[]
+  }>();
 
   constructor(private readonly dependencies: ConversationResponseControllerDependencies) {}
 
@@ -309,6 +340,8 @@ export class ConversationResponseController {
           'The conversation already has an active response execution'
         );
       }
+      const blocked = await this.responseStartBlock(runtime, draft.value.conversationId, draft.value.userMessageId);
+      if (blocked && !blocked.ok) return blocked;
       const confirmation = {
         schemaVersion: 1 as const,
         confirmationId: input.confirmationId,
@@ -338,25 +371,74 @@ export class ConversationResponseController {
 
   start(request: unknown): Promise<ChatContextIpcResult<ConversationResponseStartDto>> {
     return this.execute(async () => {
+      const result = await this.startCommand(request);
+      if (result.ok && !('execution' in result.value)) return failure('invalid_request', 'Waiting responses must use the Agent entry');
+      return result as ChatContextIpcResult<ConversationResponseStartDto>;
+    });
+  }
+
+  private startCommand(request: unknown): Promise<ChatContextIpcResult<ConversationAgentResponseStartDto>> {
+    return this.execute(async () => {
       const input = chatContextRequestParsers.startResponse(request);
-      const runtime = await this.requireRuntime();
+      const runtime = await this.requireRuntime({ waitForReady: false });
       const commandKey = `${runtime.conversations.projectId}:${input.clientCommandId}`;
       const existing = this.startCommands.get(commandKey);
       if (existing) return existing;
+      if (this.startAbortControllers.size >= 256) return failure('invalid_request', 'Too many response starts are pending');
       if (this.startCommands.size >= 256) {
-        const oldest = this.startCommands.keys().next().value as string | undefined;
+        const oldest = [...this.startCommands.keys()].find(key => !this.startAbortControllers.has(key));
         if (oldest) this.startCommands.delete(oldest);
       }
-      const operation = this.startValidated(runtime, input);
+      const controller = new AbortController();
+      this.startAbortControllers.set(commandKey, controller);
+      const operation = (async () => {
+        await waitForResponseStart(() => runtime.ready, controller.signal, () => this.assertStartScope(runtime, controller.signal));
+        return waitForResponseStart(() => this.startValidated(runtime, input, controller.signal), controller.signal,
+          () => this.assertStartScope(runtime, controller.signal));
+      })().finally(() => {
+        if (this.startAbortControllers.get(commandKey) === controller) this.startAbortControllers.delete(commandKey);
+      });
       this.startCommands.set(commandKey, operation);
       return operation;
     });
   }
 
+  cancelResponseStart(request: unknown): Promise<ChatContextIpcResult<{ readonly cancelled: boolean }>> {
+    return this.execute(async () => {
+      const input = chatContextRequestParsers.cancelResponseStart(request);
+      const session = this.dependencies.getSession();
+      if (!session) return failure('project_not_open', 'A project must be open');
+      if (input.projectId !== session.projectId) return failure('project_scope_mismatch', 'The response start belongs to another project');
+      const controller = this.startAbortControllers.get(`${input.projectId}:${input.clientCommandId}`);
+      if (!controller) return { ok: true, value: { cancelled: false } };
+      controller.abort(new ResponseStartCancelledError());
+      return { ok: true, value: { cancelled: true } };
+    });
+  }
+
+  /** Shutdown also owns starts that have not created an execution handle yet. */
+  cancelActiveStarts(): number {
+    const active = [...this.startAbortControllers.values()].filter(controller => !controller.signal.aborted);
+    for (const controller of active) controller.abort(new ResponseStartCancelledError());
+    return active.length;
+  }
+
   /** Agent-native entry: semantic routing and confirmation stay with the model. */
-  startAgent(request: unknown): Promise<ChatContextIpcResult<ConversationResponseStartDto>> {
-    const parsed = chatContextRequestParsers.startAgentResponse(request);
-    return this.start({ ...parsed, confirmed: true, agentNative: true });
+  startAgent(request: unknown): Promise<ChatContextIpcResult<ConversationAgentResponseStartDto>> {
+    return this.execute(async () => {
+      const parsed = chatContextRequestParsers.startAgentResponse(request);
+      return this.startCommand({ ...parsed, confirmed: true, agentNative: true });
+    });
+  }
+
+  cancelAgentSession(request: unknown): Promise<ChatContextIpcResult<ConversationAgentSessionDto>> {
+    return this.execute(async () => {
+      const input = chatContextRequestParsers.cancelAgentSession(request);
+      const runtime = await this.requireRuntime();
+      if (input.projectId !== runtime.conversations.projectId) return failure('project_scope_mismatch', 'The task belongs to another project');
+      if (!runtime.continuations) return failure('continuation_not_available', 'The task cannot be continued in this runtime');
+      return { ok: true, value: await runtime.continuations.cancel(input) };
+    });
   }
 
   getExecution(
@@ -365,9 +447,10 @@ export class ConversationResponseController {
     return this.execute(async () => {
       const input = chatContextRequestParsers.responseExecution(request);
       const runtime = await this.requireRuntime();
+      await runtime.refreshRecovery?.({ responseExecutionId: input.responseExecutionId });
       return {
         ok: true,
-        value: toResponseExecutionDto(await runtime.executions.readModel(
+        value: await this.executionDto(runtime, await runtime.executions.readModel(
           toConversationResponseExecutionId(input.responseExecutionId)
         ))
       };
@@ -396,6 +479,7 @@ export class ConversationResponseController {
     return this.execute(async () => {
       const input = chatContextRequestParsers.responseExecution(request);
       const runtime = await this.requireRuntime();
+      await runtime.refreshRecovery?.({ responseExecutionId: input.responseExecutionId });
       const executionId = toConversationResponseExecutionId(input.responseExecutionId);
       const interruptOnTimeout = () => runtime.executions
         .interrupt(executionId, 'transport_interrupted')
@@ -487,8 +571,11 @@ export class ConversationResponseController {
 
   private async startValidated(
     runtime: ConversationResponseControllerRuntime,
-    input: StartResponseRequest
-  ): Promise<ChatContextIpcResult<ConversationResponseStartDto>> {
+    input: StartResponseRequest,
+    signal: AbortSignal
+  ): Promise<ChatContextIpcResult<ConversationAgentResponseStartDto>> {
+    const step = <T>(operation: () => Promise<T>) => waitForResponseStart(operation, signal,
+      () => this.assertStartScope(runtime, signal));
     if (!input.confirmed) {
       return failure('explicit_confirmation_required', 'Explicit confirmation is required');
     }
@@ -499,33 +586,34 @@ export class ConversationResponseController {
       );
     }
     const startResponse = runtime.start.bind(runtime);
-    const workflow = input.workflow
-      ? await this.requireReadyWorkflow(runtime, input)
+    let workflow = input.workflow
+      ? await step(() => this.requireReadyWorkflow(runtime, input))
       : undefined;
     const attachmentFileIds = input.attachmentFileIds ?? [];
     if (attachmentFileIds.length && !runtime.attachments) {
       throw new ConversationAttachmentError('attachment_unavailable', '附件读取服务尚未配置。');
     }
     const attachments = input.attachmentFileIds !== undefined
-      ? attachmentFileIds.length ? await runtime.attachments!.pin(attachmentFileIds) : []
+      ? attachmentFileIds.length ? await step(() => runtime.attachments!.pin(attachmentFileIds)) : []
       : undefined;
-    if (input.conversation) {
-      const active = await runtime.executions.listActive(input.conversation.conversationId);
-      if (active.length > 0) {
-        return failure(
-          'response_execution_in_progress',
-          'The conversation already has an active response execution'
-        );
-      }
-    }
     let conversation = input.conversation
-      ? await runtime.conversationService.get(
-          toConversationId(input.conversation.conversationId)
-        )
-      : await runtime.conversationService.create({
+      ? await step(() => runtime.conversationService.get(
+          toConversationId(input.conversation!.conversationId)
+        ))
+      : await step(() => runtime.conversationService.create({
           title: input.title,
           projectId: runtime.conversations.projectId
-        });
+        }));
+    if (input.agentNative && runtime.continuations?.validate) {
+      const replay = await step(() => runtime.continuations!.validate!({ conversation, input, signal }));
+      if (replay) return { ok: true, value: replay };
+    }
+    if (input.conversation) {
+      const active = await step(() => runtime.executions.listActive(input.conversation!.conversationId));
+      if (active.length > 0) return failure('response_execution_in_progress', 'The conversation already has an active response execution');
+    }
+    const blocked = await step(() => this.responseStartBlock(runtime, conversation.id, input.conversation?.editedMessageId));
+    if (blocked) return blocked;
     if (workflow) {
       if (
         !input.conversation ||
@@ -544,27 +632,27 @@ export class ConversationResponseController {
       }
     } else if (input.conversation) {
       conversation = input.conversation.editedMessageId
-        ? await runtime.conversationService.editCancelledUserMessage({
+        ? await step(() => runtime.conversationService.editCancelledUserMessage({
             conversationId: conversation.id,
-            expectedRevision: input.conversation.expectedRevision,
-            messageId: toMessageId(input.conversation.editedMessageId),
+            expectedRevision: input.conversation!.expectedRevision,
+            messageId: toMessageId(input.conversation!.editedMessageId!),
             content: input.content,
             ...(attachments ? { attachments } : {}),
             ...(input.displayContent !== undefined
               ? { displayContent: input.displayContent }
               : {})
-          })
-        : await runtime.conversationService.addUserMessage({
+          }))
+        : await step(() => runtime.conversationService.addUserMessage({
             conversationId: conversation.id,
-            expectedRevision: input.conversation.expectedRevision,
+            expectedRevision: input.conversation!.expectedRevision,
             content: input.content,
             ...(attachments ? { attachments } : {}),
             ...(input.displayContent !== undefined
               ? { displayContent: input.displayContent }
               : {})
-          });
+          }));
     } else {
-      conversation = await runtime.conversationService.addUserMessage({
+      conversation = await step(() => runtime.conversationService.addUserMessage({
         conversationId: conversation.id,
         expectedRevision: conversation.revision,
         content: input.content,
@@ -572,10 +660,10 @@ export class ConversationResponseController {
         ...(input.displayContent !== undefined
           ? { displayContent: input.displayContent }
           : {})
-      });
+      }));
     }
     const userMessage = workflow
-      ? conversation.messages.find((message) => message.id === workflow.sourceMessageId)
+      ? conversation.messages.find((message) => message.id === workflow!.sourceMessageId)
       : input.conversation?.editedMessageId
       ? conversation.messages.find(
           (message) => message.id === toMessageId(input.conversation!.editedMessageId!)
@@ -589,10 +677,31 @@ export class ConversationResponseController {
       return failure('project_not_open', 'The source project is no longer active');
     }
     let agentRun: ReturnType<typeof createConversationAgentRun> | undefined;
+    let agentSession: ConversationAgentSessionDto | undefined;
+    let parentRunId: string | undefined;
+    let reservedRunId: string | undefined;
+    let removeStartedCancellation: (() => void) | undefined;
     return withProductionTrace({ rootDirectory: session.rootDirectory, projectId: session.projectId,
       conversationId: conversation.id, sourceMessageId: userMessage.id, traceId: userMessage.id,
       clientCommandId: input.clientCommandId }, async () => {
     try {
+    if (input.agentNative && runtime.continuations) {
+      const preparedSession = await step(() => runtime.continuations!.prepare({
+        conversation, userMessageId: userMessage.id, input, signal
+      }));
+      agentSession = preparedSession.agentSession;
+      parentRunId = preparedSession.parentRunId;
+      reservedRunId = preparedSession.reservedRunId;
+      workflow = preparedSession.workflow;
+      if (preparedSession.waiting) {
+        return { ok: true, value: {
+          conversation: { ...toConversationDto(await runtime.conversationService.get(conversation.id)), agentSessions: [agentSession] },
+          agentSession, waiting: true
+        } };
+      }
+    } else if (input.continuation) {
+      return failure('continuation_not_available', 'The task continuation service is unavailable');
+    }
     // Fail locally before candidate authorization or provider dispatch. Factory
     // revalidates the pinned hashes immediately before forming provider messages.
     const attachmentQuery = conversationAttachmentQuery(workflow?.plan, userMessage);
@@ -602,35 +711,35 @@ export class ConversationResponseController {
     const isPageQuestion = input.agentNative ? false : workflow ? workflow.plan.kind === 'chat'
       : userMessage.displayContent === undefined || userMessage.displayContent === userMessage.content;
     const documentPageQuery = isPageQuestion ? attachmentQuery : undefined;
-    const toolSelection = documentPageQuery ? await runtime.documentTools?.select({
+    let toolSelection: ConversationDocumentToolSelection | undefined = documentPageQuery && runtime.documentTools ? await step(() => runtime.documentTools!.select({
       conversation, currentUserMessageId: userMessage.id, query: documentPageQuery
-    }) : undefined;
-    const pageReferences = documentPageQuery && !toolSelection ? await runtime.documentPages?.resolve({
+    })) : undefined;
+    const pageReferences = documentPageQuery && !toolSelection && runtime.documentPages ? await step(() => runtime.documentPages!.resolve({
       conversation, currentUserMessageId: userMessage.id, query: documentPageQuery
-    }) ?? [] : [];
-    if (!input.agentNative && !pageReferences.length && !toolSelection) await runtime.attachments?.resolve({
+    })) ?? [] : [];
+    if (!input.agentNative && !pageReferences.length && !toolSelection && runtime.attachments) await step(() => runtime.attachments!.resolve({
       conversation,
       currentUserMessageId: userMessage.id,
       query: attachmentQuery
-    });
+    }));
     const imageQuery = isPageQuestion && !toolSelection && !pageReferences.length && !declinesConversationImageInput(attachmentQuery) && (isConversationImageRequest(attachmentQuery) || conversationAttachmentBatch(conversation).some(item => isImageAttachment(item.fileName ?? ''))) ? attachmentQuery : undefined;
     const lastUserText = [...conversation.messages].reverse().find(m => m.role === 'user')?.content ?? '';
     const declinedSearch = declinesWebResearch(lastUserText);
     if (workflow && (declinedSearch || workflow.plan.sourcePolicy === 'internal')) {
-      await runtime.nativeSearch?.revoke(conversation.id);
+      if (runtime.nativeSearch) await step(() => runtime.nativeSearch!.revoke(conversation.id));
     }
     const localSources = Boolean(workflow?.plan.sourcePolicy === 'mixed' && runtime.nativeSearch &&
-      await runtime.nativeSearch.preferLocal(conversation, workflow));
+      await step(() => runtime.nativeSearch!.preferLocal(conversation, workflow!)));
     const prepareNativeSearch = Boolean(workflow && !toolSelection && runtime.nativeSearch && !declinedSearch && !localSources &&
-      (['web', 'mixed'].includes(workflow.plan.sourcePolicy) || await runtime.nativeSearch.allowsConversation(conversation.id)));
+      (['web', 'mixed'].includes(workflow.plan.sourcePolicy) || await step(() => runtime.nativeSearch!.allowsConversation(conversation.id))));
     if (workflow?.plan.kind === 'document' && !prepareNativeSearch) {
       // Persist source disclosure before pinning the conversation revision for
       // execution. This local reply is excluded from the model's history.
-      conversation = await runtime.conversationService.ensureLocalReply(conversation.id,
-        `sources-${workflow.id}-${workflow.revision}`,
+      conversation = await step(() => runtime.conversationService.ensureLocalReply(conversation.id,
+        `sources-${workflow!.id}-${workflow!.revision}`,
         localSources
           ? '已检索到本地资料，本次优先使用本地资料制作，不联网搜索；最新公开信息未联网核实。'
-          : '本次制作不联网搜索，将依据当前需求、可用资料和模型已有知识生成内容；最新数据、政策等信息未联网核实。');
+          : '本次制作不联网搜索，将依据当前需求、可用资料和模型已有知识生成内容；最新数据、政策等信息未联网核实。'));
     }
     let draft = createConversationResponseDraft({
       id: toConversationResponseDraftId(this.dependencies.nextResponseDraftId()),
@@ -653,20 +762,20 @@ export class ConversationResponseController {
       productFeature: input.productFeature,
       createdAt: toIsoTimestamp(this.now())
     });
-    await runtime.drafts.create(draft);
+    await step(() => runtime.drafts.create(draft));
     if (Object.keys(input.parameterValues).length > 0) {
       const parameterized = replaceConversationResponseParameterValues(
         draft,
         input.parameterValues as Readonly<Record<string, ParameterValue>>,
         toIsoTimestamp(this.now())
       );
-      await runtime.drafts.save(parameterized, draft.revision);
+      await step(() => runtime.drafts.save(parameterized, draft.revision));
       draft = parameterized;
     }
     if (input.contextSelections.length > 0) {
       const selections = [];
       for (const item of input.contextSelections) {
-        const context = await runtime.contexts.get(toProjectContextId(item.contextId));
+        const context = await step(() => runtime.contexts.get(toProjectContextId(item.contextId)));
         if (!context || context.projectId !== runtime.contexts.projectId) {
           return failure('context_not_found', 'The selected project context does not exist');
         }
@@ -681,79 +790,104 @@ export class ConversationResponseController {
         selections,
         toIsoTimestamp(this.now())
       );
-      await runtime.drafts.save(contextualized, draft.revision);
+      await step(() => runtime.drafts.save(contextualized, draft.revision));
       draft = contextualized;
     }
-    if (toolSelection) await runtime.documentTools!.pinDraft({ draft, selection: toolSelection });
+    if (runtime.documentTools?.prepare) {
+      toolSelection = await step(() => runtime.documentTools!.prepare!({ conversation, draft, signal })) ?? toolSelection;
+    }
+    if (toolSelection) await step(() => runtime.documentTools!.pinDraft({ draft, selection: toolSelection!, signal }));
     if (workflow && runtime.nativeSearch && prepareNativeSearch) {
-      const binding = await runtime.candidates.resolveBinding(subject(draft), input.candidateId);
+      const binding = await step(() => runtime.candidates.resolveBinding(subject(draft), input.candidateId));
       try {
-        await runtime.nativeSearch.prepare({ conversation, workflow, draft, candidate: binding.candidate });
+        await step(() => runtime.nativeSearch!.prepare({ conversation, workflow: workflow!, draft, candidate: binding.candidate }));
       } catch (error) {
         if (error instanceof NativeSearchAuthorizationError) return failure('native_search_authorization_required', '请在对话中回应联网提示。');
         throw error;
       }
     }
-    const prepared = await runtime.candidates.prepareSubmission({
+    const prepared = await step(() => runtime.candidates.prepareSubmission({
       subject: subject(draft),
       candidateId: input.candidateId
-    }).catch(error => {
+    })).catch(error => {
       if (imageQuery && error instanceof FeatureSubmissionError && error.code === 'candidate_unavailable') {
         throw new ConversationAttachmentError('attachment_unsupported', '当前所选模型或通道不能接收图片，请选择支持图片输入的模型后重新发送。');
       }
       throw error;
     });
-    if (input.agentNative && !workflow && runtime.agentRuns) {
+    if (input.agentNative && (!workflow || agentSession) && runtime.agentRuns) {
       agentRun = createConversationAgentRun({
-        id: toConversationAgentRunId(this.dependencies.nextAgentRunId?.() ?? `agent-run-${randomUUID()}`),
+        id: toConversationAgentRunId(reservedRunId ?? this.dependencies.nextAgentRunId?.() ?? `agent-run-${randomUUID()}`),
         projectId: runtime.conversations.projectId,
         conversationId: conversation.id,
         sourceMessageId: userMessage.id,
-        parentRunId: (await runtime.agentRuns.list(conversation.id))[0]?.id,
+        parentRunId: parentRunId ? toConversationAgentRunId(parentRunId)
+          : (await step(() => runtime.agentRuns!.list(conversation.id)))[0]?.id,
         createdAt: toIsoTimestamp(this.now())
       });
-      await runtime.agentRuns.create(agentRun);
+      await step(() => runtime.agentRuns!.create(agentRun!));
+      if (agentSession) await step(() => runtime.continuations!.bindRun({ sessionId: agentSession!.sessionId, runId: agentRun!.id }));
     }
-    await emitProductionEvent({ code: 'tool_authorization', status: 'completed',
-      facts: { purpose: 'content', count: input.contextSelections.length } });
+    await step(() => emitProductionEvent({ code: 'tool_authorization', status: 'completed',
+      facts: { purpose: 'content', count: input.contextSelections.length } }));
     const pendingExecutionId = workflow
       ? `pending:${input.clientCommandId}`
       : undefined;
     const executingWorkflow = workflow && pendingExecutionId
-      ? await runtime.workflowService!.beginExecution({
-          workflowId: workflow.id,
-          expectedRevision: workflow.revision,
+      ? await step(() => runtime.workflowService!.beginExecution({
+          workflowId: workflow!.id,
+          expectedRevision: workflow!.revision,
           executionId: pendingExecutionId
-        })
+        }))
       : undefined;
     let execution: ConversationResponseExecutionReadModelV1;
     try {
-      execution = await startResponse({
+      execution = await step(() => {
+        const pending = startResponse({
         subject: subject(draft),
         routeSelectionToken: prepared.routeSelectionToken,
         confirmation: {
           schemaVersion: 1,
           confirmationId: prepared.confirmation.confirmationId,
           confirmed: true
-        }
+        },
+        signal
+        });
+        void pending.then(late => {
+          if (isActiveExecutionState(late.state)) {
+            const cancelStarted = () => { void runtime.executionCoordinator.cancel(late.responseExecutionId).catch(() => undefined); };
+            if (signal.aborted) cancelStarted();
+            else {
+              signal.addEventListener('abort', cancelStarted, { once: true });
+              removeStartedCancellation = () => signal.removeEventListener('abort', cancelStarted);
+            }
+          }
+        }, () => undefined);
+        return pending;
       });
     } catch (error) {
       if (pendingExecutionId) {
-        await runtime.workflowService?.finishExecution(pendingExecutionId, 'failed');
+        await runtime.workflowService?.finishExecution(pendingExecutionId, signal.aborted ? 'cancelled' : 'failed');
       }
       throw error;
     }
     if (agentRun && runtime.agentRuns) {
       try {
+        if (agentSession) await runtime.continuations!.bindExecution({ sessionId: agentSession.sessionId, runId: agentRun.id,
+          responseExecutionId: execution.responseExecutionId });
+        const latestRun = await runtime.agentRuns.get(agentRun.id) ?? agentRun;
         const attached = attachConversationAgentRunExecution(
-          agentRun,
+          latestRun,
           execution.responseExecutionId,
           toIsoTimestamp(this.now())
         );
-        await runtime.agentRuns.save(attached, agentRun.revision);
+        if (attached !== latestRun) await runtime.agentRuns.save(attached, latestRun.revision);
         agentRun = attached;
         execution = await runtime.executions.readModel(execution.responseExecutionId);
-        if (['completed', 'failed', 'cancelled', 'interrupted'].includes(execution.state)) {
+        if (runtime.completion && !runtime.executionCoordinator.has(toConversationResponseExecutionId(execution.responseExecutionId))) {
+          const settled = await runtime.completion.settle(toConversationResponseExecutionId(execution.responseExecutionId));
+          if (settled) agentRun = settled.run;
+        } else if (!runtime.completion && ['completed', 'failed', 'cancelled', 'interrupted'].includes(execution.state)) {
           const settled = transitionConversationAgentRun(
             agentRun,
             execution.state === 'completed' ? 'completed' : execution.state === 'cancelled' ? 'cancelled' : 'failed',
@@ -795,21 +929,26 @@ export class ConversationResponseController {
       ok: true,
       value: {
         conversation: toConversationDto(latest),
-        execution: toResponseExecutionDto(execution)
+        execution: await this.executionDto(runtime, execution),
+        ...(agentSession ? { agentSession } : {})
       }
     };
     } catch (error) {
+      if (agentSession) await runtime.continuations?.abandon?.({ sessionId: agentSession.sessionId, cancelled: signal.aborted }).catch(this.dependencies.onError);
       if (agentRun && runtime.agentRuns) {
         try {
-          const failed = transitionConversationAgentRun(agentRun, 'failed', toIsoTimestamp(this.now()));
-          await runtime.agentRuns.save(failed, agentRun.revision);
+          const latest = await runtime.agentRuns.get(agentRun.id);
+          if (latest && !['completed', 'failed', 'cancelled'].includes(latest.status)) {
+            const failed = transitionConversationAgentRun(latest, signal.aborted ? 'cancelled' : 'failed', toIsoTimestamp(this.now()));
+            await runtime.agentRuns.save(failed, latest.revision);
+          }
         } catch (runError) {
           this.dependencies.onError?.(runError);
         }
       }
-      await emitProductionEvent({ code: 'task_complete', status: 'failed', facts: { purpose: 'content' } });
+      await emitProductionEvent({ code: 'task_complete', status: signal.aborted ? 'cancelled' : 'failed', facts: { purpose: 'content' } });
       throw error;
-    }
+    } finally { removeStartedCancellation?.(); }
     });
   }
 
@@ -866,6 +1005,94 @@ export class ConversationResponseController {
     return runtime;
   }
 
+  inspectReconciliation(request: unknown): Promise<ChatContextIpcResult<ReconciliationInspectionDto>> {
+    return this.inspectReconciliationCommand(request, false);
+  }
+
+  reconcileReconciliation(request: unknown): Promise<ChatContextIpcResult<ReconciliationInspectionDto>> {
+    return this.inspectReconciliationCommand(request, true);
+  }
+
+  acknowledgeReconciliation(request: unknown): Promise<ChatContextIpcResult<ConversationParentRunDto>> {
+    return this.execute(async () => {
+      const input = chatContextRequestParsers.acknowledgeReconciliation(request);
+      const runtime = await this.requireRuntime();
+      await runtime.refreshRecovery?.({ responseExecutionId: input.responseExecutionId });
+      if (input.projectId !== runtime.conversations.projectId) return failure('project_scope_mismatch', 'The reconciliation belongs to another project');
+      if (!input.confirmed) return failure('explicit_confirmation_required', 'Explicit confirmation is required');
+      if (!runtime.completion) return failure('runtime_not_allowed', 'Reconciliation is unavailable');
+      const pin = this.reconciliationInspections.get(input.inspectToken);
+      if (!pin || pin.expiresAt <= Date.now() || pin.projectId !== input.projectId || pin.responseExecutionId !== input.responseExecutionId ||
+          pin.runRevision !== input.expectedRunRevision) return failure('reconciliation_snapshot_changed', 'Inspect the latest task state before closing it');
+      const executionId = toConversationResponseExecutionId(input.responseExecutionId);
+      const snapshot = await runtime.completion.inspect(executionId);
+      if (!snapshot || snapshot.run.id !== pin.runId || snapshot.run.revision !== pin.runRevision ||
+          (snapshot.intent?.revision ?? null) !== pin.intentRevision || projectConversationParentRun(snapshot).state !== 'needs_reconciliation') {
+        return failure('reconciliation_snapshot_changed', 'The task changed after inspection');
+      }
+      this.reconciliationInspections.delete(input.inspectToken);
+      try {
+        const acknowledged = await runtime.completion.acknowledge(executionId, pin.runRevision, pin.intentRevision, pin.taskRevisions);
+        if (!acknowledged) return failure('response_execution_not_found', 'The task does not exist');
+        return { ok: true, value: projectConversationParentRun({ run: acknowledged.run, intent: acknowledged.intent, taskRevisions: pin.taskRevisions }) };
+      } catch (error) {
+        if (error instanceof ConversationCompletionError) return failure(error.code === 'entity_conflict' ? 'reconciliation_snapshot_changed' : 'response_reconciliation_required',
+          error.code === 'entity_conflict' ? 'The task changed after inspection' : 'Local settlement still needs reconciliation');
+        throw error;
+      }
+    });
+  }
+
+  private inspectReconciliationCommand(request: unknown, reconcile: boolean): Promise<ChatContextIpcResult<ReconciliationInspectionDto>> {
+    return this.execute(async () => {
+      const input = chatContextRequestParsers.responseReconciliation(request);
+      const runtime = await this.requireRuntime();
+      await runtime.refreshRecovery?.({ responseExecutionId: input.responseExecutionId });
+      if (input.projectId !== runtime.conversations.projectId) return failure('project_scope_mismatch', 'The reconciliation belongs to another project');
+      if (!runtime.completion) return failure('runtime_not_allowed', 'Reconciliation is unavailable');
+      const id = toConversationResponseExecutionId(input.responseExecutionId);
+      if (reconcile) await runtime.completion.reconcile(id);
+      const snapshot = await runtime.completion.inspect(id);
+      if (!snapshot) return failure('response_execution_not_found', 'The task does not exist');
+      const parentRun = projectConversationParentRun(snapshot);
+      if (parentRun.state !== 'needs_reconciliation') return { ok: true, value: { parentRun } };
+      for (const [token, pin] of this.reconciliationInspections) if (pin.expiresAt <= Date.now()) this.reconciliationInspections.delete(token);
+      if (this.reconciliationInspections.size >= 256) this.reconciliationInspections.delete(this.reconciliationInspections.keys().next().value!);
+      const inspectToken = `inspect-${randomUUID()}`;
+      const expiresAt = Date.now() + 120_000;
+      this.reconciliationInspections.set(inspectToken, { projectId: input.projectId, responseExecutionId: input.responseExecutionId,
+        runId: snapshot.run.id, runRevision: snapshot.run.revision, intentRevision: snapshot.intent?.revision ?? null, expiresAt,
+        taskRevisions: snapshot.taskRevisions });
+      return { ok: true, value: { parentRun, inspectToken, expiresAt: new Date(expiresAt).toISOString() } };
+    });
+  }
+
+  private assertStartScope(runtime: ConversationResponseControllerRuntime, signal: AbortSignal): void {
+    if (signal.aborted) throw new ResponseStartCancelledError();
+    const session = this.dependencies.getSession();
+    if (!session || session.projectId !== runtime.conversations.projectId) throw new ProjectNotOpenError();
+  }
+
+  private async executionDto(runtime: ConversationResponseControllerRuntime, execution: ConversationResponseExecutionReadModelV1): Promise<ConversationResponseExecutionDto> {
+    const snapshot = await runtime.completion?.inspect(toConversationResponseExecutionId(execution.responseExecutionId));
+    return { ...toResponseExecutionDto(execution), ...(snapshot ? { parentRun: projectConversationParentRun(snapshot) } : {}) };
+  }
+
+  private async responseStartBlock(runtime: ConversationResponseControllerRuntime, conversationId: string, editedMessageId?: string | null): Promise<ChatContextIpcResult<ConversationResponseStartDto> | undefined> {
+    if (runtime.completion) await runtime.executionCoordinator.waitForCompletedOperations(async id => {
+      const execution = await runtime.executions.readModel(id);
+      return execution.conversationId === conversationId && ['completed', 'failed', 'cancelled', 'interrupted'].includes(execution.state);
+    });
+    if (runtime.completion && !await runtime.completion.canStartNewResponse(toConversationId(conversationId))) {
+      return failure('response_reconciliation_required', 'The previous task must finish local settlement or be inspected before starting a new response');
+    }
+    if (editedMessageId && runtime.agentRuns && (await runtime.agentRuns.list(toConversationId(conversationId)))
+      .some(run => run.sourceMessageId === editedMessageId && run.reconciliationReason !== undefined)) {
+      return failure('response_reconciliation_required', 'An unknown original request must not be edited and replayed');
+    }
+    return undefined;
+  }
+
   private async requireDraft(
     runtime: ConversationResponseControllerRuntime,
     responseDraftId: string,
@@ -888,6 +1115,12 @@ export class ConversationResponseController {
       try {
         return await operation();
       } catch (error) {
+        if (error instanceof ConversationCompletionError) return failure<T>(error.code === 'entity_conflict'
+          ? 'reconciliation_snapshot_changed' : 'response_reconciliation_required', 'Execution settlement requires local reconciliation');
+        if (error instanceof ResponseStartCancelledError) return failure<T>('response_start_cancelled', 'Response preparation was stopped; existing execution facts are retained');
+        if (error instanceof ExecutionBudgetError) return failure<T>(error.code === 'cancelled' ? 'response_start_cancelled'
+          : error.code === 'timeout' ? 'response_execution_timeout' : 'response_execution_stopped',
+          '执行已停止，请查看执行记录；输入和已有作品保留。');
         if (error instanceof ProjectNotOpenError) {
           return failure<T>('project_not_open', 'A project must be open');
         }
@@ -902,6 +1135,30 @@ export class ConversationResponseController {
   private now(): string {
     return (this.dependencies.now ?? (() => new Date().toISOString()))();
   }
+}
+
+class ResponseStartCancelledError extends Error {
+  constructor() {
+    super('response_start_cancelled');
+    this.name = 'AbortError';
+  }
+}
+
+async function waitForResponseStart<T>(operation: () => Promise<T>, signal: AbortSignal, assertActive: () => void): Promise<T> {
+  assertActive();
+  let stop!: () => void;
+  const stopped = new Promise<never>((_, reject) => {
+    stop = () => reject(new ResponseStartCancelledError());
+    signal.addEventListener('abort', stop, { once: true });
+  });
+  try {
+    if (signal.aborted) throw new ResponseStartCancelledError();
+    const pending = Promise.resolve().then(() => { assertActive(); return operation(); });
+    void pending.catch(() => undefined);
+    const result = await Promise.race([pending, stopped]);
+    assertActive();
+    return result;
+  } finally { signal.removeEventListener('abort', stop); }
 }
 
 /**

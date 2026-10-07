@@ -31,12 +31,27 @@ import {
   SubmissionOrchestrationError
 } from '../providers';
 import { ConversationRequestSafetyError } from '../../application';
+import { ConversationAgentSessionError } from '../../application/conversation-agent-session-service';
+import { ConversationAgentSessionConflictError, ConversationAgentSessionStorageReconciliationError } from '../repositories/json-conversation-agent-session-repository';
+import { ExecutionBudgetError } from '../../application/execution-budget';
 
 export function chatContextFailure<T>(
   error: unknown,
   onError?: (error: unknown) => void
 ): ChatContextIpcResult<T> {
   onError?.(error);
+  if (error instanceof ConversationAgentSessionError) {
+    const messages = { session_not_found: '原任务不存在，请刷新会话。', scope_mismatch: '当前项目或会话已改变，请刷新后重试。',
+      continuation_invalid: '续接信息已改变，请刷新会话后重试。', session_not_waiting: '当前任务尚未进入可续接状态。',
+      reference_changed: '原任务引用的内容已改变，请重新发起任务。', lease_lost: '任务执行权已改变，请刷新会话。',
+      unknown_result: '原任务的执行结果尚未核对，暂时不能继续。', closed: '原任务已结束，请重新发起任务。', expired: '原任务已超时，请重新发起任务。' } as const;
+    return failure(error.code === 'expired' ? 'continuation_expired' : error.code === 'unknown_result' ? 'response_reconciliation_required'
+      : ['continuation_invalid', 'reference_changed', 'lease_lost', 'scope_mismatch'].includes(error.code) ? 'continuation_conflict' : 'continuation_not_available', messages[error.code]);
+  }
+  if (error instanceof ConversationAgentSessionConflictError) return failure('continuation_conflict', '任务状态或执行权已改变，请刷新会话后重试。');
+  if (error instanceof ConversationAgentSessionStorageReconciliationError) return failure('response_reconciliation_required', '任务记录需要核对，暂时不能继续。');
+  if (error instanceof ExecutionBudgetError) return failure(error.code === 'timeout' ? 'continuation_expired' : 'continuation_not_available',
+    error.code === 'timeout' ? '原任务已超时，请重新发起任务。' : error.code === 'cancelled' ? '任务已停止。' : '原任务的执行额度已用尽，请重新发起任务。');
   if (error instanceof ConversationAttachmentError) {
     return failure(error.code, error.message);
   }

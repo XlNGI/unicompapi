@@ -95,4 +95,28 @@ describe('conversation workflow IPC parsers', () => {
       credential: 'unsafe'
     })).toThrow('unexpected or missing fields');
   });
+
+  it('allows only versioned opaque Agent continuations in an existing conversation', () => {
+    const request = { clientCommandId: 'resume-command', conversation: { conversationId: 'conversation-1',
+      expectedRevision: 3, editedMessageId: null }, title: '继续', content: '补充的需求', productFeature: 'text_chat',
+      candidateId: 'candidate-1', contextSelections: [], parameterValues: {},
+      continuation: { sessionId: 'session-1', expectedRevision: 2, resumeToken: 'resume-token-1', action: 'reply' } };
+    expect(chatContextRequestParsers.startAgentResponse(request)).toMatchObject({ continuation: request.continuation });
+    expect(() => chatContextRequestParsers.startAgentResponse({ ...request, conversation: null })).toThrow();
+    expect(() => chatContextRequestParsers.startAgentResponse({ ...request,
+      conversation: { ...request.conversation, editedMessageId: 'message-1' } })).toThrow();
+    expect(() => chatContextRequestParsers.startResponse({ ...request, confirmed: true })).toThrow();
+    for (const extra of [{ budgetUnits: 1000 }, { ownerId: 'other-owner' }, { filePath: 'C:/private/input.json' }]) {
+      expect(() => chatContextRequestParsers.startAgentResponse({ ...request,
+        continuation: { ...request.continuation, ...extra } })).toThrow();
+    }
+    expect(() => chatContextRequestParsers.startAgentResponse({ ...request,
+      continuation: { ...request.continuation, action: 'restart' } })).toThrow();
+    expect(chatContextRequestParsers.cancelAgentSession({ projectId: 'project-1', sessionId: 'session-1', expectedRevision: 2 }))
+      .toEqual({ projectId: 'project-1', sessionId: 'session-1', expectedRevision: 2 });
+    expect(chatContextRequestParsers.cancelAgentSession({ projectId: 'project-1', sessionId: 'session-1', expectedRevision: 2, closeUnknown: true }))
+      .toEqual({ projectId: 'project-1', sessionId: 'session-1', expectedRevision: 2, closeUnknown: true });
+    expect(() => chatContextRequestParsers.cancelAgentSession({ projectId: 'project-1', sessionId: 'session-1', expectedRevision: 2, closeUnknown: 'true' })).toThrow();
+    expect(() => chatContextRequestParsers.cancelAgentSession({ projectId: 'project-1', sessionId: 'session-1', expectedRevision: 2, closeUnknown: true, budgetUnits: 1000 })).toThrow();
+  });
 });

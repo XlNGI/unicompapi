@@ -19,6 +19,7 @@ import { UNICOMPAPI_PROVIDER_PACKAGE_ID, UNICOMPAPI_ENDPOINT_POLICY_ID } from '.
 import { kimiK3TextChatParameterSchema, KIMI_PROVIDER_PACKAGE_ID, KIMI_ENDPOINT_POLICY_ID } from '../../src/platform/providers/kimi/kimi-contracts';
 import { uniCompApiTextChatParameterSchema } from '../../src/platform/providers/newapi/unicompapi-model-capabilities';
 import { NewApiRuntimeError } from '../../src/platform/providers/newapi/newapi-runtime';
+import { executionStopReasons, executionTimeoutScopes } from '../../src/shared/conversation-production-ipc';
 
 afterEach(() => vi.restoreAllMocks());
 
@@ -303,6 +304,26 @@ describe('controlled conversation semantic classifier', () => {
     await expect(f.classifier.classify({ rawText: '做 PPT', context: { semanticCandidate: f.selection }, signal: new AbortController().signal })).rejects.toThrow('classification_invalid_response');
     expect(f.auditEvents.at(-1)).toMatchObject({ type: 'failed', safeCode: failureCode });
   });
+
+  it.each(['newapi', 'deepseek'].flatMap(provider => [
+    ...executionStopReasons.map(reason => `${provider}.tool_loop_${reason}`),
+    ...executionTimeoutScopes.map(scope => `${provider}.${scope}_timeout`)
+  ]))('retains the enumerated execution diagnostic %s without model text', async failureCode => {
+    const f = fixture({ failureCode });
+    await expect(f.classifier.classify({ rawText: '本地合成需求', context: { semanticCandidate: f.selection },
+      signal: new AbortController().signal })).rejects.toThrow();
+    expect(f.auditEvents.at(-1)).toMatchObject({ type: failureCode.endsWith('_unknown_result') ? 'outcome_unknown' : 'failed', safeCode: failureCode });
+    expect(JSON.stringify(f.auditEvents)).not.toMatch(/本地合成需求|synthetic-test-key|private reasoning/);
+  });
+
+  it.each(['newapi.tool_loop_private_prompt', 'deepseek.execution_timeout.private_token', 'newapi.tool_loop_unknown_result: C:/private'])
+    ('does not accept arbitrary execution diagnostic %s', async failureCode => {
+      const f = fixture({ failureCode });
+      await expect(f.classifier.classify({ rawText: '本地合成需求', context: { semanticCandidate: f.selection },
+        signal: new AbortController().signal })).rejects.toThrow();
+      expect(f.auditEvents.at(-1)).toMatchObject({ type: 'outcome_unknown', safeCode: 'semantic.outcome_unknown' });
+      expect(JSON.stringify(f.auditEvents)).not.toMatch(/private_prompt|private_token|C:\/private/);
+    });
 
   it('does not persist arbitrary adapter diagnostics as safe codes', async () => {
     const f = fixture({ failureCode: 'newapi.invalid_response.private_payload' });

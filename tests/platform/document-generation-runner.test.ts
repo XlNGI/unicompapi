@@ -27,6 +27,7 @@ import {
 } from '../../src/platform';
 import { toExecutionId, toFileReferenceId, toProjectId, toTaskId, toWorkId } from '../../src/domain';
 import type { DocumentGenerationProgressEvent } from '../../src/application/document-generation-service';
+import type { PresentationPageRequirement } from '../../src/domain/entities/presentation-page-requirement';
 
 const temporaryRoots: string[] = [];
 
@@ -181,7 +182,7 @@ describe('document generation runner', () => {
       'document-file-write:started', 'document-file-write:completed',
       'document-output-structure:started', 'document-output-structure:completed',
       'document-preview-render:started', 'document-preview-render:completed',
-      'document-render-diagnostics:started', 'document-render-diagnostics:completed',
+      'document-render-diagnostics:completed',
       'document-temporary-hash:started', 'document-temporary-hash:completed',
       'document-atomic-publish:started', 'document-atomic-publish:completed',
       'document-published-hash:started', 'document-published-hash:completed',
@@ -450,6 +451,7 @@ describe('document generation runner', () => {
       sourceDraftId: 'ppt-exact-page-count',
       outline: exactOutline,
       requestedTotalPages: 5,
+      pageRequirement: { mode: 'exact', targetPages: 5, countBasis: 'total' },
       presentationTemplate: 'work_report'
     });
 
@@ -480,6 +482,7 @@ describe('document generation runner', () => {
       sourceDraftId: 'ppt-page-count-mismatch',
       outline: presentationOutline,
       requestedTotalPages: 5,
+      pageRequirement: { mode: 'exact', targetPages: 5, countBasis: 'total' },
       presentationTemplate: 'work_report'
     })).rejects.toMatchObject({ code: 'page_count_mismatch' });
 
@@ -489,6 +492,131 @@ describe('document generation runner', () => {
     );
     expect(await works.list(projectId)).toEqual([]);
     expect(await documentFiles(rootDirectory)).toEqual([]);
+  });
+
+  it('publishes a verified target deviation and rejects those same PPT bytes when exactness is required', async () => {
+    const rootDirectory = await createProjectRoot();
+    const projectId = toProjectId('doc-project-page-count-target');
+    const events: DocumentGenerationProgressEvent[] = [];
+    const generate = vi.fn(generateTemporaryDocumentFile);
+    const render = vi.fn(async (temporaryPath: string) => {
+      const zip = await JSZip.loadAsync(await readFile(temporaryPath));
+      expect(Object.keys(zip.files).filter(name => /^ppt\/slides\/slide\d+\.xml$/u.test(name))).toHaveLength(3);
+      return { previewCount: 3, diagnostics: [] };
+    });
+    const runner = new DocumentGenerationRunner({ rootDirectory, projectId,
+      generateTemporaryFile: generate, renderPreview: render, requireRenderForPpt: true });
+    const input = { kind: 'ppt' as const, title: presentationOutline.title,
+      contentFingerprint: '6'.repeat(64), draftRevision: 1, sourceDraftId: 'ppt-page-count-target',
+      outline: presentationOutline, requestedTotalPages: 5,
+      onProgress: (event: DocumentGenerationProgressEvent) => { events.push(event); } };
+    const result = await runner.run(input);
+    expect(result.execution.state).toBe('completed');
+    expect(result.file.checksumSha256).toMatch(/^[a-f0-9]{64}$/u);
+    expect(result.pageCountAssessment).toMatchObject({ mode: 'target', countBasis: 'total',
+      targetPages: 5, actualPages: 3, actualTotalPages: 3, satisfied: false, blocking: false });
+    expect(events).toContainEqual(expect.objectContaining({ code: 'document_check', status: 'completed',
+      operationId: 'presentation-page-count', facts: expect.objectContaining({ totalPages: 3, requestedPages: 5,
+        pageCountMode: 'target', pageCountBasis: 'total', diagnosticCode: 'page_count_deviation' }) }));
+    expect(events.map(event => event.operationId)).toContain('document-published-hash');
+    expect(events.map(event => event.operationId)).toContain('document-work-register');
+    const cached = await runner.run(input);
+    expect(cached.work.id).toBe(result.work.id);
+    expect(cached.pageCountAssessment).toEqual(result.pageCountAssessment);
+    await expect(runner.run({ ...input,
+      pageRequirement: { mode: 'exact', targetPages: 5, countBasis: 'total' }
+    })).rejects.toMatchObject({ code: 'page_count_mismatch', message: expect.stringContaining('3 页') });
+    expect(generate).toHaveBeenCalledTimes(1);
+    expect(render).toHaveBeenCalledTimes(1);
+    expect(await new JsonWorkRepository(new NodeProjectStorage(rootDirectory), projectId).list(projectId)).toHaveLength(1);
+    expect(await documentFiles(rootDirectory)).toHaveLength(1);
+    expect(await persistedExecutionStates(rootDirectory)).toEqual(['completed']);
+  });
+
+  it.each([
+    { requirement: { mode: 'max', targetPages: 3, maximumPages: 4, countBasis: 'total' }, sections: 1, accepted: true },
+    { requirement: { mode: 'max', targetPages: 3, maximumPages: 4, countBasis: 'total' }, sections: 3, accepted: false },
+    { requirement: { mode: 'range', targetPages: 4, minimumPages: 3, maximumPages: 5, countBasis: 'total' }, sections: 1, accepted: true },
+    { requirement: { mode: 'range', targetPages: 4, minimumPages: 4, maximumPages: 5, countBasis: 'total' }, sections: 1, accepted: false },
+    { requirement: { mode: 'range', targetPages: 4, minimumPages: 3, maximumPages: 4, countBasis: 'total' }, sections: 3, accepted: false },
+    { requirement: { mode: 'exact', targetPages: 1, countBasis: 'content' }, sections: 1, accepted: true }
+  ] satisfies readonly { requirement: PresentationPageRequirement; sections: number; accepted: boolean }[])(
+    'applies explicit $requirement.mode bounds using $requirement.countBasis counts (sections=$sections, accepted=$accepted)',
+    async ({ requirement, sections, accepted }) => {
+      const rootDirectory = await createProjectRoot();
+      const projectId = toProjectId('doc-project-page-count-bounds');
+      const boundedOutline = parseDocumentOutline(JSON.stringify({ kind: 'ppt', title: '受控页数',
+        sections: Array.from({ length: sections }, (_, index) => ({ heading: `结论 ${index + 1}`, level: 1,
+          blocks: [{ type: 'paragraph', text: `正文事实 ${index + 1}` }] })) }));
+      const events: DocumentGenerationProgressEvent[] = [];
+      const runner = new DocumentGenerationRunner({ rootDirectory, projectId });
+      const run = runner.run({ kind: 'ppt', title: boundedOutline.title, contentFingerprint: '5'.repeat(64),
+        draftRevision: 1, sourceDraftId: 'ppt-page-count-bounds', outline: boundedOutline,
+        requestedTotalPages: 40, pageRequirement: requirement,
+        onProgress: event => { events.push(event); } });
+      if (accepted) {
+        const result = await run;
+        expect(result.execution.state).toBe('completed');
+        expect(result.pageCountAssessment).toMatchObject({ mode: requirement.mode, countBasis: requirement.countBasis,
+          targetPages: requirement.targetPages, actualTotalPages: sections + 2, satisfied: true, blocking: false });
+        expect(await documentFiles(rootDirectory)).toHaveLength(1);
+      } else {
+        await expect(run).rejects.toMatchObject({ code: 'page_count_mismatch' });
+        expect(events).toContainEqual(expect.objectContaining({ operationId: 'presentation-page-count', status: 'failed' }));
+        expect(events.map(event => event.operationId)).not.toContain('document-atomic-publish');
+        expect(await documentFiles(rootDirectory)).toEqual([]);
+        expect(await new JsonWorkRepository(new NodeProjectStorage(rootDirectory), projectId).list(projectId)).toEqual([]);
+      }
+    }
+  );
+
+  it.each([0, 2, 41, 3.5, Number.NaN])('rejects an invalid legacy planning target %s before generating files', async requestedTotalPages => {
+    const rootDirectory = await createProjectRoot();
+    const generate = vi.fn(generateTemporaryDocumentFile);
+    const runner = new DocumentGenerationRunner({ rootDirectory, projectId: toProjectId('doc-invalid-target'),
+      generateTemporaryFile: generate });
+    await expect(runner.run({ kind: 'ppt', title: presentationOutline.title, contentFingerprint: '2'.repeat(64),
+      draftRevision: 1, sourceDraftId: 'invalid-target', outline: presentationOutline, requestedTotalPages
+    })).rejects.toMatchObject({ code: 'invalid_plan' });
+    expect(generate).not.toHaveBeenCalled();
+    expect(await persistedExecutionStates(rootDirectory)).toEqual([]);
+    expect(await documentFiles(rootDirectory)).toEqual([]);
+  });
+
+  it.each([
+    { mode: 'max', targetPages: 3, maximumPages: 41, countBasis: 'total' },
+    { mode: 'range', targetPages: 3, minimumPages: 4, maximumPages: 5, countBasis: 'total' },
+    { mode: 'max', targetPages: 1, maximumPages: 39, countBasis: 'content' },
+    { mode: 'exact', targetPages: 3, maximumPages: 4, countBasis: 'total' },
+    null
+  ])('rejects malformed or unbounded host page requirements before generating files: %s', async raw => {
+    const rootDirectory = await createProjectRoot();
+    const generate = vi.fn(generateTemporaryDocumentFile);
+    const runner = new DocumentGenerationRunner({ rootDirectory, projectId: toProjectId('doc-invalid-requirement'),
+      generateTemporaryFile: generate });
+    await expect(runner.run({ kind: 'ppt', title: presentationOutline.title, contentFingerprint: '2'.repeat(64),
+      draftRevision: 1, sourceDraftId: 'invalid-requirement', outline: presentationOutline,
+      pageRequirement: raw as PresentationPageRequirement
+    })).rejects.toMatchObject({ code: 'invalid_plan' });
+    expect(generate).not.toHaveBeenCalled();
+    expect(await documentFiles(rootDirectory)).toEqual([]);
+  });
+
+  it.each(['content', 'render'] as const)('keeps %s QA blocking when an ordinary page target deviates', async failure => {
+    const rootDirectory = await createProjectRoot();
+    const projectId = toProjectId('doc-target-quality-gates');
+    const runner = new DocumentGenerationRunner({ rootDirectory, projectId, requireRenderForPpt: true,
+      generateTemporaryFile: input => generateTemporaryDocumentFile(failure === 'content' ? { ...input,
+        outline: { ...input.outline, sections: [{ heading: '不相关章节', level: 1,
+          blocks: [{ type: 'paragraph', text: '不相关内容' }] }] } } : input),
+      renderPreview: async () => ({ previewCount: 3, diagnostics: failure === 'render'
+        ? [{ code: 'text_overflow' as const, severity: 'error' as const, scope: 'page', message: 'overflow' }] : [] })
+    });
+    await expect(runner.run({ kind: 'ppt', title: presentationOutline.title, contentFingerprint: '3'.repeat(64),
+      draftRevision: 1, sourceDraftId: 'target-quality-gates', outline: presentationOutline, requestedTotalPages: 5
+    })).rejects.toMatchObject({ code: 'verification_failed' });
+    expect(await documentFiles(rootDirectory)).toEqual([]);
+    expect(await new JsonWorkRepository(new NodeProjectStorage(rootDirectory), projectId).list(projectId)).toEqual([]);
   });
 
   it('publishes a real scoped parent revision and preserves non-target sections', async () => {

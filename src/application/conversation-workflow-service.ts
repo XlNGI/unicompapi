@@ -442,11 +442,13 @@ export class ConversationWorkflowService {
     }
   }
 
-  async recoverInterruptedExecutions(): Promise<number> {
+  async recoverInterruptedExecutions(canRecover?: (workflow: ConversationWorkflowV1) => Promise<boolean>): Promise<number> {
     const executing = (await this.repository.list()).filter(
       (workflow) => workflow.status === 'executing'
     );
+    let recovered = 0;
     for (const workflow of executing) {
+      if (canRecover && !await canRecover(workflow)) continue;
       const failed = updateConversationWorkflow(workflow, {
         status: 'failed',
         ...(workflow.deliveries ? { deliveries: workflow.deliveries.map((item) => item.status === 'executing'
@@ -455,8 +457,9 @@ export class ConversationWorkflowService {
         updatedAt: toIsoTimestamp(this.now())
       });
       await this.repository.save(failed, workflow.revision);
+      recovered += 1;
     }
-    return executing.length;
+    return recovered;
   }
 
   private async require(id: ConversationWorkflowId, expectedRevision: number): Promise<ConversationWorkflowV1> {

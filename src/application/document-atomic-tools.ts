@@ -17,6 +17,8 @@ export interface DocumentAtomicExecutionContext extends ToolExecutionContext {
 export interface DocumentAtomicToolBinding {
   readonly contract: CanonicalToolContract;
   authorize(args: CanonicalToolArguments, context: DocumentAtomicExecutionContext): Promise<boolean>;
+  /** Pure Host validation. A known refusal is returned before any write-ahead claim or execution charge. */
+  preflight?(args: CanonicalToolArguments, context: DocumentAtomicExecutionContext): Promise<DocumentToolResult | undefined>;
   execute(args: CanonicalToolArguments, context: DocumentAtomicExecutionContext): Promise<DocumentToolResult>;
 }
 

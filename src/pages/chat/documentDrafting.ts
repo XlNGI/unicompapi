@@ -1,9 +1,10 @@
 import type { PresentationTemplateId } from '../../shared/document-generation-ipc';
 import {
   isSupportedPresentationTotalPages,
-  parseRequestedPresentationTotalPages,
+  parsePresentationPageRequirement,
   presentationBodySectionCount
 } from '../../application/presentation-page-count';
+import { presentationPlanningTotalPages, presentationDocumentPageLimits } from '../../domain';
 import {
   buildDocumentOutlinePrompt,
   type OutlineDocumentKind
@@ -118,14 +119,17 @@ export function composeDocumentRevisionInput(
   requirements: string,
   kind?: 'word' | 'excel' | 'ppt'
 ): string {
-  const requestedTotalPages =
+  const pageRequirement =
     kind === 'ppt'
-      ? parseRequestedPresentationTotalPages(requirements)
+      ? parsePresentationPageRequirement(requirements)
       : undefined;
+  const requestedTotalPages = pageRequirement ? presentationPlanningTotalPages(pageRequirement) : undefined;
   const pageCountConstraint =
     requestedTotalPages !== undefined &&
     isSupportedPresentationTotalPages(requestedTotalPages)
-      ? `\n\nPPT 总页数硬性约束：\n- 用户要求总页数恰好为 ${requestedTotalPages} 页，包含系统另行生成的 1 页封面和 1 页结束页。\n- sections 必须恰好包含 ${presentationBodySectionCount(requestedTotalPages)} 个正文分节，不得输出封面、结束页或致谢 section。\n- 每个 section 必须控制为 1 页：正文最多 4 个内容组，takeaway 和 action 各不超过 90 字；表格最多 5 列、7 行。不要用重复页或碎片页凑页数。`
+      ? pageRequirement?.mode === 'exact'
+        ? `\n\nPPT 总页数硬性约束：\n- 用户要求总页数恰好为 ${requestedTotalPages} 页，包含系统另行生成的 1 页封面和 1 页结束页。\n- sections 必须恰好包含 ${presentationBodySectionCount(requestedTotalPages)} 个正文分节，不得输出封面、结束页或致谢 section。\n- 每个 section 必须控制为 1 页：正文最多 4 个内容组，takeaway 和 action 各不超过 90 字；表格最多 5 列、7 行。不要用重复页或碎片页凑页数。`
+        : `\n\nPPT 页数规划：\n- 以约 ${requestedTotalPages} 页总页数为规划目标，包含系统生成的封面和结束页；正文按约 ${presentationBodySectionCount(requestedTotalPages)} 个分节组织。\n- 普通页数目标允许根据内容和排版调整实际页数，不是必须恰好相等的验收条件；保留完整事实与可读性，不因目标偏差重复生成或删减必要内容。\n${pageRequirement?.mode === 'max' ? `- 用户明确要求总页数不超过 ${requestedTotalPages} 页。\n` : pageRequirement?.mode === 'range' ? `- 用户明确要求总页数在 ${pageRequirement.minimumPages! + (pageRequirement.countBasis === 'content' ? presentationDocumentPageLimits.systemGeneratedPages : 0)} 至 ${pageRequirement.maximumPages! + (pageRequirement.countBasis === 'content' ? presentationDocumentPageLimits.systemGeneratedPages : 0)} 页范围内。\n` : ''}- sections 不填写系统封面、结束页或致谢页，不通过重复页凑数。`
       : '';
   const isFullPresentationRevision =
     previousContent !== undefined &&
@@ -169,7 +173,7 @@ export function extractSectionHeadings(
 export function documentKindInstruction(kind: OutlineDocumentKind): string {
   if (kind === 'ppt') {
     return [
-      '这是 PPT 文档：每页表达一个明确结论，并用 3 至 5 个内容组支撑。每个内容组必须包含短标题和解释文字；不要用只有几个词的空泛要点。用户明确要求总页数时，必须服从前文的精确页数与单页容量约束。',
+      '这是 PPT 文档：每页表达一个明确结论，并用 3 至 5 个内容组支撑。每个内容组必须包含短标题和解释文字；不要用只有几个词的空泛要点。普通页数是规划目标；用户明确要求必须恰好、范围或上限时才使用相应的严格页数约束。',
       '封面和结束页由系统统一生成；sections 只填写正文内容。不要把“封面”“谢谢”“谢谢观看”“感谢观看”作为正文 section，也不要把表格或图表挂在致谢页下。用户明确要求页数时，按总页数预算组织内容，避免通过重复页或碎片页凑页数。',
       '页面的构图、留白、信息层级和视觉节奏由你自主设计，不要套用固定模板。text 元素的 content 必须来自同一页的标题、takeaway、action 或 blocks 原文；用 shape 和 line 组织视觉层级，不要把所有内容排成相同的卡片网格。',
       buildDocumentOutlinePrompt('ppt'),

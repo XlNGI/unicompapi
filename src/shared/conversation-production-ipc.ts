@@ -11,6 +11,10 @@ export const productionEventCodes = [
 ] as const;
 export type ProductionEventCode = (typeof productionEventCodes)[number];
 export type ProductionEventStatus = 'started' | 'progress' | 'completed' | 'failed' | 'cancelled';
+export const executionStopReasons = ['timeout', 'cancelled', 'tool_call_limit', 'budget_exceeded',
+  'failure_limit', 'no_progress', 'unknown_result'] as const;
+export const executionTimeoutScopes = ['execution', 'prepare', 'model', 'tool', 'design', 'repair',
+  'render', 'check', 'publish', 'register'] as const;
 export interface ProductionEventFacts {
   readonly purpose?: 'planning' | 'content' | 'repair' | 'tool' | 'source_summary';
   readonly documentKind?: 'word' | 'excel' | 'ppt';
@@ -22,10 +26,22 @@ export interface ProductionEventFacts {
   readonly count?: number;
   readonly pageNumber?: number;
   readonly totalPages?: number;
+  readonly requestedPages?: number;
+  readonly pageCountMode?: 'target' | 'exact' | 'max' | 'range';
+  readonly pageCountBasis?: 'total' | 'content';
   readonly bytes?: number;
   readonly missingCount?: number;
   readonly sectionCount?: number;
   readonly contentCharacters?: number;
+  readonly stopReason?: (typeof executionStopReasons)[number];
+  readonly timeoutScope?: (typeof executionTimeoutScopes)[number];
+  readonly parentElapsedMs?: number;
+  readonly parentRemainingMs?: number;
+  readonly childElapsedMs?: number;
+  readonly childRemainingMs?: number;
+  readonly toolCallsUsed?: number;
+  /** Host scheduling units, never currency or a Provider charge. */
+  readonly costUnitsUsed?: number;
   readonly designPath?: 'design-aware' | 'legacy-fallback';
   readonly fallbackReason?: string;
   readonly artDirectionStatus?: 'validated' | 'invalid' | 'missing';
@@ -56,6 +72,10 @@ export interface ProductionTraceEventDto {
   readonly assistantMessageId?: string;
   readonly clientCommandId?: string;
   readonly sequence: number;
+  /** Host canonical identity; the project-wide sequence remains the legacy replay cursor. */
+  readonly runId?: string;
+  readonly runEventId?: string;
+  readonly runSequence?: number;
   readonly code: ProductionEventCode;
   readonly status: ProductionEventStatus;
   readonly operationId?: string;
@@ -96,6 +116,10 @@ export function parseProductionEventFacts(input: unknown): ProductionEventFacts 
     errorCode: ['TOOL_PRECONDITION_FAILED', 'OUTLINE_INVALID'],
     tool: ['read_sources', 'search', 'analyze', 'write_document', 'render', 'check', 'publish', 'patch'],
     designPath: ['design-aware', 'legacy-fallback'],
+    pageCountMode: ['target', 'exact', 'max', 'range'],
+    pageCountBasis: ['total', 'content'],
+    stopReason: executionStopReasons,
+    timeoutScope: executionTimeoutScopes,
     artDirectionStatus: ['validated', 'invalid', 'missing'],
     designIrStatus: ['validated', 'invalid', 'missing'],
     layoutStatus: ['success', 'failed', 'skipped'],
@@ -108,7 +132,8 @@ export function parseProductionEventFacts(input: unknown): ProductionEventFacts 
     whitespace: ['minimal', 'balanced', 'generous'],
     primaryRegion: ['left', 'center', 'right', 'top', 'bottom', 'leading', 'trailing', 'supporting']
   };
-  const counts = ['count', 'pageNumber', 'totalPages', 'bytes', 'missingCount', 'sectionCount', 'contentCharacters', 'elementCount', 'repairCount'];
+  const counts = ['count', 'pageNumber', 'totalPages', 'requestedPages', 'bytes', 'missingCount', 'sectionCount', 'contentCharacters', 'elementCount', 'repairCount',
+    'parentElapsedMs', 'parentRemainingMs', 'childElapsedMs', 'childRemainingMs', 'toolCallsUsed', 'costUnitsUsed'];
   const result: Record<string, string | number | boolean> = {};
   for (const [key, value] of Object.entries(input)) {
     if (enums[key]?.includes(value as string)) result[key] = value as string;
@@ -128,19 +153,32 @@ export function parseProductionTraceEvent(input: unknown): ProductionTraceEventD
   if (typeof input !== 'object' || input === null || Array.isArray(input)) throw new TypeError('Invalid production event');
   const item = input as Record<string, unknown>;
   const allowed = ['schemaVersion', 'projectId', 'conversationId', 'sourceMessageId', 'traceId', 'assistantMessageId',
-    'clientCommandId', 'sequence', 'code', 'status', 'operationId', 'facts', 'occurredAt'];
+    'clientCommandId', 'sequence', 'runId', 'runEventId', 'runSequence', 'code', 'status', 'operationId', 'facts', 'occurredAt'];
   if (Object.keys(item).some((key) => !allowed.includes(key)) || item.schemaVersion !== 1 ||
     !Number.isSafeInteger(item.sequence) || Number(item.sequence) < 1 ||
     !productionEventCodes.includes(item.code as ProductionEventCode) ||
     !['started', 'progress', 'completed', 'failed', 'cancelled'].includes(item.status as string) ||
     typeof item.occurredAt !== 'string' || !Number.isFinite(Date.parse(item.occurredAt))) throw new TypeError('Invalid production event');
+  const canonical = ['runId', 'runEventId', 'runSequence'].filter((key) => item[key] !== undefined);
+  if (canonical.length !== 0 && (canonical.length !== 3 || !Number.isSafeInteger(item.runSequence) || Number(item.runSequence) < 1)) {
+    throw new TypeError('Invalid canonical production event');
+  }
   return {
     schemaVersion: 1, projectId: productionTraceIdentifier(item.projectId), conversationId: productionTraceIdentifier(item.conversationId),
     sourceMessageId: productionTraceIdentifier(item.sourceMessageId), traceId: productionTraceIdentifier(item.traceId),
     ...(item.assistantMessageId !== undefined ? { assistantMessageId: productionTraceIdentifier(item.assistantMessageId) } : {}),
     ...(item.clientCommandId !== undefined ? { clientCommandId: productionTraceIdentifier(item.clientCommandId) } : {}),
+    ...(canonical.length ? { runId: productionTraceIdentifier(item.runId), runEventId: productionTraceIdentifier(item.runEventId),
+      runSequence: item.runSequence as number } : {}),
     sequence: item.sequence as number, code: item.code as ProductionEventCode, status: item.status as ProductionEventStatus,
     ...(item.operationId !== undefined ? { operationId: productionTraceIdentifier(item.operationId) } : {}),
     ...(item.facts !== undefined ? { facts: parseProductionEventFacts(item.facts) } : {}), occurredAt: item.occurredAt
   };
+}
+
+/** Stable across outbox replay while legacy trace records retain their existing identity. */
+export function productionTraceEventIdentity(event: ProductionTraceEventDto): string {
+  return event.runId && event.runEventId
+    ? `canonical:${JSON.stringify([event.projectId, event.conversationId, event.runId, event.runEventId])}`
+    : `${event.conversationId}:${event.sequence}`;
 }

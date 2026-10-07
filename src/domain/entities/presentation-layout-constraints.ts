@@ -75,6 +75,7 @@ export interface PresentationPageFeatures {
   readonly dominantPrimaryContent?: string;
   readonly contentDensity: PresentationLayoutDensity;
   readonly units: readonly PresentationPageContentUnitFeature[];
+  readonly contentOrganization?: ResolvedPresentationContentOrganization;
 }
 
 export interface PresentationLayoutCanvas {
@@ -107,6 +108,19 @@ export interface PresentationLayoutThemeTokens {
   readonly typography: PresentationLayoutTypographyTokens;
   readonly spacing: PresentationLayoutSpacingTokens;
   readonly colors: PresentationLayoutColorTokens;
+}
+
+/** Host-expanded renderable aliases; business groups cannot own the generated footer. */
+export interface ResolvedPresentationContentOrganization {
+  readonly schemaVersion: 1;
+  readonly source: 'explicit' | 'inferred';
+  readonly layout: 'comparison' | 'metrics' | 'sequence' | 'evidence' | 'grouped';
+  readonly groups: readonly {
+    readonly groupId: string;
+    readonly role: 'header' | 'comparison-side' | 'metric' | 'step' | 'evidence' | 'content' | 'supporting';
+    readonly sourceRefs: readonly string[];
+  }[];
+  readonly relationships: readonly { readonly kind: 'compare' | 'sequence' | 'supports'; readonly fromGroupId: string; readonly toGroupId: string }[];
 }
 
 /** Page-level limits describe available extents and insets, not element placement. */
@@ -144,6 +158,7 @@ export interface PresentationPageConstraint {
   readonly maximumElementCount: number;
   readonly elements: readonly PresentationElementConstraint[];
   readonly relationships: readonly PresentationRelationshipConstraint[];
+  readonly contentOrganization?: ResolvedPresentationContentOrganization;
 }
 
 export interface PresentationElementConstraint {
@@ -239,7 +254,7 @@ export function validatePresentationLayoutConstraintModel(
     value.pages.forEach((page, index) => {
       const pagePath = `$.pages[${index}]`;
       if (!isRecord(page)) { diagnostics.push(issue('invalid_shape', pagePath, 'page must be an object')); return; }
-      checkKeys(page, ['pageNumber', 'pageRole', 'pageIntent', 'designIntent', 'density', 'contentDensity', 'safeArea', 'contentBounds', 'minimumGap', 'preferredGap', 'maximumElementCount', 'elements', 'relationships'], pagePath, diagnostics);
+      checkKeys(page, ['pageNumber', 'pageRole', 'pageIntent', 'designIntent', 'density', 'contentDensity', 'safeArea', 'contentBounds', 'minimumGap', 'preferredGap', 'maximumElementCount', 'elements', 'relationships', 'contentOrganization'], pagePath, diagnostics, ['contentOrganization']);
       if (!isIntegerInRange(page.pageNumber, 1, MAX_PAGES)) diagnostics.push(issue('invalid_value', `${pagePath}.pageNumber`, 'pageNumber is out of range'));
       else pageNumbers.push(page.pageNumber);
       if (typeof page.pageRole !== 'string' || !enumHas(['hero', 'statement', 'comparison', 'metric', 'process', 'evidence', 'section', 'content', 'closing'], page.pageRole)) diagnostics.push(issue('invalid_value', `${pagePath}.pageRole`, 'pageRole is invalid'));
@@ -253,6 +268,7 @@ export function validatePresentationLayoutConstraintModel(
       if (!Array.isArray(page.relationships) || page.relationships.length > MAX_ELEMENTS_PER_PAGE * 2) diagnostics.push(issue('invalid_shape', `${pagePath}.relationships`, 'relationships must be a bounded array'));
       else page.relationships.forEach((relationship, relationshipIndex) => validateRelationship(relationship, `${pagePath}.relationships[${relationshipIndex}]`, refs, diagnostics));
       validateDesignIntent(page.designIntent, `${pagePath}.designIntent`, refs, diagnostics);
+      if (page.contentOrganization !== undefined) validateResolvedOrganization(page.contentOrganization, `${pagePath}.contentOrganization`, refs, diagnostics);
     });
     const duplicates = pageNumbers.filter((page, index) => pageNumbers.indexOf(page) !== index);
     duplicates.forEach(page => diagnostics.push(issue('duplicate_page', '$.pages', `page ${page} is duplicated`)));
@@ -265,6 +281,59 @@ export function validatePresentationLayoutConstraintModel(
     if (options.validSourceRefsByPage) validatePageReferences(value.pages, options.validSourceRefsByPage, diagnostics);
   }
   return diagnostics;
+}
+
+function validateResolvedOrganization(value: unknown, path: string, refs: ReadonlySet<string>, diagnostics: PresentationLayoutConstraintDiagnostic[]): void {
+  const invalid = (part: string, message: string) => diagnostics.push(issue('invalid_reference', `${path}.${part}`, message));
+  if (!isRecord(value)) { diagnostics.push(issue('invalid_shape', path, 'contentOrganization must be an object')); return; }
+  checkKeys(value, ['schemaVersion', 'source', 'layout', 'groups', 'relationships'], path, diagnostics);
+  if (value.schemaVersion !== 1 || !enumHas(['explicit', 'inferred'], value.source) || !enumHas(['comparison', 'metrics', 'sequence', 'evidence', 'grouped'], value.layout)) {
+    diagnostics.push(issue('invalid_value', path, 'content organization version, source or layout is invalid'));
+  }
+  if (!Array.isArray(value.groups) || value.groups.length < 1 || value.groups.length > 16) {
+    diagnostics.push(issue('invalid_shape', `${path}.groups`, 'groups must contain 1-16 items')); return;
+  }
+  const groups = new Set<string>();
+  const covered = new Set<string>();
+  value.groups.forEach((group, index) => {
+    const groupPath = `${path}.groups[${index}]`;
+    if (!isRecord(group)) { diagnostics.push(issue('invalid_shape', groupPath, 'group must be an object')); return; }
+    checkKeys(group, ['groupId', 'role', 'sourceRefs'], groupPath, diagnostics);
+    if (typeof group.groupId !== 'string' || !/^[a-zA-Z0-9][a-zA-Z0-9_-]{0,79}$/u.test(group.groupId) || groups.has(group.groupId)) invalid(`groups[${index}].groupId`, 'group identity is invalid or duplicated');
+    else groups.add(group.groupId);
+    if (!enumHas(['header', 'comparison-side', 'metric', 'step', 'evidence', 'content', 'supporting'], group.role)) invalid(`groups[${index}].role`, 'group role is invalid');
+    if (!Array.isArray(group.sourceRefs) || group.sourceRefs.length < 1 || group.sourceRefs.length > 128) {
+      diagnostics.push(issue('invalid_shape', `${groupPath}.sourceRefs`, 'sourceRefs must be a bounded nonempty array')); return;
+    }
+    for (const ref of group.sourceRefs) {
+      if (typeof ref !== 'string' || !refs.has(ref) || ref === 'generated.page-number' || covered.has(ref)) invalid(`groups[${index}].sourceRefs`, 'group source is missing, generated or duplicated');
+      else covered.add(ref);
+      if (typeof ref === 'string' && (ref === 'outline.title' || ref.endsWith('.heading')) && group.role !== 'header') invalid(`groups[${index}].role`, 'document titles must belong to a header group');
+    }
+  });
+  if ([...refs].filter(ref => ref !== 'generated.page-number').some(ref => !covered.has(ref))) invalid('groups', 'group coverage must include every non-generated element once');
+  if (!Array.isArray(value.relationships) || value.relationships.length > 32) {
+    diagnostics.push(issue('invalid_shape', `${path}.relationships`, 'relationships must contain at most 32 items')); return;
+  }
+  const edges = new Map([...groups].map(groupId => [groupId, new Set<string>()]));
+  const relationKeys = new Set<string>();
+  value.relationships.forEach((relation, index) => {
+    if (!isRecord(relation)) { diagnostics.push(issue('invalid_shape', `${path}.relationships[${index}]`, 'relationship must be an object')); return; }
+    checkKeys(relation, ['kind', 'fromGroupId', 'toGroupId'], `${path}.relationships[${index}]`, diagnostics);
+    const key = JSON.stringify([relation.kind, relation.fromGroupId, relation.toGroupId]);
+    if (!enumHas(['compare', 'sequence', 'supports'], relation.kind) || typeof relation.fromGroupId !== 'string' || typeof relation.toGroupId !== 'string' ||
+      !groups.has(relation.fromGroupId) || !groups.has(relation.toGroupId) || relation.fromGroupId === relation.toGroupId || relationKeys.has(key)) {
+      invalid(`relationships[${index}]`, 'relationship kind or group reference is invalid'); return;
+    }
+    relationKeys.add(key);
+    if (relation.kind !== 'compare') edges.get(relation.fromGroupId)!.add(relation.toGroupId);
+  });
+  const pending = new Set(groups);
+  while (pending.size) {
+    const next = [...pending].find(groupId => [...pending].every(other => !edges.get(other)?.has(groupId)));
+    if (!next) { invalid('relationships', 'group relationships must not contain a cycle'); break; }
+    pending.delete(next);
+  }
 }
 
 function validateCanvas(value: unknown, path: string, diagnostics: PresentationLayoutConstraintDiagnostic[]): void {

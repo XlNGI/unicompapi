@@ -2,8 +2,11 @@ import {
   buildPresentationArtDirectionInput, parseArtDirection, PresentationDesignIRParseError,
   type PresentationArtDirectionInput, type ProductionPresentationDesignIR
 } from '../domain/entities/presentation-design-contract';
-import type { DocumentIR } from '../domain/entities/document-agent';
+import { parseDocumentIR, type DocumentIR } from '../domain/entities/document-agent';
 import type { DocumentOutline } from '../domain/entities/document-generation';
+import { documentContentSnapshotToOutline, parseDocumentContentSnapshot } from '../domain/entities/document-content-snapshot';
+import { canonicalizeLayoutJson } from '../domain/entities/presentation-layout-ir';
+import type { HostExecutionBudget } from './execution-budget';
 
 /** Only this projected semantic contract crosses the Provider boundary. */
 export interface PresentationArtDirectionRequest {
@@ -29,13 +32,26 @@ export async function planPresentationArtDirection(options: {
   readonly request?: PresentationArtDirectionPlanner;
   readonly signal: AbortSignal;
   readonly timeoutMs?: number;
+  readonly executionBudget?: HostExecutionBudget;
 }): Promise<PresentationArtDirectionResult> {
+  options.executionBudget?.assertCanProceed('design');
   options.signal.throwIfAborted();
-  if (!options.request) return { diagnostics: [{ code: 'art_direction_unavailable' }] };
   let input: PresentationArtDirectionInput;
-  try { input = buildPresentationArtDirectionInput(options); }
+  let outline = options.outline;
+  const documentIR = options.documentIR ? parseDocumentIR(options.documentIR) : undefined;
+  if (documentIR?.canonicalContent) {
+    outline = documentContentSnapshotToOutline(parseDocumentContentSnapshot(documentIR.canonicalContent));
+    if (JSON.stringify(canonicalizeLayoutJson(outline)) !== JSON.stringify(canonicalizeLayoutJson(options.outline))) {
+      throw new TypeError('content_snapshot_conflict');
+    }
+  }
+  if (!options.request) return { diagnostics: [{ code: 'art_direction_unavailable' }] };
+  try {
+    input = buildPresentationArtDirectionInput({ ...options, outline, ...(documentIR ? { documentIR } : {}) });
+  }
   catch { return { diagnostics: [{ code: 'art_direction_input_invalid' }] }; }
-  const timeoutMs = resolveArtDirectionTimeout(options.timeoutMs, input.outline.pageCount);
+  const timeoutMs = Math.min(resolveArtDirectionTimeout(options.timeoutMs, input.outline.pageCount),
+    options.executionBudget ? Math.max(1, Math.ceil(options.executionBudget.remainingMs())) : Infinity);
   const controller = new AbortController();
   let timer: ReturnType<typeof setTimeout> | undefined;
   let abort: () => void = () => undefined;
@@ -56,15 +72,20 @@ export async function planPresentationArtDirection(options: {
   try {
     controller.signal.throwIfAborted();
     const raw = await Promise.race([
-      Promise.resolve().then(() => options.request!({ input, signal: controller.signal, timeoutMs })), interrupted
+      Promise.resolve().then(() => {
+        options.signal.throwIfAborted();
+        controller.signal.throwIfAborted();
+        return options.request!({ input, signal: controller.signal, timeoutMs });
+      }), interrupted
     ]);
     options.signal.throwIfAborted();
-    const designIR = parseArtDirection(raw, { outline: options.outline });
+    const designIR = parseArtDirection(raw, { outline });
     return { input, designIR, diagnostics: [] };
   } catch (error) {
     options.signal.throwIfAborted();
     return { input, diagnostics: error instanceof PresentationDesignIRParseError
-      ? error.diagnostics.slice(0, 40).map(({ code }) => ({ code }))
+      ? [...(error.diagnostics.some(diagnostic => /(?:^|\.)organization(?:\.|$|\[)/u.test(diagnostic.path))
+          ? [{ code: 'invalid_content_organization' }] : []), ...error.diagnostics.slice(0, 39).map(({ code }) => ({ code }))]
       : [{ code: safeArtDirectionFailure(error, timedOut) }] };
   } finally {
     clearTimeout(timer);

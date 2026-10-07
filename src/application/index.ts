@@ -20,3 +20,7 @@ export * from './generate-pptx-tool';
 export * from './add-element-tool';
 export * from './delete-element-tool';
 export * from './add-slide-tool';
+export * from './conversation-completion-coordinator';
+export * from './conversation-agent-runtime-service';
+export * from './conversation-agent-recovery-coordinator';
+export * from './conversation-agent-session-service';

@@ -65,9 +65,21 @@ import {
 } from './repair-workflow';
 import { readPptxDocument, readPptxSlideOrder } from './pptx-page-reader';
 import { emitProductionEvent } from '../conversation-production-trace';
+import { ExecutionBudgetError, type HostExecutionBudget, type ExecutionStage } from '../../application/execution-budget';
 import type { DocumentGenerationProgressCallback, DocumentGenerationProgressEvent } from '../../application/document-generation-service';
 import { planPresentationArtDirection, type PresentationArtDirectionPlanner } from '../../application/presentation-art-direction';
 import type { DocumentIR } from '../../domain/entities/document-agent';
+import {
+  assessPresentationPageCount,
+  validatePresentationPageRequirement,
+  type PresentationPageRequirement
+} from '../../domain/entities/presentation-page-requirement';
+import { presentationDocumentPageLimits } from '../../domain/entities/document-generation';
+import { repairPresentationDesign } from './presentation-design-repair';
+import { buildDocumentContentSnapshot, documentContentAliases, documentContentSnapshotToOutline,
+  parseDocumentContentSnapshot } from '../../domain/entities/document-content-snapshot';
+import { canonicalizeLayoutJson } from '../../domain/entities/presentation-layout-ir';
+import { persistPreparedPresentationAttempt, persistPresentationAttemptReceipt, type PresentationDesignAttempt } from './presentation-design-attempts';
 
 export type DocumentGenerationErrorCode =
   | 'invalid_plan'
@@ -92,6 +104,7 @@ export class DocumentGenerationError extends Error {
 }
 
 export interface DocumentGenerationPlanInput {
+  readonly executionBudget?: HostExecutionBudget;
   readonly executionId?: string;
   /** Durable Task Runtime progress is a safety gate, not best-effort UI telemetry. */
   readonly strictProgress?: boolean;
@@ -110,7 +123,9 @@ export interface DocumentGenerationPlanInput {
   readonly revisionTargetSectionHeading?: string;
   readonly revisionPatch?: DocumentRevisionPatch;
   readonly revisionPatches?: readonly DocumentRevisionPatch[];
+  /** Legacy page numbers remain planning targets; explicit host requirements own strict limits. */
   readonly requestedTotalPages?: number;
+  readonly pageRequirement?: PresentationPageRequirement;
   readonly theme?: DocumentThemeId;
   readonly presentationTemplate?: PresentationTemplateId;
   readonly signal?: AbortSignal;
@@ -146,6 +161,7 @@ export interface DocumentGenerationResult {
   readonly file: FileReference;
   readonly work: Work;
   readonly validatedOutline?: DocumentOutline;
+  readonly pageCountAssessment?: ReturnType<typeof assessPresentationPageCount>;
 }
 
 interface RunnerContext {
@@ -190,10 +206,12 @@ export class DocumentGenerationRunner {
   async run(
     input: DocumentGenerationPlanInput
   ): Promise<DocumentGenerationResult> {
+    input.executionBudget?.assertCanProceed('prepare');
     const now = this.options.now ?? (() => new Date().toISOString());
     const createId = this.options.createId ?? (() => randomUUID());
     const context = this.context();
-    const existing = await this.findRegisteredResult(context, input);
+    const pageRequirement = this.validatePageRequirement(input);
+    const existing = await this.findRegisteredResult(context, input, pageRequirement);
     if (existing) return existing;
     if (input.kind === 'ppt' && this.options.requireRenderForPpt && !this.options.renderPreview) {
       throw new DocumentGenerationError(
@@ -207,6 +225,7 @@ export class DocumentGenerationRunner {
     let finalPath: string | undefined;
     let generated: GeneratedTemporaryDocumentFile | undefined;
     let file: FileReference | undefined;
+    let pageCountAssessment: ReturnType<typeof assessPresentationPageCount> | undefined;
     let workRegistered = false;
     try {
       task = createDocumentTask({
@@ -246,6 +265,22 @@ export class DocumentGenerationRunner {
       const generateTemporaryFile =
         this.options.generateTemporaryFile ?? generateTemporaryDocumentFile;
       const revisionSource = await this.resolveRevisionSource(context, input);
+      const existingContent = input.documentIR?.canonicalContent === undefined ? undefined : parseDocumentContentSnapshot(input.documentIR.canonicalContent);
+      const authoritativeOutline = existingContent ? documentContentSnapshotToOutline(existingContent) : input.outline;
+      if (existingContent && JSON.stringify(canonicalizeLayoutJson(authoritativeOutline)) !== JSON.stringify(canonicalizeLayoutJson(input.outline))) {
+        throw new DocumentGenerationError('invalid_plan', 'Canonical content conflicts with the compatibility outline');
+      }
+      // Host scope is assigned once per admitted document execution, never by the model.
+      const canonicalContent = input.kind === 'ppt' && !input.revisionPatch && !input.revisionPatches && !input.revisionTargetSectionHeading
+        ? existingContent ?? buildDocumentContentSnapshot({ outline: authoritativeOutline,
+            identityScope: `doc-${createHash('sha256').update(JSON.stringify([input.sourceDraftId, execution.id])).digest('hex').slice(0, 40)}` })
+        : undefined;
+      const canonicalOutline = canonicalContent ? documentContentSnapshotToOutline(canonicalContent) : authoritativeOutline;
+      let candidateContent = canonicalContent;
+      let lastPreparedAttempt: PresentationDesignAttempt | undefined;
+      let passedCandidate: { readonly attemptHash: string; readonly artifactHash: string } | undefined;
+      let repairTargetIndexes: readonly number[] = [];
+      let repairDiagnosisCodes: readonly string[] = [];
       const sourceStructure =
         revisionSource.revisionSourcePath && (input.revisionPatch || input.revisionPatches)
           ? await readOfficeDocumentStructureFromBuffer({
@@ -257,35 +292,73 @@ export class DocumentGenerationRunner {
       // Structural and rendered QA failures are recorded against the durable
       // verification stage, including failures during a repair candidate.
       execution = await this.move(context, execution, 'verifying_file');
-      let currentOutline = input.outline;
+      let currentOutline = canonicalOutline;
       const artDirection = input.kind === 'ppt' && !input.parentWorkId && !input.revisionPatch && !input.revisionPatches
         ? await this.observe(input, 'plan_validation', 'presentation-art-direction', () => planPresentationArtDirection({
-            outline: input.outline, documentIR: input.documentIR, userRequirement: input.userRequirement ?? '',
+            outline: canonicalOutline, documentIR: input.documentIR, userRequirement: input.userRequirement ?? '',
             brandingConstraints: [input.theme, input.presentationTemplate].filter((value): value is NonNullable<typeof value> => value !== undefined),
             request: input.requestArtDirection, signal: input.signal ?? new AbortController().signal,
+            executionBudget: input.executionBudget,
             timeoutMs: input.artDirectionTimeoutMs
           }), { purpose: 'planning', documentKind: 'ppt', count: input.outline.sections.length })
         : undefined;
       const artDirectionStatus = artDirection === undefined ? 'missing' as const
         : artDirection.designIR ? 'validated' as const
           : artDirection.diagnostics.some(item => item.code === 'art_direction_unavailable') ? 'missing' as const : 'invalid' as const;
+      if (artDirection?.diagnostics.some(diagnostic => diagnostic.code === 'invalid_content_organization')) {
+        throw new DocumentGenerationError('invalid_plan', 'The declared content organization is invalid');
+      }
       const designIrStatus = artDirection?.designIR ? 'validated' as const : artDirectionStatus;
       if (artDirection) await this.reportProgress(input, { code: 'plan_validation', status: 'completed',
         operationId: artDirection.designIR ? 'presentation-design-validated' : 'presentation-design-fallback',
         facts: { purpose: 'planning', documentKind: 'ppt', count: artDirection.diagnostics.length, artDirectionStatus, designIrStatus } });
+      let currentDesignIR = artDirection?.designIR;
       let repairDiagnostics: readonly DocumentQualityDiagnostic[] = [];
       const supportsLlmRepair = input.kind === 'ppt' && input.requestLlmRepair !== undefined &&
         this.options.renderPreview !== undefined &&
         input.revisionPatch === undefined && input.revisionPatches === undefined;
       const compileAndDiagnose = async (outline: DocumentOutline, attempt: number) => {
         const operationSuffix = attempt === 0 ? '' : `:repair-${attempt}`;
+        if (candidateContent && !currentDesignIR && attempt > 0) {
+          const identityMap = Object.fromEntries(Object.entries(documentContentAliases(candidateContent)).filter(([reference]) => reference.startsWith('outline.')));
+          candidateContent = buildDocumentContentSnapshot({ outline, previousSnapshot: candidateContent, identityMap });
+        }
+        let preparedAttempt: PresentationDesignAttempt | undefined;
+        let artifactHash: string | undefined;
+        let receiptSaved = false;
+        const saveReceipt = async (outcome: 'passed' | 'failed' | 'cancelled', diagnostics: readonly DocumentQualityDiagnostic[] = []) => {
+          if (!preparedAttempt || receiptSaved) return;
+          await persistPresentationAttemptReceipt({ storage: context.storage, attempt: preparedAttempt,
+            ...(artifactHash ? { artifactHash } : {}), outcome,
+            diagnosisCodes: [...new Set(diagnostics.map(diagnostic => diagnostic.code))], now: now() });
+          receiptSaved = true;
+        };
+        try {
         const candidate = await this.observe(input, 'document_compile', `document-file-write${operationSuffix}`, async () => generateTemporaryFile({
           onProgress: event => this.reportProgress(input, event),
           onDesignCompiled: snapshot => this.recordDesignCompilation(input, snapshot, attempt),
+          ...(candidateContent ? { contentSnapshot: candidateContent, onPlanPrepared: async prepared => {
+            this.assertNotCancelled(input.signal);
+            input.executionBudget?.assertCanProceed('tool');
+            if (JSON.stringify(canonicalizeLayoutJson(prepared.contentSnapshot)) !== JSON.stringify(canonicalizeLayoutJson(candidateContent))) {
+              throw new TypeError('content_snapshot_conflict');
+            }
+            preparedAttempt = await persistPreparedPresentationAttempt({ storage: context.storage,
+              executionId: execution!.id, sourceDraftId: input.sourceDraftId, draftRevision: input.draftRevision, attempt,
+              prepared, ...(lastPreparedAttempt ? { previousAttempt: lastPreparedAttempt } : {}),
+              targetSectionIds: repairTargetIndexes.map(index => candidateContent!.sections[index].sectionId),
+              diagnosisCodes: repairDiagnosisCodes, now: now() });
+            lastPreparedAttempt = preparedAttempt;
+            this.assertNotCancelled(input.signal);
+            input.executionBudget?.assertCanProceed('tool');
+          } } : {}),
           kind: input.kind,
-          outline,
-          // A content repair changes reference identity: rerender it with the stable legacy path.
-          ...(attempt === 0 && artDirection?.designIR ? { designIR: artDirection.designIR } : {}),
+          ...(input.parentWorkId ? { compatibilityReason: input.revisionPatch || input.revisionPatches || input.revisionTargetSectionHeading
+            ? 'verified_parent_xml_patch' as const : 'existing_parent_work_regeneration' as const } : {}),
+          // Layout-only repair updates Design IR while the canonical facts remain unchanged.
+          // The patched Outline is retained only for the explicit legacy compatibility path.
+          outline: currentDesignIR ? canonicalOutline : outline,
+          ...(currentDesignIR ? { designIR: currentDesignIR } : {}),
           artDirectionStatus,
           designIrStatus,
           ...(artDirection?.diagnostics.length ? { artDirectionDiagnostics: artDirection.diagnostics } : {}),
@@ -306,14 +379,23 @@ export class DocumentGenerationRunner {
         if (previousTemporaryPath && previousTemporaryPath !== candidate.temporaryPath) {
           await rm(previousTemporaryPath, { force: true });
         }
+        if (candidateContent && !preparedAttempt) {
+          throw new DocumentGenerationError('verification_failed', 'The generated candidate has no durable production plan');
+        }
         this.assertNotCancelled(input.signal);
-        await this.observe(input, 'document_structure_check', `document-output-structure${operationSuffix}`, () => this.assertTemporaryOutput(
+        pageCountAssessment = await this.observe(input, 'document_structure_check', `document-output-structure${operationSuffix}`, () => this.assertTemporaryOutput(
           candidate,
           input.kind,
           outline,
-          input.requestedTotalPages
+          pageRequirement
         ), { tool: 'check', ...(attempt > 0 ? { count: attempt, purpose: 'repair' as const } : {}) });
-        if (!this.options.renderPreview) return { candidate, diagnostics: [] as readonly DocumentQualityDiagnostic[] };
+        if (pageCountAssessment) await this.checkPageCount(input, pageCountAssessment, operationSuffix);
+        if (preparedAttempt) artifactHash = (await this.verifyTemporaryOutput(execution!, candidate, input.signal)).checksumSha256;
+        if (!this.options.renderPreview) {
+          await saveReceipt('passed');
+          if (preparedAttempt && artifactHash) passedCandidate = { attemptHash: preparedAttempt.attemptHash, artifactHash };
+          return { candidate, diagnostics: [] as readonly DocumentQualityDiagnostic[] };
+        }
         let renderResult: DocumentRenderResult;
         try {
           renderResult = await this.observe(input, 'document_render', `document-preview-render${operationSuffix}`, () => this.options.renderPreview!(candidate.temporaryPath, {
@@ -327,12 +409,28 @@ export class DocumentGenerationRunner {
           );
         }
         const diagnostics = (renderResult.diagnostics ?? []) as readonly DocumentQualityDiagnostic[];
-        await this.observe(input, 'document_check', `document-render-diagnostics${operationSuffix}`, async () => {
-          if (!supportsLlmRepair && diagnostics.some((diagnostic) => diagnostic.severity === 'error')) {
-            throw new DocumentGenerationError('verification_failed', 'Rendered document failed visual diagnostics');
-          }
-        }, { tool: 'check', count: diagnostics.length, ...(attempt > 0 ? { purpose: 'repair' as const } : {}) });
+        await saveReceipt(diagnostics.some(diagnostic => diagnostic.severity === 'error') ? 'failed' : 'passed', diagnostics);
+        if (preparedAttempt && artifactHash && !diagnostics.some(diagnostic => diagnostic.severity === 'error')) {
+          passedCandidate = { attemptHash: preparedAttempt.attemptHash, artifactHash };
+        }
+        this.assertNotCancelled(input.signal);
+        input.executionBudget?.assertCanProceed('check');
+        const blocksDelivery = !supportsLlmRepair && diagnostics.some(diagnostic => diagnostic.severity === 'error');
+        await this.reportProgress(input, { code: 'document_check', status: blocksDelivery ? 'failed' : 'completed',
+          operationId: `document-render-diagnostics${operationSuffix}`, facts: {
+            documentKind: input.kind, tool: 'check', count: diagnostics.length, ...(attempt > 0 ? { purpose: 'repair' as const } : {})
+          } });
+        this.assertNotCancelled(input.signal);
+        input.executionBudget?.assertCanProceed('check');
+        if (blocksDelivery) throw new DocumentGenerationError('verification_failed', 'Rendered document failed visual diagnostics');
         return { candidate, diagnostics };
+        } catch (error) {
+          await saveReceipt(input.signal?.aborted ? 'cancelled' : 'failed');
+          if (error instanceof TypeError && error.message === 'content_snapshot_conflict') {
+            throw new DocumentGenerationError('verification_failed', 'Generated content conflicts with the validated canonical content');
+          }
+          throw error;
+        }
       };
       const initial = await compileAndDiagnose(currentOutline, 0);
       generated = initial.candidate;
@@ -368,6 +466,11 @@ export class DocumentGenerationRunner {
             }), { tool: 'patch', purpose: 'repair', count: attempt });
             const plan = parseRepairPlan(raw);
             validateLlmRepairPlan(plan, diagnostics, repairOutline);
+            repairDiagnosisCodes = plan.diagnosisCodes;
+            repairTargetIndexes = plan.operations.map(operation => operation.target.sectionIndex!);
+            if (currentDesignIR) currentDesignIR = repairPresentationDesign({
+              outline: canonicalOutline, designIR: currentDesignIR, plan
+            }).designIR;
             return plan;
           },
           expectedRevision: attempt => input.draftRevision + attempt - 1,
@@ -410,6 +513,10 @@ export class DocumentGenerationRunner {
         verifiedGenerated,
         input.signal
       ), { tool: 'check', bytes: verifiedGenerated.sizeBytes });
+      if (canonicalContent && (!passedCandidate || passedCandidate.attemptHash !== lastPreparedAttempt?.attemptHash ||
+        passedCandidate.artifactHash !== temporaryVerification.checksumSha256)) {
+        throw new DocumentGenerationError('verification_failed', 'The file no longer matches the candidate that passed QA');
+      }
       this.assertNotCancelled(input.signal);
       const validatedOutline = input.kind === 'ppt' && (input.revisionPatch || input.revisionPatches)
          ? await this.readRevisedOutline(input, verifiedGenerated.temporaryPath) : undefined;
@@ -461,7 +568,8 @@ export class DocumentGenerationRunner {
         execution,
         file,
         work,
-        ...(validatedOutline ? { validatedOutline } : {})
+        ...(validatedOutline ? { validatedOutline } : {}),
+        ...(pageCountAssessment ? { pageCountAssessment } : {})
       };
     } catch (error) {
       if (workRegistered) throw new DocumentGenerationError('result_sync_pending', 'The new document is registered; execution status synchronization must be retried');
@@ -471,10 +579,10 @@ export class DocumentGenerationRunner {
         : execution?.state === 'registering_work' ? new DocumentGenerationError('registration_failed', 'The new document could not be registered')
         : ['ENOSPC', 'EACCES', 'EPERM', 'EBUSY', 'EROFS'].includes(String(errorCode)) ? new DocumentGenerationError('write_failed', 'The new document could not be written to local storage')
         : error;
-      const cancelled =
+      const cancelled = (!input.executionBudget?.stopReason || input.executionBudget.stopReason === 'cancelled') && (
         input.signal?.aborted === true ||
         (error instanceof DocumentGenerationError && error.code === 'cancelled') ||
-        (error instanceof FileVerificationError && error.code === 'aborted');
+        (error instanceof FileVerificationError && error.code === 'aborted'));
       if (file && !workRegistered) {
         await this.removeRegisteredOutput(context, file);
       }
@@ -523,9 +631,12 @@ export class DocumentGenerationRunner {
   ): Promise<unknown> {
     const planner = input.requestLlmRepair;
     if (!planner) throw new Error('llm_repair_planner_unavailable');
+    input.executionBudget?.assertCanProceed('repair');
+    input.signal?.throwIfAborted();
     const configured = input.repairTimeoutMs ?? 30_000;
     if (!Number.isFinite(configured) || configured <= 0) throw new Error('repair_timeout_invalid');
-    const timeoutMs = Math.min(Math.floor(configured), 60_000);
+    const timeoutMs = Math.min(Math.floor(configured), 60_000,
+      input.executionBudget ? Math.max(1, Math.ceil(input.executionBudget.remainingMs())) : Infinity);
     const controller = new AbortController();
     let rejectAbort: ((reason?: unknown) => void) | undefined;
     const onAbort = () => {
@@ -546,7 +657,11 @@ export class DocumentGenerationRunner {
         rejectAbort = () => reject(new Error('repair_planner_cancelled'));
       });
       return await Promise.race([
-        planner({ ...request, signal: controller.signal }),
+        Promise.resolve().then(() => {
+          input.executionBudget?.assertCanProceed('repair');
+          controller.signal.throwIfAborted();
+          return planner({ ...request, signal: controller.signal });
+        }),
         timeout,
         aborted
       ]);
@@ -564,14 +679,25 @@ export class DocumentGenerationRunner {
         facts: { documentKind: input.kind, ...facts } };
       await this.reportProgress(input, event);
     };
+    const stage: ExecutionStage = code === 'document_render' ? 'render' : code === 'document_publish' ? 'publish'
+      : code === 'document_register' ? 'register' : operationId.startsWith('document-repair-plan') ? 'repair'
+        : code === 'plan_validation' ? 'design' : 'check';
+    input.executionBudget?.assertCanProceed(stage);
     await report('started');
     try {
-      const result = await action();
+      input.executionBudget?.assertCanProceed(stage);
+      // Local commits are awaited to observe their actual outcome, even if Stop wins
+      // at the parent. Racing rename/registration would orphan a late successful write.
+      const interruptible = code === 'document_render' || operationId === 'presentation-art-direction' ||
+        operationId.startsWith('document-repair-plan');
+      const result = input.executionBudget && interruptible
+        ? await input.executionBudget.run(stage, async () => action()) : await action();
       await report('completed');
       return result;
     } catch (error) {
-      await report(input.signal?.aborted || (error instanceof Error && error.name === 'AbortError') ||
-        (error instanceof DocumentGenerationError && error.code === 'cancelled') ? 'cancelled' : 'failed');
+      await report((!input.executionBudget?.stopReason || input.executionBudget.stopReason === 'cancelled') &&
+        (input.signal?.aborted || (error instanceof Error && error.name === 'AbortError') ||
+        (error instanceof DocumentGenerationError && error.code === 'cancelled')) ? 'cancelled' : 'failed');
       throw error;
     }
   }
@@ -592,6 +718,15 @@ export class DocumentGenerationRunner {
     attempt: number
   ): Promise<void> {
     const suffix = attempt === 0 ? '' : `-repair-${attempt}`;
+    // These are observations of completed compilation, not additional effects.
+    // Keep the same facts and budget checks without two durable events per no-op.
+    const reportFact = async (operationId: string, facts: NonNullable<DocumentGenerationProgressEvent['facts']>) => {
+      this.assertNotCancelled(input.signal);
+      input.executionBudget?.assertCanProceed('check');
+      await this.reportProgress(input, { code: 'document_check', status: 'completed', operationId, facts });
+      this.assertNotCancelled(input.signal);
+      input.executionBudget?.assertCanProceed('check');
+    };
     const facts: NonNullable<DocumentGenerationProgressEvent['facts']> = {
       purpose: 'planning', documentKind: 'ppt', tool: 'check', count: snapshot.pages.length,
       designPath: snapshot.designPath,
@@ -602,22 +737,22 @@ export class DocumentGenerationRunner {
       renderPlanStatus: snapshot.renderPlanStatus,
       repairCount: snapshot.repairCount
     };
-    await this.observe(input, 'document_check', `presentation-layout-summary${suffix}`, async () => undefined, facts);
+    await reportFact(`presentation-layout-summary${suffix}`, facts);
     for (const [index, diagnostic] of snapshot.diagnostics.entries()) {
-      await this.observe(input, 'document_check', `presentation-layout-diagnostic-${index + 1}${suffix}`, async () => undefined, {
+      await reportFact(`presentation-layout-diagnostic-${index + 1}${suffix}`, {
         purpose: 'planning', documentKind: 'ppt', tool: 'check', diagnosticCode: diagnostic.code.slice(0, 80),
         ...(diagnostic.pageNumber ? { pageNumber: diagnostic.pageNumber } : {})
       });
     }
     for (const repair of snapshot.repairs) {
       for (const pageNumber of repair.pages) {
-        await this.observe(input, 'document_check', `presentation-layout-repair-${repair.attempt}${suffix}`, async () => undefined, {
+        await reportFact(`presentation-layout-repair-${repair.attempt}${suffix}`, {
           purpose: 'planning', documentKind: 'ppt', tool: 'check', count: repair.attempt, pageNumber, repairAction: repair.action
         });
       }
     }
     for (const page of snapshot.pages) {
-      await this.observe(input, 'document_check', `presentation-layout-page-${page.pageNumber}${suffix}`, async () => undefined, {
+      await reportFact(`presentation-layout-page-${page.pageNumber}${suffix}`, {
         purpose: 'planning', documentKind: 'ppt', tool: 'check', pageNumber: page.pageNumber,
         pageRole: page.pageRole,
         pageIntentDigest: `sha256:${createHash('sha256').update(page.pageIntent).digest('hex').slice(0, 20)}`,
@@ -642,7 +777,8 @@ export class DocumentGenerationRunner {
    */
   private async findRegisteredResult(
     context: RunnerContext,
-    input: DocumentGenerationPlanInput
+    input: DocumentGenerationPlanInput,
+    pageRequirement?: PresentationPageRequirement
   ): Promise<DocumentGenerationResult | undefined> {
     const tasks = await context.tasks.list(this.options.projectId);
     const candidates = tasks.filter((task) => {
@@ -675,16 +811,27 @@ export class DocumentGenerationRunner {
         } catch {
           continue;
         }
+        let pageCountAssessment: ReturnType<typeof assessPresentationPageCount> | undefined;
+        if (pageRequirement) {
+          const verifiedPath = await resolveFileReferencePathSafely(this.options.rootDirectory, file);
+          const zip = await JSZip.loadAsync(await readFile(verifiedPath));
+          const actualTotalPages = (await readPptxSlideOrder(zip)).length;
+          this.assertPptPageResourceLimit(actualTotalPages);
+          pageCountAssessment = assessPresentationPageCount(actualTotalPages, pageRequirement);
+          await this.checkPageCount(input, pageCountAssessment);
+        }
         if (execution.state === 'registering_work') {
           const completed = transitionExecution(execution, 'completed', toIsoTimestamp(
             (this.options.now ?? (() => new Date().toISOString()))()
           ), { outputFileId: file.id, workId: work.id });
           await context.executions.save(completed);
           return { task, execution: completed, file, work,
+            ...(pageCountAssessment ? { pageCountAssessment } : {}),
             ...(input.kind === 'ppt' && (input.revisionPatch || input.revisionPatches)
               ? { validatedOutline: await this.readRevisedOutline(input, await resolveFileReferencePathSafely(this.options.rootDirectory, file)) } : {}) };
         }
         return { task, execution, file, work,
+          ...(pageCountAssessment ? { pageCountAssessment } : {}),
           ...(input.kind === 'ppt' && (input.revisionPatch || input.revisionPatches)
             ? { validatedOutline: await this.readRevisedOutline(input, await resolveFileReferencePathSafely(this.options.rootDirectory, file)) } : {}) };
       }
@@ -762,6 +909,7 @@ export class DocumentGenerationRunner {
 
   private assertNotCancelled(signal: AbortSignal | undefined): void {
     if (signal?.aborted) {
+      if (signal.reason instanceof ExecutionBudgetError && signal.reason.code !== 'cancelled') throw signal.reason;
       throw new DocumentGenerationError(
         'cancelled',
         'Document generation was cancelled'
@@ -769,12 +917,54 @@ export class DocumentGenerationRunner {
     }
   }
 
+  private validatePageRequirement(input: DocumentGenerationPlanInput): PresentationPageRequirement | undefined {
+    const requirement = input.pageRequirement !== undefined ? { ...input.pageRequirement } : (input.requestedTotalPages !== undefined
+      ? { mode: 'target' as const, targetPages: input.requestedTotalPages, countBasis: 'total' as const } : undefined);
+    if (requirement === undefined) return undefined;
+    try {
+      if (input.kind !== 'ppt') throw new TypeError('invalid_page_requirement');
+      validatePresentationPageRequirement(requirement);
+    } catch {
+      throw new DocumentGenerationError('invalid_plan', 'PPT page requirement is invalid or exceeds supported limits');
+    }
+    return Object.freeze(requirement);
+  }
+
+  private async checkPageCount(input: DocumentGenerationPlanInput,
+    assessment: ReturnType<typeof assessPresentationPageCount>, operationSuffix = ''): Promise<void> {
+    this.assertNotCancelled(input.signal);
+    input.executionBudget?.assertCanProceed('check');
+    // The physical count was already computed by document-output-structure.
+    // Report its decision once; no additional asynchronous effect starts here.
+    await this.reportProgress(input, { code: 'document_check', status: assessment.blocking ? 'failed' : 'completed',
+      operationId: `presentation-page-count${operationSuffix}`, facts: {
+        documentKind: input.kind, tool: 'check', totalPages: assessment.actualTotalPages, requestedPages: assessment.targetPages,
+        pageCountMode: assessment.mode, pageCountBasis: assessment.countBasis,
+        ...(!assessment.satisfied ? { diagnosticCode: assessment.blocking ? 'page_count_mismatch' : 'page_count_deviation' } : {})
+      } });
+    if (assessment.blocking) {
+      const expected = assessment.mode === 'max' ? `不超过 ${assessment.maximumPages} 页`
+        : assessment.mode === 'range' ? `${assessment.minimumPages}～${assessment.maximumPages} 页`
+          : `严格 ${assessment.targetPages} 页`;
+      throw new DocumentGenerationError('page_count_mismatch',
+        `${assessment.countBasis === 'content' ? '正文页数' : '总页数'}实际为 ${assessment.actualPages} 页（文件共 ${assessment.actualTotalPages} 页），未满足明确要求：${expected}。`);
+    }
+    this.assertNotCancelled(input.signal);
+    input.executionBudget?.assertCanProceed('check');
+  }
+
+  private assertPptPageResourceLimit(actualTotalPages: number): void {
+    if (actualTotalPages > presentationDocumentPageLimits.maximumPages) {
+      throw new DocumentGenerationError('verification_failed', 'Generated PPT exceeds the supported page limit');
+    }
+  }
+
   private async assertTemporaryOutput(
     generated: GeneratedTemporaryDocumentFile,
     kind: DocumentWorkspaceKind,
     outline: DocumentOutline,
-    requestedTotalPages?: number
-  ): Promise<void> {
+    pageRequirement?: PresentationPageRequirement
+  ): Promise<ReturnType<typeof assessPresentationPageCount> | undefined> {
     const metadata = await lstat(generated.temporaryPath);
     if (
       !metadata.isFile() ||
@@ -816,16 +1006,11 @@ export class DocumentGenerationRunner {
         'Generated document is not a valid Office package'
       );
     }
-    if (kind === 'ppt' && requestedTotalPages !== undefined) {
-      const actualPages = (await readPptxSlideOrder(zip)).length;
-      if (actualPages !== requestedTotalPages) {
-        throw new DocumentGenerationError(
-          'page_count_mismatch',
-          `生成的 PPT 共 ${actualPages} 页，与明确要求的 ${requestedTotalPages} 页不一致。`
-        );
-      }
-    }
     await assertExpectedDocumentContent(zip, kind, outline, generated.fileName);
+    if (kind !== 'ppt') return undefined;
+    const actualTotalPages = (await readPptxSlideOrder(zip)).length;
+    this.assertPptPageResourceLimit(actualTotalPages);
+    return pageRequirement ? assessPresentationPageCount(actualTotalPages, pageRequirement) : undefined;
   }
 
   private async verifyTemporaryOutput(

@@ -29,7 +29,7 @@ import {
   isOpenAiCompatibleCredentialSchemaId,
   matchOpenAiCompatiblePackage
 } from './openai-compatible-identity';
-import { emitProductionEvent } from '../../conversation-production-trace';
+import { emitProductionDiagnostic } from '../../conversation-production-trace';
 
 // A 15 MiB controlled image expands to 20 MiB in Base64; keep room for JSON fields.
 export const NEWAPI_MAXIMUM_IMAGE_REQUEST_BYTES = 24 * 1024 * 1024;
@@ -562,7 +562,7 @@ export class NewApiSharedRuntime {
         throw new NewApiRuntimeError('cancelled', 'not_retryable');
       }
       await input.beforeRequestStarted?.();
-      void emitProductionEvent({ code: 'model_request', status: 'started', operationId: 'http_submit_start', facts: { purpose: 'content', count: input.body?.byteLength ?? 0 } });
+      void emitProductionDiagnostic({ code: 'model_request', status: 'started', operationId: 'http_submit_start', facts: { purpose: 'content', count: input.body?.byteLength ?? 0 } });
       requestStarted = true;
       this.log({
         event: 'request_started',

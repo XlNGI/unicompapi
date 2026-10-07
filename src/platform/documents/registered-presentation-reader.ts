@@ -15,6 +15,7 @@ import { ConversationDocumentPageError } from './conversation-document-page-cont
 import { NodeProjectStorage, toProjectRelativePath } from '../storage';
 import { resolveFileReferencePathSafely } from '../files/file-paths';
 import { readPptxDocument, type PptxPhysicalPage } from './pptx-page-reader';
+import { readRegisteredPresentationProductionPlan } from './presentation-production-plan-reader';
 
 export function buildPresentationRevisionMap(pages: readonly PptxPhysicalPage[], outline: DocumentOutline, checksumSha256: string): PresentationRevisionMap {
   if (outline.kind !== 'ppt') throw scopeError();
@@ -34,6 +35,14 @@ export class RegisteredPresentationReader {
   private readonly storage: NodeProjectStorage;
   constructor(private readonly options: { rootDirectory: string; projectId: ProjectId }) {
     this.storage = new NodeProjectStorage(options.rootDirectory);
+  }
+
+  /** Explicit private-plan readback; ordinary physical reads do not parse compiler evidence. */
+  async readWithProductionPlan(workId: WorkId, outline?: DocumentOutline) {
+    const source = await this.read(workId, outline);
+    const productionPlan = await readRegisteredPresentationProductionPlan({ ...this.options,
+      work: source.work, file: source.file, buffer: source.buffer });
+    return { ...source, ...(productionPlan ? { productionPlan } : {}) };
   }
 
   async read(workId: WorkId, outline?: DocumentOutline) {
@@ -117,8 +126,12 @@ export function createPresentationWorkflowScope(options: { rootDirectory: string
       const result = message?.documentResult;
       if (result?.kind !== 'ppt') return undefined;
       try {
-        if (!result.validatedContent) throw scopeError();
-        const { map } = await reader.read(result.workId, parseDocumentOutline(result.validatedContent));
+        const actual = await reader.readWithProductionPlan(result.workId);
+        const sourceOutline = actual.productionPlan?.plan.outline ?? (result.validatedContent ? parseDocumentOutline(result.validatedContent) : undefined);
+        if (!sourceOutline) throw scopeError();
+        // Physical pages verify the file; a matching private plan owns semantic
+        // section identity. Saved message JSON remains only a legacy fallback.
+        const map = buildPresentationRevisionMap(actual.pages, sourceOutline, actual.file.checksumSha256!);
         const target = { unit: plan.targetHint.unit as 'page' | 'section', ordinal: plan.targetHint.ordinal };
         const resolved = mappedPresentationTarget(map!, target);
         return { workId: result.workId, checksumSha256: map!.checksumSha256, ...target,

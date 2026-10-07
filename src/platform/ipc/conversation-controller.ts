@@ -11,7 +11,9 @@ import {
   type ChatContextIpcResult,
   type ConversationCandidateDto,
   type ConversationDto,
-  type MessageDto
+  type MessageDto,
+  type ConversationParentRunDto,
+  type ConversationAgentSessionDto
 } from '../../shared/chat-context-ipc';
 import type { StorageProjectSession } from './storage-ipc-controller';
 import { chatContextFailure, failure } from './chat-context-errors';
@@ -22,6 +24,11 @@ export interface ConversationControllerDependencies {
   readonly projectRequired?: boolean;
   readonly storageScope?: ConversationDto['storageScope'];
   readonly readOnly?: boolean;
+  readParentRuns?(conversationId: string): Promise<readonly ConversationParentRunDto[]>;
+  readAgentSessions?(conversationId: string): Promise<readonly ConversationAgentSessionDto[]>;
+  refreshRecovery?(conversationId: string): Promise<void>;
+  canStartNewResponse?(conversationId: string): Promise<boolean>;
+  canEditUserMessage?(conversationId: string, messageId: string): Promise<boolean>;
   onError?(error: unknown): void;
 }
 
@@ -58,11 +65,13 @@ export class ConversationController {
   get(request: unknown): Promise<ChatContextIpcResult<ConversationDto>> {
     return this.execute(async () => {
       const input = chatContextRequestParsers.conversationId(request);
+      await this.dependencies.refreshRecovery?.(input.conversationId);
+      const conversation = await this.dependencies.service.get(toConversationId(input.conversationId));
+      const parentRuns = await this.dependencies.readParentRuns?.(conversation.id);
+      const agentSessions = await this.dependencies.readAgentSessions?.(conversation.id);
       return {
         ok: true,
-        value: this.toDto(
-          await this.dependencies.service.get(toConversationId(input.conversationId))
-        )
+        value: { ...this.toDto(conversation), ...(parentRuns ? { parentRuns } : {}), ...(agentSessions ? { agentSessions } : {}) }
       };
     });
   }
@@ -74,7 +83,10 @@ export class ConversationController {
       if (input.includeArchived) statuses.push('archived');
       if (input.includeDeleted) statuses.push('deleted');
       const conversations = await this.dependencies.service.list({ statuses });
-      return { ok: true, value: conversations.map((conversation) => this.toDto(conversation)) };
+      return { ok: true, value: await Promise.all(conversations.map(async conversation => {
+        const agentSessions = await this.dependencies.readAgentSessions?.(conversation.id);
+        return { ...this.toDto(conversation), ...(agentSessions ? { agentSessions } : {}) };
+      })) };
     });
   }
 
@@ -138,6 +150,9 @@ export class ConversationController {
     if (this.dependencies.readOnly) return this.readOnlyFailure();
     return this.execute(async () => {
       const input = chatContextRequestParsers.addUserMessage(request);
+      if (this.dependencies.canStartNewResponse && !await this.dependencies.canStartNewResponse(input.conversationId)) {
+        return failure('response_reconciliation_required', 'The previous task needs local settlement or reconciliation');
+      }
       const conversation = await this.dependencies.service.addUserMessage({
         conversationId: toConversationId(input.conversationId),
         expectedRevision: input.expectedRevision,
@@ -153,6 +168,9 @@ export class ConversationController {
     if (this.dependencies.readOnly) return this.readOnlyFailure();
     return this.execute(async () => {
       const input = chatContextRequestParsers.editCancelledUserMessage(request);
+      if (this.dependencies.canEditUserMessage && !await this.dependencies.canEditUserMessage(input.conversationId, input.messageId)) {
+        return failure('response_reconciliation_required', 'The original unknown request cannot be edited and replayed');
+      }
       const conversation = await this.dependencies.service.editCancelledUserMessage({
         conversationId: toConversationId(input.conversationId),
         expectedRevision: input.expectedRevision,
@@ -289,6 +307,7 @@ function toMessageDto(message: Message): MessageDto {
     ...(message.documentResult !== undefined
       ? { documentResult: message.documentResult }
       : {}),
+    ...(message.retainedDocumentResult !== undefined ? { retainedDocumentResult: message.retainedDocumentResult } : {}),
     ...(message.attachmentSelection ? { attachmentSelection: message.attachmentSelection } : {}),
     attachments: message.attachments.map((attachment) =>
       attachment.kind === 'asset'

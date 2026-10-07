@@ -21,6 +21,11 @@ export const chatContextIpcChannels = {
   submitResponse: 'chat-context:submit-response',
   startResponse: 'chat-context:start-response',
   startAgentResponse: 'chat-context:start-agent-response',
+  cancelAgentSession: 'chat-context:cancel-agent-session',
+  cancelResponseStart: 'chat-context:cancel-response-start',
+  inspectReconciliation: 'chat-context:inspect-reconciliation',
+  reconcileReconciliation: 'chat-context:reconcile-reconciliation',
+  acknowledgeReconciliation: 'chat-context:acknowledge-reconciliation',
   startWorkflow: 'chat-context:start-workflow',
   cancelPlanning: 'chat-context:cancel-planning',
   answerWorkflow: 'chat-context:answer-workflow',
@@ -67,6 +72,14 @@ export type ChatContextIpcErrorCode =
   | 'response_execution_not_found'
   | 'response_execution_not_active'
   | 'response_execution_in_progress'
+  | 'response_start_cancelled'
+  | 'response_execution_timeout'
+  | 'response_execution_stopped'
+  | 'response_reconciliation_required'
+  | 'reconciliation_snapshot_changed'
+  | 'continuation_not_available'
+  | 'continuation_conflict'
+  | 'continuation_expired'
   | 'candidate_not_found'
   | 'candidate_unavailable'
   | 'route_selection_invalid'
@@ -168,6 +181,15 @@ export interface MessageDto {
     readonly sizeBytes: number;
     readonly validatedContent?: string;
   };
+  /** Host-verified artifact; response and parent task retain their stopped state. */
+  readonly retainedDocumentResult?: {
+    readonly workId: string;
+    readonly fileName: string;
+    readonly kind: 'ppt';
+    readonly sizeBytes: number;
+    readonly actualPageCount: number;
+    readonly planningTargetTotalPages?: number;
+  };
   readonly attachments: readonly ConversationAttachmentDto[];
   readonly attachmentSelection?: 'replace';
   readonly streamSequence?: number;
@@ -189,6 +211,8 @@ export interface ConversationDto {
   readonly storageScope: 'current_project' | 'legacy_project' | 'legacy_unbound';
   readonly readOnly: boolean;
   readonly messages: readonly MessageDto[];
+  readonly parentRuns?: readonly ConversationParentRunDto[];
+  readonly agentSessions?: readonly ConversationAgentSessionDto[];
   readonly createdAt: string;
   readonly updatedAt: string;
   readonly archivedAt?: string;
@@ -395,6 +419,7 @@ export interface ConversationResponseExecutionDto {
   readonly reasoningContent: string;
   readonly content: string;
   readonly taskProgress?: readonly ConversationTaskProgressSnapshot[];
+  readonly parentRun?: ConversationParentRunDto;
   readonly createdAt: string;
   readonly updatedAt: string;
 }
@@ -402,7 +427,31 @@ export interface ConversationResponseExecutionDto {
 export interface ConversationResponseStartDto {
   readonly conversation: ConversationDto;
   readonly execution: ConversationResponseExecutionDto;
+  readonly agentSession?: ConversationAgentSessionDto;
 }
+
+/** Public waiting state contains only Host-issued references and safe facts. */
+export interface ConversationAgentSessionDto {
+  readonly sessionId: string;
+  readonly revision: number;
+  readonly sourceMessageId: string;
+  readonly state: 'running' | 'waiting_user' | 'waiting_authorization' | 'needs_reconciliation' | 'completed' | 'failed' | 'cancelled' | 'expired';
+  readonly waiting?: {
+    readonly reason: 'input_required' | 'authorization_required' | 'continuation_required';
+    readonly allowedActions: readonly ('reply' | 'authorize' | 'continue')[];
+  };
+  readonly resumeToken?: string;
+  readonly deadlineAt: string;
+  readonly registeredWorkCount: number;
+  /** Host offers an explicit close when no response exists for the unknown planning task. */
+  readonly canCloseUnknown?: boolean;
+}
+
+export type ConversationAgentResponseStartDto = ConversationResponseStartDto | {
+  readonly conversation: ConversationDto;
+  readonly agentSession: ConversationAgentSessionDto;
+  readonly waiting: true;
+};
 
 export interface ConversationIntentPlanDto {
   readonly schemaVersion: 1;
@@ -563,6 +612,12 @@ export interface StartResponseRequest {
     readonly workflowId: string;
     readonly expectedRevision: number;
   };
+  readonly continuation?: {
+    readonly sessionId: string;
+    readonly expectedRevision: number;
+    readonly resumeToken: string;
+    readonly action: 'reply' | 'authorize' | 'continue';
+  };
   readonly productFeature: 'text_chat' | 'text_reasoning';
   readonly candidateId: string;
   readonly contextSelections: readonly {
@@ -578,6 +633,45 @@ export interface StartResponseRequest {
 }
 
 export type StartAgentResponseRequest = Omit<StartResponseRequest, 'workflow' | 'confirmed' | 'agentNative'>;
+
+export interface CancelResponseStartRequest {
+  readonly projectId: string;
+  readonly clientCommandId: string;
+}
+
+export interface CancelAgentSessionRequest {
+  readonly projectId: string;
+  readonly sessionId: string;
+  readonly expectedRevision: number;
+  readonly closeUnknown?: boolean;
+}
+
+export interface ConversationParentRunDto {
+  readonly responseExecutionId: string;
+  readonly sourceMessageId: string;
+  readonly state: 'running' | 'waiting_user' | 'waiting_authorization' | 'executing_tool' | 'needs_reconciliation' | 'completed' | 'failed' | 'cancelled';
+  readonly runRevision: number;
+  readonly reconciliationReason?: 'unknown_result' | 'unsettled_tool_call' | 'observation_missing' | 'entity_conflict';
+  readonly registeredWorkCount: number;
+  readonly acknowledged: boolean;
+}
+
+export interface ReconciliationInspectionDto {
+  readonly parentRun: ConversationParentRunDto;
+  readonly inspectToken?: string;
+  readonly expiresAt?: string;
+}
+
+export interface ResponseReconciliationRequest {
+  readonly projectId: string;
+  readonly responseExecutionId: string;
+}
+
+export interface AcknowledgeReconciliationRequest extends ResponseReconciliationRequest {
+  readonly expectedRunRevision: number;
+  readonly inspectToken: string;
+  readonly confirmed: boolean;
+}
 
 export interface StartWorkflowRequest {
   readonly clientCommandId: string;
@@ -856,6 +950,7 @@ export const chatContextRequestParsers = {
       !Array.isArray(value) &&
       Object.prototype.hasOwnProperty.call(value, 'workflow');
     const hasAgentNative = hasOwn(value, 'agentNative');
+    const hasContinuation = hasOwn(value, 'continuation');
     const record = exactRecord(value, [
       'clientCommandId',
       'conversation',
@@ -869,6 +964,7 @@ export const chatContextRequestParsers = {
       'contextSelections',
       'parameterValues',
       ...(hasAgentNative ? ['agentNative'] : []),
+      ...(hasContinuation ? ['continuation'] : []),
       'confirmed'
     ]);
     if (record.productFeature !== 'text_chat' && record.productFeature !== 'text_reasoning') {
@@ -887,6 +983,15 @@ export const chatContextRequestParsers = {
     const workflow = !hasWorkflow
       ? undefined
       : exactRecord(record.workflow, ['workflowId', 'expectedRevision']);
+    const continuation = hasContinuation
+      ? exactRecord(record.continuation, ['sessionId', 'expectedRevision', 'resumeToken', 'action'])
+      : undefined;
+    if (continuation && (record.agentNative !== true || !conversation || editedMessageId !== null || workflow)) {
+      throw new TypeError('Continuation must belong to an existing Agent conversation');
+    }
+    if (continuation && !['reply', 'authorize', 'continue'].includes(String(continuation.action))) {
+      throw new TypeError('Continuation action is invalid');
+    }
     if (!Array.isArray(record.contextSelections) || record.contextSelections.length > 100) {
       throw new TypeError('contextSelections are invalid');
     }
@@ -938,6 +1043,12 @@ export const chatContextRequestParsers = {
           }
         : {}),
       ...(hasAttachments ? { attachmentFileIds: attachmentIds(record.attachmentFileIds) } : {}),
+      ...(continuation ? { continuation: {
+        sessionId: controlledId(continuation.sessionId, 'continuation.sessionId'),
+        expectedRevision: revision(continuation.expectedRevision, 'continuation.expectedRevision'),
+        resumeToken: controlledId(continuation.resumeToken, 'continuation.resumeToken'),
+        action: continuation.action as 'reply' | 'authorize' | 'continue'
+      } } : {}),
       productFeature: record.productFeature,
       candidateId: controlledId(record.candidateId, 'candidateId'),
       contextSelections,
@@ -959,6 +1070,13 @@ export const chatContextRequestParsers = {
     delete (agentRequest as { confirmed?: boolean }).confirmed;
     delete (agentRequest as { agentNative?: boolean }).agentNative;
     return agentRequest;
+  },
+  cancelAgentSession(value: unknown): CancelAgentSessionRequest {
+    const record = exactRecord(value, ['projectId', 'sessionId', 'expectedRevision', ...(hasOwn(value, 'closeUnknown') ? ['closeUnknown'] : [])]);
+    return { projectId: controlledId(record.projectId, 'projectId'),
+      sessionId: controlledId(record.sessionId, 'sessionId'),
+      expectedRevision: revision(record.expectedRevision, 'expectedRevision'),
+      ...(record.closeUnknown === undefined ? {} : { closeUnknown: booleanValue(record.closeUnknown, 'closeUnknown') }) };
   },
   startWorkflow(value: unknown): StartWorkflowRequest {
     const hasAttachments = hasOwn(value, 'attachmentFileIds');
@@ -1044,6 +1162,22 @@ export const chatContextRequestParsers = {
   planningCommand(value: unknown): { readonly clientCommandId: string } {
     const record = exactRecord(value, ['clientCommandId']);
     return { clientCommandId: controlledId(record.clientCommandId, 'clientCommandId') };
+  },
+
+  cancelResponseStart(value: unknown): CancelResponseStartRequest {
+    const record = exactRecord(value, ['projectId', 'clientCommandId']);
+    return { projectId: controlledId(record.projectId, 'projectId'),
+      clientCommandId: controlledId(record.clientCommandId, 'clientCommandId') };
+  },
+  responseReconciliation(value: unknown): ResponseReconciliationRequest {
+    const record = exactRecord(value, ['projectId', 'responseExecutionId']);
+    return { projectId: controlledId(record.projectId, 'projectId'), responseExecutionId: controlledId(record.responseExecutionId, 'responseExecutionId') };
+  },
+  acknowledgeReconciliation(value: unknown): AcknowledgeReconciliationRequest {
+    const record = exactRecord(value, ['projectId', 'responseExecutionId', 'expectedRunRevision', 'inspectToken', 'confirmed']);
+    return { projectId: controlledId(record.projectId, 'projectId'), responseExecutionId: controlledId(record.responseExecutionId, 'responseExecutionId'),
+      expectedRunRevision: revision(record.expectedRunRevision, 'expectedRunRevision'), inspectToken: controlledId(record.inspectToken, 'inspectToken'),
+      confirmed: booleanValue(record.confirmed, 'confirmed') };
   },
   workflowRevision(value: unknown): WorkflowRevisionRequest {
     const record = exactRecord(value, ['workflowId', 'expectedRevision']);
@@ -1267,7 +1401,14 @@ export interface ChatContextApi {
   ): Promise<ChatContextIpcResult<ConversationResponseStartDto>>;
   startAgentResponse(
     request: StartAgentResponseRequest
-  ): Promise<ChatContextIpcResult<ConversationResponseStartDto>>;
+  ): Promise<ChatContextIpcResult<ConversationAgentResponseStartDto>>;
+  cancelAgentSession?(request: CancelAgentSessionRequest): Promise<ChatContextIpcResult<ConversationAgentSessionDto>>;
+  cancelResponseStart?(
+    request: CancelResponseStartRequest
+  ): Promise<ChatContextIpcResult<{ readonly cancelled: boolean }>>;
+  inspectReconciliation?(request: ResponseReconciliationRequest): Promise<ChatContextIpcResult<ReconciliationInspectionDto>>;
+  reconcileReconciliation?(request: ResponseReconciliationRequest): Promise<ChatContextIpcResult<ReconciliationInspectionDto>>;
+  acknowledgeReconciliation?(request: AcknowledgeReconciliationRequest): Promise<ChatContextIpcResult<ConversationParentRunDto>>;
   startWorkflow(
     request: StartWorkflowRequest
   ): Promise<ChatContextIpcResult<ConversationWorkflowStartDto>>;

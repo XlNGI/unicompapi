@@ -77,10 +77,12 @@ describe('production Design IR compiler and PPT renderer', () => {
     const all: Record<string, ReturnType<typeof shapes>> = {};
     for (const [name, designIR] of Object.entries(fixedDesignDirections())) {
       const snapshots: PresentationDesignCompilationSnapshot[] = [];
+      let expectedElementIds: readonly string[] = [];
       const result = await generateTemporaryDocumentFile({
         kind: 'ppt', outline: fixedDesignOutline, designIR, outputDirectory,
         presentationTemplate: 'business_minimal', now: '2026-09-29T06:00:00.000Z',
-        onDesignCompiled: snapshot => { snapshots.push(snapshot); }
+        onDesignCompiled: snapshot => { snapshots.push(snapshot); },
+        onPlanPrepared: prepared => { expectedElementIds = prepared.layoutIR?.pages[1]?.elements.map(element => element.elementId) ?? []; }
       });
       const bytes = await readFile(result.temporaryPath);
       const zip = await JSZip.loadAsync(bytes);
@@ -88,7 +90,8 @@ describe('production Design IR compiler and PPT renderer', () => {
       all[name] = shapes(xml);
       for (const text of fixedBodyTexts) expect(xml).toContain(text);
       expect(Object.keys(zip.files).filter(file => /^ppt\/slides\/slide\d+\.xml$/u.test(file))).toHaveLength(3);
-      expect(xml).toContain('UniComp Render p2-e');
+      expect(expectedElementIds.length).toBeGreaterThan(0);
+      for (const elementId of expectedElementIds) expect(xml).toContain(`UniComp Render ${elementId}`);
       expect(xml).not.toContain('UniComp Design');
       expect(snapshots[0]).toMatchObject({ designPath: 'design-aware', layoutStatus: 'success', renderPlanStatus: 'valid' });
       expect(snapshots[0].strategies.every(page => page.strategy !== 'legacy-template')).toBe(true);
@@ -182,7 +185,10 @@ describe('production Design IR compiler and PPT renderer', () => {
       const outputDirectory = await root();
       const render = createConfiguredOfficeRenderAdapter();
       expect(render).toBeDefined();
-      for (const designIR of Object.values(fixedDesignDirections())) {
+      // These three independent fixtures each receive an isolated Office
+      // profile and render directory. Keep the existing 10-second gate while
+      // awaiting every owned renderer before afterEach removes their inputs.
+      const directions = await Promise.allSettled(Object.values(fixedDesignDirections()).map(async designIR => {
         const result = await generateTemporaryDocumentFile({
           kind: 'ppt', outline: fixedDesignOutline, designIR, outputDirectory,
           now: '2026-09-29T06:00:00.000Z'
@@ -193,7 +199,8 @@ describe('production Design IR compiler and PPT renderer', () => {
         // inspection is unavailable; Office/PDF rasterization still proves
         // that all three pages rendered. Any other error is a real failure.
         expect((qa.diagnostics ?? []).filter(diagnostic => diagnostic.severity === 'error' && diagnostic.code !== 'font_missing')).toEqual([]);
-      }
+      }));
+      for (const direction of directions) if (direction.status === 'rejected') throw direction.reason;
     },
     10_000
   );

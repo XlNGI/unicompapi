@@ -1,10 +1,12 @@
 import { access, mkdir, mkdtemp, readdir, rm, readFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
-import { execFileSync, spawn } from 'node:child_process';
+import { execFileSync } from 'node:child_process';
 import JSZip from 'jszip';
 import type * as PdfJsModule from 'pdfjs-dist/legacy/build/pdf.mjs';
 import type { DocumentRenderAdapter, DocumentRenderResult } from './temporary-document-workflow';
+import { ManagedProcessSupervisor } from '../runtime/managed-process';
+import { pathToFileURL } from 'node:url';
 
 export interface OfficeRenderCommandConfig {
   readonly officeExecutable: string;
@@ -115,6 +117,7 @@ export function createOfficeRenderAdapter(
       const pngPrefix = path.join(workDirectory, 'page');
       await mkdir(pdfDirectory, { recursive: true });
       await run(config.officeExecutable, [
+        `-env:UserInstallation=${pathToFileURL(path.join(workDirectory, 'office-profile')).href}`,
         '--headless', '--convert-to', 'pdf', '--outdir', pdfDirectory, temporaryPath
       ], input.signal, timeoutMs);
       const pdfFiles = (await readdir(pdfDirectory)).filter((file) => /\.pdf$/iu.test(file));
@@ -319,6 +322,7 @@ async function run(
   signal: AbortSignal,
   timeoutMs: number
 ): Promise<void> {
+  signal.throwIfAborted();
   if (!executable || path.isAbsolute(executable) === false && /[\\/]/u.test(executable)) {
     throw new OfficeRenderUnavailableError('Renderer executable configuration is invalid');
   }
@@ -327,26 +331,25 @@ async function run(
   } catch {
     throw new OfficeRenderUnavailableError();
   }
-  await new Promise<void>((resolve, reject) => {
-    const child = spawn(executable, [...args], { windowsHide: true, stdio: 'ignore' });
-    let settled = false;
-    const finish = (error?: Error) => {
-      if (settled) return;
-      settled = true;
-      clearTimeout(timeout);
-      signal.removeEventListener('abort', abort);
-      if (error) reject(error); else resolve();
-    };
-    const abort = () => {
-      child.kill();
-      finish(new OfficeRenderUnavailableError('Rendering was cancelled'));
-    };
-    const timeout = setTimeout(() => {
-      child.kill();
-      finish(new OfficeRenderUnavailableError('Rendering timed out'));
-    }, timeoutMs);
-    signal.addEventListener('abort', abort, { once: true });
-    child.once('error', () => finish(new OfficeRenderUnavailableError()));
-    child.once('exit', (code) => code === 0 ? finish() : finish(new OfficeRenderUnavailableError('Renderer exited unsuccessfully')));
-  });
+  // Checking the binary can yield. Stop must be checked again before any spawn.
+  signal.throwIfAborted();
+  const supervisor = new ManagedProcessSupervisor();
+  let child;
+  try { child = supervisor.start({ command: executable, args, timeoutMs, maxStdoutBytes: 0, maxStderrBytes: 0 }); }
+  catch { throw new OfficeRenderUnavailableError(); }
+  const abort = () => { child.cancel('cancelled'); };
+  signal.addEventListener('abort', abort, { once: true });
+  if (signal.aborted) abort();
+  try {
+    const result = await child.promise;
+    if (signal.aborted || result.terminationReason === 'cancelled') throw new OfficeRenderUnavailableError('Rendering was cancelled');
+    if (result.terminationReason === 'timed_out') throw new OfficeRenderUnavailableError('Rendering timed out');
+    if (result.code !== 0) throw new OfficeRenderUnavailableError('Renderer exited unsuccessfully');
+  } catch (error) {
+    if (error instanceof OfficeRenderUnavailableError) throw error;
+    throw new OfficeRenderUnavailableError();
+  } finally {
+    signal.removeEventListener('abort', abort);
+    await supervisor.terminateAll();
+  }
 }

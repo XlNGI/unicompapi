@@ -32,6 +32,10 @@ import type { DocumentRevisionPatch } from '../../application/document-revision-
 import type { DocumentGenerationProgressCallback } from '../../application/document-generation-service';
 import type { PresentationPageScene } from '../../domain/entities/presentation-plan';
 import type { ProductionPresentationDesignIR } from '../../domain/entities/presentation-design-contract';
+import { buildDocumentContentSnapshot, parseDocumentContentSnapshot, documentContentSnapshotToOutline,
+  type DocumentContentSnapshotV1 } from '../../domain/entities/document-content-snapshot';
+import type { PresentationPlanPrepared } from './presentation-production-plan';
+import { canonicalizeLayoutJson } from '../../domain/entities/presentation-layout-ir';
 import { compilePresentationRenderPlan, buildPresentationDesignSnapshot } from './presentation-render-plan-compiler';
 import type { PresentationDesignCompilationSnapshot, PresentationDesignStatus } from './presentation-render-plan-compiler';
 import { renderPresentationRenderPlan } from './presentation-design-renderer';
@@ -69,6 +73,9 @@ export interface GenerateDocumentFileInput {
   readonly onProgress?: DocumentGenerationProgressCallback;
   readonly kind: DocumentWorkspaceKind;
   readonly outline: DocumentOutline;
+  readonly contentSnapshot?: DocumentContentSnapshotV1;
+  readonly onPlanPrepared?: PresentationPlanPrepared;
+  readonly compatibilityReason?: 'existing_parent_work_regeneration' | 'verified_parent_xml_patch';
   readonly outputDirectory: string;
   readonly now: string;
   readonly theme?: DocumentThemeId;
@@ -123,20 +130,27 @@ export async function generateTemporaryDocumentFile(
 async function buildDocumentOutput(
   input: GenerateDocumentFileInput
 ): Promise<{ readonly fileName: string; readonly buffer: Buffer }> {
+  const contentSnapshot = input.contentSnapshot ? parseDocumentContentSnapshot(input.contentSnapshot)
+    : buildDocumentContentSnapshot({ outline: { ...input.outline, kind: input.kind } });
+  const outline = documentContentSnapshotToOutline(contentSnapshot);
+  if (input.contentSnapshot && JSON.stringify(canonicalizeLayoutJson(outline)) !== JSON.stringify(canonicalizeLayoutJson(input.outline))) {
+    throw new TypeError('content_snapshot_conflict');
+  }
+  if (outline.kind !== input.kind) throw new TypeError('content_document_kind_mismatch');
   const extension = documentWorkspaceKindExtensions[input.kind];
-  const fileName = `${sanitizeFileName(input.outline.title)}-${timestampSuffix(
+  const fileName = `${sanitizeFileName(outline.title)}-${timestampSuffix(
     input.now
   )}${extension}`;
   const buffer =
     input.kind === 'word'
       ? await buildWordBuffer(
-          input.outline,
+          outline,
           resolveGenerationTheme(input.theme, input.customTheme)
         )
       : input.kind === 'excel'
-        ? await buildExcelBuffer(input.outline)
+        ? await buildExcelBuffer(outline)
         : await buildPptBuffer(
-            input.outline,
+            outline,
             resolvePresentationTemplate(
               input.presentationTemplate ??
                 (input.theme === 'financing' ? 'financing' : 'work_report')
@@ -147,7 +161,10 @@ async function buildDocumentOutput(
             input.onDesignCompiled,
             input.artDirectionStatus,
             input.designIrStatus,
-            input.artDirectionDiagnostics
+            input.artDirectionDiagnostics,
+            contentSnapshot,
+            input.onPlanPrepared,
+            input.compatibilityReason
         );
   const revisedBuffer =
     (input.revisionSourceBuffer || input.revisionSourcePath) && (input.revisionPatch || input.revisionPatches)
@@ -817,7 +834,10 @@ async function buildPptBuffer(
   onDesignCompiled?: GenerateDocumentFileInput['onDesignCompiled'],
   artDirectionStatus?: PresentationDesignStatus,
   designIrStatus?: PresentationDesignStatus,
-  artDirectionDiagnostics?: GenerateDocumentFileInput['artDirectionDiagnostics']
+  artDirectionDiagnostics?: GenerateDocumentFileInput['artDirectionDiagnostics'],
+  contentSnapshot?: DocumentContentSnapshotV1,
+  onPlanPrepared?: PresentationPlanPrepared,
+  compatibilityReason?: GenerateDocumentFileInput['compatibilityReason']
 ): Promise<Buffer> {
   const pptx = new PptxGenJS();
   pptx.layout = 'LAYOUT_WIDE';
@@ -834,11 +854,17 @@ async function buildPptBuffer(
     } catch { /* Progress recording cannot affect document generation. */ }
   };
   await reportLayout('started');
+  try {
   const renderOutline = normalizePresentationOutline(outline);
-  let compilation = designIR === undefined ? undefined : compilePresentationRenderPlan(outline, designIR, template.tokens);
+  const canonicalContent = contentSnapshot ?? buildDocumentContentSnapshot({ outline });
+  const compilation = designIR === undefined ? undefined : compilePresentationRenderPlan(outline, designIR, template.tokens, { contentSnapshot: canonicalContent });
+  if (compilation?.diagnostics.some(diagnostic => ['content_snapshot_conflict', 'invalid_content_snapshot'].includes(diagnostic.code))) {
+    throw new TypeError('content_snapshot_conflict');
+  }
   const containsSceneContent = Boolean(outline.coverScene?.elements.length || outline.closingScene?.elements.length ||
     outline.sections.some(section => section.scene?.elements.length));
   let fallbackReason = fallbackReasonFor(compilation, designIR !== undefined || artDirectionStatus === 'invalid', artDirectionStatus);
+  if (designIR === undefined && compatibilityReason) fallbackReason = compatibilityReason;
   if (fallbackReason === undefined && renderOutline.sections.length !== outline.sections.length) fallbackReason = 'outline_normalization';
   if (fallbackReason === undefined && containsSceneContent) fallbackReason = 'unsupported_scene_content';
   if (fallbackReason === undefined && images.length > 0) fallbackReason = 'external_images_require_legacy_path';
@@ -846,29 +872,18 @@ async function buildPptBuffer(
     fallbackReason = 'page_count_limit';
   }
 
-  let actualPageCount: number;
-  const designAware = fallbackReason === undefined && compilation?.plan !== undefined;
-  if (designAware) {
-    renderPresentationRenderPlan(pptx, compilation.plan!);
-    actualPageCount = compilation.plan!.pages.length;
-  } else {
-    let pages: ReturnType<typeof expandPresentationSections>;
-    try {
-      pages = expandPresentationSections(renderOutline, template, images);
-      actualPageCount = 1 + pages.length + (renderOutline.sections.length > 0 ? 1 : 0);
-      if (actualPageCount > presentationOutlineLimits.maxEstimatedPages) {
-        throw new PresentationLayoutError(`PPT 分页结果超过 ${presentationOutlineLimits.maxEstimatedPages} 页上限`);
-      }
-      renderPresentationCover(pptx, outline, template);
-      pages.forEach((page, index) => renderPresentationPage(pptx, page, template, index + 2));
-      if (renderOutline.sections.length > 0) renderPresentationClosing(pptx, renderOutline, template);
-    } catch (error) {
-      await reportLayout('failed');
-      throw error;
-    }
+  // A declared business organization is an execution requirement. A generic
+  // template cannot certify that its comparison, sequence or support ran.
+  if (designIR?.pages.some(page => page.organization !== undefined) && fallbackReason !== undefined) {
+    throw new PresentationLayoutError('The declared content organization could not be rendered');
   }
-  await reportLayout('completed', actualPageCount);
 
+  const designAware = fallbackReason === undefined && compilation?.plan !== undefined;
+  const pages = designAware ? undefined : expandPresentationSections(renderOutline, template, images);
+  const actualPageCount = designAware ? compilation!.plan!.pages.length : 1 + pages!.length + (renderOutline.sections.length > 0 ? 1 : 0);
+  if (actualPageCount > presentationOutlineLimits.maxEstimatedPages) {
+    throw new PresentationLayoutError(`PPT 分页结果超过 ${presentationOutlineLimits.maxEstimatedPages} 页上限`);
+  }
   const snapshot = buildPresentationDesignSnapshot(compilation, {
     requested: designIR !== undefined,
     legacyPageCount: actualPageCount,
@@ -878,9 +893,28 @@ async function buildPptBuffer(
     ...(artDirectionDiagnostics ? { artDirectionDiagnostics } : {}),
     ...(fallbackReason ? { fallbackReason } : {})
   });
+  // Unlike public progress, this private write is a required publication gate.
+  // The callback receives only Host-validated inputs before the writer creates a candidate.
+  await onPlanPrepared?.(structuredClone({ contentSnapshot: canonicalContent, outline,
+    ...(compilation?.designIR ? { designIR: compilation.designIR } : designIR ? { designIR } : {}),
+    ...(designAware && compilation?.layoutIR ? { layoutIR: compilation.layoutIR } : {}),
+    ...(designAware && compilation?.plan ? { renderPlan: compilation.plan } : {}), snapshot }));
+  if (designAware) {
+    renderPresentationRenderPlan(pptx, compilation.plan!);
+  } else {
+      renderPresentationCover(pptx, outline, template);
+      pages!.forEach((page, index) => renderPresentationPage(pptx, page, template, index + 2));
+      if (renderOutline.sections.length > 0) renderPresentationClosing(pptx, renderOutline, template);
+  }
+  await reportLayout('completed', actualPageCount);
+
   try { await onDesignCompiled?.(snapshot); }
   catch { /* Development observability cannot affect file generation. */ }
   return (await pptx.write({ outputType: 'nodebuffer' })) as Buffer;
+  } catch (error) {
+    await reportLayout('failed');
+    throw error;
+  }
 }
 
 function fallbackReasonFor(

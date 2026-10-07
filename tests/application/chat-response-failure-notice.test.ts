@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import type { MessageDto } from '../../src/shared/chat-context-ipc';
-import { failedResponseNotice } from '../../src/ui/chat-response-failure-notice';
+import { failedResponseNotice, responseFailureFactsFromTrace } from '../../src/ui/chat-response-failure-notice';
+import type { ProductionTraceEventDto } from '../../src/shared/conversation-production-ipc';
 
 function failedMessage(
   failureReason: MessageDto['failureReason'],
@@ -21,6 +22,71 @@ function failedMessage(
 }
 
 describe('chat response failure notices', () => {
+  it.each(['newapi', 'deepseek'])('distinguishes %s protocol and round failures from a depleted execution budget', provider => {
+    for (const [code, label] of [
+      ['tool_bridge_unavailable', '受控工具不可用'], ['invalid_tool_calls', '工具调用不符合要求'],
+      ['tool_loop_limit_exceeded', '模型执行轮数已达上限']
+    ]) {
+      const notice = failedResponseNotice(failedMessage('unavailable', '部分回答'), `${provider}.tool_loop_${code}`);
+      expect(notice).toContain(label);
+      expect(notice).toContain('已保留接收到的内容');
+      expect(notice).not.toMatch(/预算已耗尽|调度预算|余额|费用|请重试/);
+    }
+  });
+  it.each(['newapi', 'deepseek'])('distinguishes precise %s execution stops from network failures', provider => {
+    for (const [reason, label] of [
+      ['timeout', '任务执行达到总时限'], ['tool_call_limit', '执行调用次数已达上限'],
+      ['budget_exceeded', '执行调度预算已耗尽'], ['failure_limit', '连续执行失败已达上限'],
+      ['no_progress', '执行未产生新的进展'], ['cancelled', '任务执行已停止']
+    ]) {
+      const notice = failedResponseNotice(failedMessage('unavailable', '部分回答'), `${provider}.tool_loop_${reason}`);
+      expect(notice).toContain(label);
+      expect(notice).toContain('已保留接收到的内容');
+      expect(notice).not.toMatch(/网络|模型连接超时|费用|请重试|金额/);
+    }
+    expect(failedResponseNotice(failedMessage('unknown'), `${provider}.execution_timeout`)).toContain('任务执行达到总时限');
+    expect(failedResponseNotice(failedMessage('unknown'), `${provider}.prepare_timeout`)).toContain('执行准备达到时限');
+    expect(failedResponseNotice(failedMessage('unknown'), `${provider}.tool_timeout`)).toContain('受控工具执行达到时限');
+  });
+
+  it.each(['newapi', 'deepseek'])('does not suggest retrying a %s unknown tool result', provider => {
+    const notice = failedResponseNotice(failedMessage('unavailable'), `${provider}.tool_loop_unknown_result`);
+    expect(notice).toContain('执行结果需要核对');
+    expect(notice).toContain('核对前不要重复生成');
+    expect(notice).not.toMatch(/请重试|重新生成|连接超时/);
+  });
+
+  it('uses persisted stop facts after reopening and preserves a registered artifact on either side of Stop', () => {
+    const stopped: ProductionTraceEventDto = { schemaVersion: 1, projectId: 'project', conversationId: 'conversation',
+      sourceMessageId: 'user', traceId: 'trace', sequence: 2, code: 'task_complete', status: 'failed',
+      operationId: 'execution_budget', facts: { stopReason: 'timeout', timeoutScope: 'execution', parentElapsedMs: 360_000,
+        parentRemainingMs: 0, toolCallsUsed: 2, costUnitsUsed: 16 }, occurredAt: '2026-10-03T00:00:00.000Z' };
+    for (const sequence of [1, 3]) {
+      const registered = { ...stopped, sequence, code: 'document_register' as const, status: 'completed' as const, facts: undefined };
+      const localCompleted = { ...registered, sequence: 4, code: 'task_complete' as const };
+      const facts = responseFailureFactsFromTrace([registered, stopped, localCompleted]);
+      const notice = failedResponseNotice(failedMessage('unavailable'), undefined, facts);
+      expect(notice).toContain('任务执行达到总时限');
+      expect(notice).toContain('已保存的文件保留，后续回复已停止');
+      expect(notice).not.toMatch(/未生成|trace|360000|16|费用|网络|重试/);
+    }
+  });
+
+  it('does not invent a precise cause for the legacy loop-limit code', () => {
+    const notice = failedResponseNotice(failedMessage('unavailable'), 'newapi.tool_loop_limit');
+    expect(notice).toContain('历史记录未保存具体停止原因');
+    expect(notice).not.toMatch(/超时|预算.*耗尽|轮数.*上限|请重试/);
+  });
+
+  it('does not keep an earlier child stop after a later completed response', () => {
+    const base: ProductionTraceEventDto = { schemaVersion: 1, projectId: 'project', conversationId: 'conversation',
+      sourceMessageId: 'user', traceId: 'trace', sequence: 1, code: 'task_complete', status: 'failed',
+      facts: { stopReason: 'timeout', timeoutScope: 'design' }, occurredAt: '2026-10-03T00:00:00.000Z' };
+    const facts = responseFailureFactsFromTrace([base, { ...base, sequence: 2, code: 'model_response', status: 'completed',
+      facts: { purpose: 'content' } }]);
+    expect(facts.stopReason).toBeUndefined();
+  });
+
   it.each(['', '已收到的部分回答'])('explains HTTP 400 request rejection despite the legacy invalid-response projection (%s)', (content) => {
     const notice = failedResponseNotice(failedMessage('invalid_response', content), 'newapi.invalid_request');
 

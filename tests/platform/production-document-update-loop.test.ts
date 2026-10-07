@@ -1,12 +1,12 @@
 import { createHash } from 'node:crypto';
-import { mkdir, mkdtemp, readFile, rm } from 'node:fs/promises';
+import { mkdir, mkdtemp, readFile, readdir, rm } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
   addCompletedAssistantMessage, addUserMessage, attachDocumentResultToMessage,
-  createProjectConversation, createProvider, createProviderConnection, createProviderModel, createProviderProtocolBinding,
-  toConnectionId, toConversationId, toIsoTimestamp, toMessageId, toModelId, toProjectId, toProtocolBindingId, toProviderId, toWorkId,
+  createConversationResponseDraft, createProjectConversation, createProvider, createProviderConnection, createProviderModel, createProviderProtocolBinding,
+  toConnectionId, toConversationId, toConversationResponseDraftId, toIsoTimestamp, toMessageId, toModelId, toProjectId, toProtocolBindingId, toProviderId, toWorkId,
   type Conversation
 } from '../../src/domain';
 import { canonicalToolInputSchema, createCanonicalToolRegistry } from '../../src/domain/entities/canonical-tool-contract';
@@ -28,6 +28,7 @@ import * as officeRenderer from '../../src/platform/documents/office-render-adap
 import { DocumentMutationCoordinator } from '../../src/application/document-mutation-coordinator';
 import { DocumentTaskRuntimeService } from '../../src/application/document-task-runtime-service';
 import { ConversationResponseExecutionLifecycle } from '../../src/platform/providers/conversation-response-streaming';
+import { ConversationDocumentToolSessionService } from '../../src/platform/documents/conversation-document-tool-session';
 
 const roots: string[] = [];
 const cleanups: Array<() => Promise<void>> = [];
@@ -254,6 +255,7 @@ async function fixture(revokeBeforeWrite = false, cancelBeforeWrite = false, mut
       ? await runtime.responses.startAgent(request)
       : await runtime.responses.start({ ...request, confirmed: true });
     if (!started.ok) throw new Error('Start failed: ' + started.error.code);
+    if (!('execution' in started.value)) throw new Error('Expected an executable document update response');
     const executionId = started.value.execution.responseExecutionId;
     activeExecutionId = executionId;
     await vi.waitFor(async () => {
@@ -276,6 +278,47 @@ async function fixture(revokeBeforeWrite = false, cancelBeforeWrite = false, mut
 }
 
 describe('production NewAPI update_element continuation', () => {
+  it('does not invent a new lineage when the identity of a twice-mutated registered PPT is missing', async () => {
+    const data = await fixture();
+    expect((await data.run()).state).toBe('completed');
+    const head = (await data.headStore.get(data.identity.documentLineageId))!;
+    expect(head.runtimeRevision).toBe(3);
+    const old = await new RegisteredPresentationReader({ rootDirectory: data.rootDirectory, projectId }).read(data.source.work.id);
+    const current = await new RegisteredPresentationReader({ rootDirectory: data.rootDirectory, projectId }).read(toWorkId(head.headWorkId));
+    const primary = path.join(data.rootDirectory, 'entities', 'presentation-identity-index',
+      `work-${createHash('sha256').update(head.headWorkId).digest('hex')}.json`);
+    await rm(primary);
+    const before = (await readdir(path.dirname(primary))).sort();
+    const conversations = new JsonProjectConversationRepository(data.storage, projectId);
+    const stored = (await conversations.get(toConversationId('conversation-production-update')))!;
+    const publishedAt = toIsoTimestamp(new Date().toISOString());
+    const resultId = toMessageId('latest-controlled-version-result');
+    const published = addCompletedAssistantMessage(stored, { id: resultId, content: '已登记并核验最新修改版本。', createdAt: publishedAt });
+    await conversations.save(published, stored.revision);
+    const prior = attachDocumentResultToMessage(published, resultId, { kind: 'ppt', workId: current.work.id,
+      fileName: current.fileName, sizeBytes: current.buffer.length }, publishedAt);
+    await conversations.save(prior, published.revision);
+    const userMessageId = toMessageId('missing-identity-followup');
+    const conversation = addUserMessage(prior, { id: userMessageId, content: '修改当前 PPT 第二页的文字', createdAt: toIsoTimestamp(new Date().toISOString()) });
+    await conversations.save(conversation, prior.revision);
+    const message = conversation.messages.at(-1)!;
+    const draft = createConversationResponseDraft({ id: toConversationResponseDraftId('missing-identity-draft'), projectId,
+      conversationId: conversation.id, conversationRevision: conversation.revision,
+      userMessageId: message.id, userMessageRevision: message.revision, productFeature: 'text_chat', createdAt: message.createdAt });
+    const service = new ConversationDocumentToolSessionService({ rootDirectory: data.rootDirectory, projectId, conversations,
+      mutation: { renderPreview: data.render } });
+    cleanups.push(() => service.dispose());
+    await expect(service.prepare({ conversation, draft })).rejects.toMatchObject({ code: 'identity_unresolved' });
+    expect(await data.identityStore.getForWork(head.headWorkId)).toBeUndefined();
+    expect(await data.headStore.get(data.identity.documentLineageId)).toEqual(head);
+    expect((await readdir(path.dirname(primary))).sort()).toEqual(before);
+    expect(await data.works.list(projectId)).toHaveLength(3);
+    const reader = new RegisteredPresentationReader({ rootDirectory: data.rootDirectory, projectId });
+    expect((await reader.read(data.source.work.id)).buffer).toEqual(old.buffer);
+    expect((await reader.read(toWorkId(head.headWorkId))).buffer).toEqual(current.buffer);
+    expect(data.mutateSpy).toHaveBeenCalledTimes(2);
+  }, 20_000);
+
   it('reads, updates the same element twice and reads each actual revision without changing duplicate text', async () => {
     const data = await fixture();
     const execution = await data.run();

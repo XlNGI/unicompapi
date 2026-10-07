@@ -1,9 +1,13 @@
 import type { ConversationDto, MessageDto } from '../../shared/chat-context-ipc';
-import type { ProductionTraceEventDto } from '../../shared/conversation-production-ipc';
+import { productionTraceEventIdentity, type ProductionTraceEventDto } from '../../shared/conversation-production-ipc';
 
 export function mergeProductionEvents(current: readonly ProductionTraceEventDto[], incoming: readonly ProductionTraceEventDto[]) {
-  const bySequence = new Map(current.map((event) => [`${event.conversationId}:${event.sequence}`, event]));
-  for (const event of incoming) bySequence.set(`${event.conversationId}:${event.sequence}`, event);
+  const bySequence = new Map(current.map((event) => [productionTraceEventIdentity(event), event]));
+  for (const event of incoming) {
+    const key = productionTraceEventIdentity(event);
+    const existing = bySequence.get(key);
+    if (!event.runId || !event.runEventId || !existing || event.sequence < existing.sequence) bySequence.set(key, event);
+  }
   return [...bySequence.values()].sort((left, right) => left.sequence - right.sequence);
 }
 

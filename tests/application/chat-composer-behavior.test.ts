@@ -48,6 +48,12 @@ function find(node: ReactNode, predicate: (element: Element) => boolean): Elemen
   return predicate(element) ? element : find(element.props.children as ReactNode, predicate);
 }
 
+function deferred<T>() {
+  let resolve!: (value: T) => void;
+  const promise = new Promise<T>((accept) => { resolve = accept; });
+  return { promise, resolve };
+}
+
 describe('chat composer event behavior', () => {
   let tree: ReactElement;
   let draftTree: ReactNode;
@@ -190,6 +196,268 @@ describe('chat composer event behavior', () => {
     await send('enter');
     expect(startWorkflow).not.toHaveBeenCalled();
     expect(element('对话输入').props.value).toBe('产品介绍 PPT');
+  });
+
+  it.each(['enter', 'button'] as const)('%s sends a trimmed draft to the selected conversation agent', async (method) => {
+    initialConversationId = conversation.conversationId;
+    const startAgentResponse = vi.fn(async () => ({
+      ok: false as const,
+      error: { code: 'request_rejected' as const, message: 'Test response failure' }
+    }));
+    Object.assign(window.unicomp!.chatContexts!, { startAgentResponse });
+    await settle();
+    await type('  简单聊天  ');
+
+    await send(method);
+
+    expect(startAgentResponse).toHaveBeenCalledWith(expect.objectContaining({ content: '简单聊天' }));
+    expect(startWorkflow).not.toHaveBeenCalled();
+  });
+
+  it('cancels an Agent start immediately by its project command and preserves the draft', async () => {
+    initialConversationId = conversation.conversationId;
+    const pending = deferred<{ ok: false; error: { code: 'response_start_cancelled'; message: string } }>();
+    const startAgentResponse = vi.fn(async (_request: { clientCommandId: string }) => pending.promise);
+    const cancelResponseStart = vi.fn(async () => ({ ok: true, value: { cancelled: true } }));
+    Object.assign(window.unicomp!.chatContexts!, { startAgentResponse, cancelResponseStart });
+    await settle();
+    await type('  当前聊天草稿  ');
+    await send('button');
+    expect(startAgentResponse).toHaveBeenCalledOnce();
+    const stop = element('停止生成');
+    expect(stop.props.disabled).toBe(false);
+    (stop.props.onClick as () => void)();
+    (stop.props.onClick as () => void)();
+    expect(cancelResponseStart).toHaveBeenCalledOnce();
+    expect(cancelResponseStart).toHaveBeenCalledWith({ projectId: session.projectId,
+      clientCommandId: startAgentResponse.mock.calls[0][0].clientCommandId });
+    pending.resolve({ ok: false, error: { code: 'response_start_cancelled', message: 'Cancelled' } });
+    await settle(24);
+    expect(element('对话输入').props.value).toBe('  当前聊天草稿  ');
+    expect(startAgentResponse).toHaveBeenCalledOnce();
+    expect(element('发送消息').props.disabled).toBe(false);
+  });
+
+  it('shows a local waiting response without a provider execution and sends the next answer to the same task', async () => {
+    initialConversationId = conversation.conversationId;
+    const agentSession = { sessionId: 'session-root-1', revision: 2, sourceMessageId: 'source-1', state: 'waiting_user',
+      waiting: { reason: 'input_required', allowedActions: ['reply'] }, resumeToken: 'resume-token-1',
+      deadlineAt: new Date(Date.now() + 600000).toISOString(), registeredWorkCount: 0 };
+    const waitingConversation = { ...conversation, revision: 2, agentSessions: [agentSession] };
+    const startAgentResponse = vi.fn(async () => ({ ok: true, value: { conversation: waitingConversation, agentSession, waiting: true } }));
+    Object.assign(window.unicomp!.chatContexts!, { startAgentResponse });
+    await settle();
+    await type('帮我做一个 PPT');
+    await send('button');
+    await settle(16);
+    expect(element('对话输入').props.value).toBe('');
+    expect(element('发送消息').props.disabled).toBe(true);
+    const waitingCard = find(tree, item => typeof item.type === 'function' && (item.type as { name?: string }).name === 'AgentSessionNotice');
+    expect(waitingCard?.props.session).toEqual(agentSession);
+    await type('主题是产品介绍，给客户看');
+    await send('enter');
+    expect(startAgentResponse).toHaveBeenCalledTimes(2);
+    expect(startAgentResponse).toHaveBeenLastCalledWith(expect.objectContaining({
+      content: '主题是产品介绍，给客户看',
+      continuation: { sessionId: agentSession.sessionId, expectedRevision: 2, resumeToken: agentSession.resumeToken, action: 'reply' }
+    }));
+    expect(startWorkflow).not.toHaveBeenCalled();
+    expect(answerWorkflow).not.toHaveBeenCalled();
+  });
+
+  it('does not turn an unknown task result into a new provider request', async () => {
+    initialConversationId = conversation.conversationId;
+    const agentSession = { sessionId: 'session-root-unknown', revision: 3, sourceMessageId: 'source-1',
+      state: 'needs_reconciliation', deadlineAt: new Date(Date.now() + 600000).toISOString(), registeredWorkCount: 1 };
+    const startAgentResponse = vi.fn();
+    Object.assign(window.unicomp!.chatContexts!, { startAgentResponse,
+      listConversations: vi.fn(async () => ({ ok: true, value: [{ ...conversation, agentSessions: [agentSession] }] })),
+      getConversation: vi.fn(async () => ({ ok: true, value: { ...conversation, agentSessions: [agentSession] } })) });
+    await settle();
+    await type('继续');
+    await send('button');
+    expect(startAgentResponse).not.toHaveBeenCalled();
+    expect(element('对话输入').props.value).toBe('继续');
+  });
+
+  it('guards repeated confirmation clicks before React updates and forwards the original task token', async () => {
+    initialConversationId = conversation.conversationId;
+    const agentSession = { sessionId: 'session-root-authorization', revision: 3, sourceMessageId: 'source-1',
+      state: 'waiting_authorization', waiting: { reason: 'authorization_required', allowedActions: ['authorize'] },
+      resumeToken: 'single-confirmation-token', deadlineAt: new Date(Date.now() + 600000).toISOString(), registeredWorkCount: 0 };
+    const pending = deferred<{ ok: false; error: { code: 'continuation_conflict'; message: string } }>();
+    const startAgentResponse = vi.fn(async () => pending.promise);
+    Object.assign(window.unicomp!.chatContexts!, { startAgentResponse,
+      listConversations: vi.fn(async () => ({ ok: true, value: [{ ...conversation, agentSessions: [agentSession] }] })),
+      getConversation: vi.fn(async () => ({ ok: true, value: { ...conversation, agentSessions: [agentSession] } })) });
+    await settle();
+    const waitingCard = find(tree, item => typeof item.type === 'function' && (item.type as { name?: string }).name === 'AgentSessionNotice')!;
+    const confirm = waitingCard.props.onContinue as (action: string) => void;
+    confirm('authorize'); confirm('authorize');
+    expect(startAgentResponse).toHaveBeenCalledOnce();
+    expect(startAgentResponse).toHaveBeenCalledWith(expect.objectContaining({ content: '确认执行', continuation: {
+      sessionId: agentSession.sessionId, expectedRevision: 3, resumeToken: 'single-confirmation-token', action: 'authorize'
+    } }));
+    pending.resolve({ ok: false, error: { code: 'continuation_conflict', message: 'Used' } });
+    await settle(20);
+  });
+
+  it('requires an explicit new-task action after expiration and never sends the expired resume token', async () => {
+    initialConversationId = conversation.conversationId;
+    const agentSession = { sessionId: 'expired-session', revision: 4, sourceMessageId: 'source-1', state: 'expired',
+      deadlineAt: '2020-01-01T00:00:00.000Z', registeredWorkCount: 1 };
+    const startAgentResponse = vi.fn(async (_request: unknown) => ({ ok: false, error: { code: 'invalid_request', message: 'Test' } }));
+    Object.assign(window.unicomp!.chatContexts!, { startAgentResponse,
+      listConversations: vi.fn(async () => ({ ok: true, value: [{ ...conversation, agentSessions: [agentSession] }] })),
+      getConversation: vi.fn(async () => ({ ok: true, value: { ...conversation, agentSessions: [agentSession] } })) });
+    await settle();
+    await type('制作一个新的销售汇报 PPT');
+    await send('button');
+    expect(startAgentResponse).not.toHaveBeenCalled();
+    const waitingCard = find(tree, item => typeof item.type === 'function' && (item.type as { name?: string }).name === 'AgentSessionNotice')!;
+    (waitingCard.props.onNewTask as () => void)();
+    await settle();
+    await send('button');
+    expect(startAgentResponse).toHaveBeenCalledOnce();
+    expect(startAgentResponse).toHaveBeenCalledWith(expect.objectContaining({ content: '制作一个新的销售汇报 PPT' }));
+    expect(startAgentResponse.mock.calls[0][0]).not.toHaveProperty('continuation');
+  });
+  it('shows the new waiting task ahead of an older expired record and forwards the new nonce', async () => {
+    initialConversationId = conversation.conversationId;
+    const expired = { sessionId: 'old-expired', revision: 4, sourceMessageId: 'old-source', state: 'expired',
+      deadlineAt: '2020-01-01T00:00:00.000Z', registeredWorkCount: 0 };
+    const waiting = { sessionId: 'new-waiting', revision: 2, sourceMessageId: 'new-source', state: 'waiting_user',
+      waiting: { reason: 'input_required', allowedActions: ['reply'] }, resumeToken: 'new-task-resume-token',
+      deadlineAt: new Date(Date.now() + 600000).toISOString(), registeredWorkCount: 0 };
+    const active = { ...conversation, agentSessions: [expired, waiting] };
+    const startAgentResponse = vi.fn(async () => ({ ok: true, value: { conversation: active, agentSession: waiting, waiting: true } }));
+    Object.assign(window.unicomp!.chatContexts!, { startAgentResponse,
+      listConversations: vi.fn(async () => ({ ok: true, value: [active] })), getConversation: vi.fn(async () => ({ ok: true, value: active })) });
+    await settle();
+    const card = find(tree, item => typeof item.type === 'function' && (item.type as { name?: string }).name === 'AgentSessionNotice')!;
+    expect(card.props.session).toEqual(waiting);
+    await type('主题是新的销售培训'); await send('enter');
+    expect(startAgentResponse).toHaveBeenCalledWith(expect.objectContaining({ content: '主题是新的销售培训', continuation: {
+      sessionId: 'new-waiting', expectedRevision: 2, resumeToken: 'new-task-resume-token', action: 'reply'
+    } }));
+  });
+  it('keeps an unresolved unknown task ahead of a more recent waiting task', async () => {
+    initialConversationId = conversation.conversationId;
+    const unknown = { sessionId: 'older-unknown', revision: 4, sourceMessageId: 'old-source', state: 'needs_reconciliation',
+      deadlineAt: '2020-01-01T00:00:00.000Z', registeredWorkCount: 1 };
+    const waiting = { sessionId: 'newer-waiting', revision: 2, sourceMessageId: 'new-source', state: 'waiting_user',
+      waiting: { reason: 'input_required', allowedActions: ['reply'] }, resumeToken: 'new-task-resume-token',
+      deadlineAt: new Date(Date.now() + 600000).toISOString(), registeredWorkCount: 0 };
+    const active = { ...conversation, agentSessions: [unknown, waiting] }, startAgentResponse = vi.fn();
+    Object.assign(window.unicomp!.chatContexts!, { startAgentResponse,
+      listConversations: vi.fn(async () => ({ ok: true, value: [active] })), getConversation: vi.fn(async () => ({ ok: true, value: active })) });
+    await settle();
+    const card = find(tree, item => typeof item.type === 'function' && (item.type as { name?: string }).name === 'AgentSessionNotice')!;
+    expect(card.props.session).toEqual(unknown);
+    await type('主题是新的销售培训'); await send('enter');
+    expect(startAgentResponse).not.toHaveBeenCalled();
+  });
+  it('does not revive an older expired task after the newer task was completed', async () => {
+    initialConversationId = conversation.conversationId;
+    const expired = { sessionId: 'old-expired', revision: 4, sourceMessageId: 'old-source', state: 'expired',
+      deadlineAt: '2020-01-01T00:00:00.000Z', registeredWorkCount: 0 };
+    const completed = { sessionId: 'new-completed', revision: 7, sourceMessageId: 'new-source', state: 'completed',
+      deadlineAt: new Date(Date.now() + 600000).toISOString(), registeredWorkCount: 1 };
+    const active = { ...conversation, agentSessions: [expired, completed] };
+    const startAgentResponse = vi.fn(async (_request: unknown) => ({ ok: false, error: { code: 'invalid_request', message: 'Synthetic stop before execution' } }));
+    Object.assign(window.unicomp!.chatContexts!, { startAgentResponse,
+      listConversations: vi.fn(async () => ({ ok: true, value: [active] })), getConversation: vi.fn(async () => ({ ok: true, value: active })) });
+    await settle();
+    expect(find(tree, item => typeof item.type === 'function' && (item.type as { name?: string }).name === 'AgentSessionNotice')).toBeUndefined();
+    await type('继续讨论新的主题'); await send('button');
+    expect(startAgentResponse).toHaveBeenCalledOnce();
+    expect(startAgentResponse.mock.calls[0][0]).not.toHaveProperty('continuation');
+  });
+  it('explicitly closes an unknown planning task without a response or selected model and refreshes its root state', async () => {
+    initialConversationId = conversation.conversationId; candidateEnabled = false;
+    const unknown = { sessionId: 'unknown-planning', revision: 4, sourceMessageId: 'old-source', state: 'needs_reconciliation',
+      deadlineAt: '2020-01-01T00:00:00.000Z', registeredWorkCount: 1, canCloseUnknown: true };
+    let current = { ...conversation, agentSessions: [unknown] };
+    const pending = deferred<{ ok: true; value: typeof unknown }>();
+    const cancelAgentSession = vi.fn(async () => pending.promise), startAgentResponse = vi.fn();
+    Object.assign(window.unicomp!.chatContexts!, { startAgentResponse, cancelAgentSession,
+      listConversations: vi.fn(async () => ({ ok: true, value: [current] })), getConversation: vi.fn(async () => ({ ok: true, value: current })) });
+    await settle();
+    const card = find(tree, item => typeof item.type === 'function' && (item.type as { name?: string }).name === 'AgentSessionNotice')!;
+    const rendered = (card.type as (props: Record<string, unknown>) => ReactNode)(card.props);
+    const close = find(rendered, item => item.props.onClick === card.props.onCloseUnknown)!;
+    expect(close.props.disabled).toBe(false);
+    (card.props.onCloseUnknown as () => void)(); (card.props.onCloseUnknown as () => void)();
+    expect(cancelAgentSession).toHaveBeenCalledOnce();
+    expect(cancelAgentSession).toHaveBeenCalledWith({ projectId: session.projectId, sessionId: unknown.sessionId, expectedRevision: 4, closeUnknown: true });
+    const closed = { ...unknown, revision: 5, state: 'failed', canCloseUnknown: false };
+    current = { ...conversation, revision: 2, agentSessions: [closed] }; pending.resolve({ ok: true, value: closed });
+    await settle(24);
+    expect(find(tree, item => typeof item.type === 'function' && (item.type as { name?: string }).name === 'AgentSessionNotice')).toBeUndefined();
+    expect(startAgentResponse).not.toHaveBeenCalled();
+  });
+  it('does not offer the planning-close path for an unknown task that already has a response', async () => {
+    initialConversationId = conversation.conversationId;
+    const unknown = { sessionId: 'unknown-with-response', revision: 4, sourceMessageId: 'old-source', state: 'needs_reconciliation',
+      deadlineAt: new Date(Date.now() + 600000).toISOString(), registeredWorkCount: 1 };
+    const active = { ...conversation, agentSessions: [unknown] }, cancelAgentSession = vi.fn();
+    Object.assign(window.unicomp!.chatContexts!, { cancelAgentSession,
+      listConversations: vi.fn(async () => ({ ok: true, value: [active] })), getConversation: vi.fn(async () => ({ ok: true, value: active })) });
+    await settle();
+    const card = find(tree, item => typeof item.type === 'function' && (item.type as { name?: string }).name === 'AgentSessionNotice')!;
+    const rendered = (card.type as (props: Record<string, unknown>) => ReactNode)(card.props);
+    expect(find(rendered, item => containsText(item.props.children as ReactNode, '确认关闭本次任务'))).toBeUndefined();
+    (card.props.onCloseUnknown as () => void)();
+    expect(cancelAgentSession).not.toHaveBeenCalled();
+  });
+
+  it('keeps the deferred post-start cancellation fallback when the preload has no start-cancel API', async () => {
+    initialConversationId = conversation.conversationId;
+    const execution = { responseExecutionId: 'legacy-start-execution', conversationId: conversation.conversationId,
+      userMessageId: 'legacy-user', assistantMessageId: 'legacy-assistant', state: 'pending', content: '', streamSequence: 0 };
+    const pending = deferred<{ ok: true; value: { conversation: typeof conversation; execution: typeof execution } }>();
+    const startAgentResponse = vi.fn(async (_request: { clientCommandId: string }) => pending.promise);
+    const cancelResponseExecution = vi.fn(async () => ({ ok: true, value: { ...execution, state: 'cancelled' } }));
+    Object.assign(window.unicomp!.chatContexts!, { startAgentResponse, cancelResponseExecution,
+      subscribeResponseEvents: vi.fn(() => () => undefined), replayResponseEvents: vi.fn(async () => ({ ok: true, value: [] })) });
+    await settle();
+    await type('旧环境草稿');
+    await send('button');
+    (element('停止生成').props.onClick as () => void)();
+    expect(cancelResponseExecution).not.toHaveBeenCalled();
+    pending.resolve({ ok: true, value: { conversation, execution } });
+    await settle(30);
+    expect(cancelResponseExecution).toHaveBeenCalledWith(execution.responseExecutionId);
+    expect(element('对话输入').props.value).toBe('旧环境草稿');
+  });
+
+  it('cancels a document response start before execution identity exists and retains the source request', async () => {
+    const requirements = '帮我生成10页PPT';
+    const documentConversation = { ...conversation, messages: [{ messageId: 'source-1', role: 'user', state: 'completed',
+      content: requirements, attachments: [] }] };
+    const ready = { ...workflow, status: 'ready', plan: { ...workflow.plan, action: 'create', documentKind: 'ppt',
+      parameters: { topic: '季度经营' } }, pendingQuestions: [] };
+    const pending = deferred<{ ok: false; error: { code: 'response_start_cancelled'; message: string } }>();
+    startWorkflow.mockResolvedValue({ ok: true, value: { conversation: documentConversation, workflow: ready } });
+    startResponse.mockImplementation(async () => pending.promise);
+    const cancelResponseStart = vi.fn(async () => ({ ok: true, value: { cancelled: true } }));
+    Object.assign(window.unicomp!.chatContexts!, { cancelResponseStart });
+    const prepareGeneration = vi.fn();
+    Object.assign(window.unicomp!, { documentGeneration: { prepareGeneration } });
+    try {
+      await settle();
+      await type(requirements);
+      await send('button');
+      await settle(24);
+      expect(startResponse).toHaveBeenCalledOnce();
+      (element('停止生成').props.onClick as () => void)();
+      expect(cancelResponseStart).toHaveBeenCalledWith({ projectId: session.projectId,
+        clientCommandId: startResponse.mock.calls[0][0].clientCommandId });
+      pending.resolve({ ok: false, error: { code: 'response_start_cancelled', message: 'Cancelled' } });
+      await settle(30);
+      expect(prepareGeneration).not.toHaveBeenCalled();
+      expect(element('对话输入').props.value).toBe(requirements);
+    } finally { startResponse.mockReset(); }
   });
 
   it('restores the selected reasoning model and feature together after leaving and reopening chat', async () => {
@@ -617,6 +885,113 @@ describe('chat composer event behavior', () => {
       item.props.className === 'uc-chat-page__workspace-conversation-row' &&
       JSON.stringify(item.props.children).includes('Beta chat')
     );
+    expect(betaRow?.props['aria-current']).toBe('true');
+  });
+
+  it('does not let an older project load overwrite the latest session snapshot', async () => {
+    const firstSession = deferred<unknown>();
+    const firstConversations = deferred<unknown>();
+    const betaSession = { projectId: 'project-2', projectName: 'Beta', projectPath: '/beta' };
+    const betaConversation = { ...conversation, conversationId: 'conversation-beta', projectId: 'project-2', title: 'Beta chat' };
+    const listeners = new Map<string, Set<(event: Event) => void>>();
+    let sessionReads = 0;
+    let conversationReads = 0;
+
+    Object.assign(window.unicomp!.storage!, {
+      getProjectSession: vi.fn(() => ++sessionReads === 1
+        ? firstSession.promise
+        : Promise.resolve({ ok: true as const, value: betaSession })),
+      listProjects: vi.fn(async () => ({ ok: true, value: [
+        { projectId: session.projectId, projectName: 'Test', availability: 'available', lastOpenedAt: conversation.updatedAt },
+        { projectId: betaSession.projectId, projectName: betaSession.projectName, availability: 'available', lastOpenedAt: conversation.updatedAt }
+      ] }))
+    });
+    Object.assign(window.unicomp!.chatContexts!, {
+      listConversations: vi.fn(() => ++conversationReads === 1
+        ? firstConversations.promise
+        : Promise.resolve({ ok: true as const, value: [betaConversation] }))
+    });
+    window.addEventListener = vi.fn((type: string, listener: (event: Event) => void) => {
+      const set = listeners.get(type) ?? new Set<(event: Event) => void>();
+      set.add(listener);
+      listeners.set(type, set);
+    }) as typeof window.addEventListener;
+    window.removeEventListener = vi.fn((type: string, listener: (event: Event) => void) => {
+      listeners.get(type)?.delete(listener);
+    }) as typeof window.removeEventListener;
+
+    await settle(1);
+    const onFocus = [...(listeners.get('focus') ?? [])][0];
+    expect(onFocus).toBeTypeOf('function');
+    onFocus!(new Event('focus'));
+    await settle(12);
+    expect(sessionReads).toBe(2);
+    expect(conversationReads).toBe(2);
+    expect(find(tree, (item) => item.props.className === 'uc-chat-page__header-project')?.props.children).toBe('Beta');
+    const betaProject = () => find(tree, (item) => item.type === 'button'
+      && typeof item.props.className === 'string'
+      && item.props.className.startsWith('uc-chat-page__project-item')
+      && JSON.stringify(item.props.children).includes('Beta'));
+    expect(betaProject()?.props['aria-current']).toBe('true');
+
+    firstSession.resolve({ ok: true, value: session });
+    firstConversations.resolve({ ok: true, value: [conversation] });
+    await settle(16);
+
+    expect(betaProject()?.props['aria-current']).toBe('true');
+    expect(find(tree, (item) => item.props.className === 'uc-chat-page__header-project')?.props.children).toBe('Beta');
+  });
+
+  it('serializes rapid cross-project conversation opens', async () => {
+    const betaSession = { projectId: 'project-2', projectName: 'Beta', projectPath: '/beta' };
+    const betaConversation = { ...conversation, conversationId: 'conversation-beta', projectId: 'project-2', title: 'Beta chat' };
+    const open = deferred<{ ok: true; value: { cancelled: false; session: typeof betaSession } }>();
+    const projects = [
+      { projectId: session.projectId, projectName: 'Alpha', availability: 'available' as const, lastOpenedAt: conversation.updatedAt },
+      { projectId: betaSession.projectId, projectName: 'Beta', availability: 'available' as const, lastOpenedAt: conversation.updatedAt }
+    ];
+    const desktop = window.unicomp!;
+    Object.assign(desktop.chatContexts!, {
+      listConversations: vi.fn(async () => ({
+        ok: true,
+        value: currentSession.projectId === betaSession.projectId ? [betaConversation] : [conversation]
+      }))
+    });
+    const openRecentProject = vi.fn(() => open.promise);
+    Object.assign(desktop.storage!, {
+      listProjects: vi.fn(async () => ({ ok: true, value: projects })),
+      listProjectConversationSummaries: vi.fn(async (projectId: string) => ({
+        ok: true,
+        value: projectId === betaSession.projectId ? [{
+          conversationId: betaConversation.conversationId,
+          projectId,
+          title: betaConversation.title,
+          status: 'active' as const,
+          updatedAt: conversation.updatedAt
+        }] : []
+      })),
+      getProjectSession: vi.fn(async () => ({ ok: true, value: currentSession })),
+      openRecentProject
+    });
+    await settle();
+
+    const betaProject = find(tree, (item) => item.type === 'button'
+      && item.props.className === 'uc-chat-page__project-item'
+      && JSON.stringify(item.props.children).includes('Beta'))!;
+    (betaProject.props.onClick as () => void)();
+    await settle();
+    const betaChat = conversationButton('Beta chat');
+    const onClick = betaChat.props.onClick as () => void;
+
+    onClick();
+    onClick();
+
+    expect(openRecentProject).toHaveBeenCalledTimes(1);
+    currentSession = betaSession;
+    open.resolve({ ok: true, value: { cancelled: false, session: betaSession } });
+    await settle(12);
+    const betaRow = find(tree, (item) => item.props.className === 'uc-chat-page__workspace-conversation-row'
+      && JSON.stringify(item.props.children).includes('Beta chat'));
     expect(betaRow?.props['aria-current']).toBe('true');
   });
 

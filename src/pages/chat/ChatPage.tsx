@@ -31,6 +31,7 @@ import { EmptyState } from '../../components/EmptyState';
 import { StreamingMarkdown } from './StreamingMarkdown';
 import { ChatAttachment } from './ChatAttachment';
 import { DocumentProgress } from './DocumentProgress';
+import { RetainedDocumentCard } from './RetainedDocumentCard';
 import { mergeProductionEvents, projectProductionMessages, type PendingProductionInput } from './productionTimeline';
 import type { ProductionTraceEventDto } from '../../shared/conversation-production-ipc';
 import { projectTaskProgress } from '../../shared/conversation-task-progress';
@@ -42,6 +43,9 @@ import type {
   ConversationDto,
   ConversationResponseCandidateDto,
   ConversationResponseExecutionDto,
+  ConversationParentRunDto,
+  ConversationAgentSessionDto,
+  ReconciliationInspectionDto,
   ConversationResponseStreamEventDto,
   ConversationWorkflowDto,
   MessageDto,
@@ -71,7 +75,8 @@ import {
   PROJECT_SESSION_CHANGED_EVENT,
   registerProjectSwitchGuard
 } from '../../ui/project-session-events';
-import { failedResponseNotice } from '../../ui/chat-response-failure-notice';
+import { failedResponseNotice, responseFailureFactsFromTrace } from '../../ui/chat-response-failure-notice';
+import { ExecutionSettlementNotice } from './ExecutionSettlementNotice';
 import {
   parseDeterministicClearRevisionTarget,
   waitForDocumentResponseCompletion,
@@ -95,6 +100,14 @@ const errorMessages: Record<ChatContextIpcErrorCode, string> = {
   response_execution_not_found: '本次文本执行记录不存在。',
   response_execution_not_active: '当前回复没有可控制的活动请求，请刷新后确认状态。',
   response_execution_in_progress: '该会话已有回复正在进行，请等待完成或先停止。',
+  response_start_cancelled: '请求准备已停止，输入已保留；已有执行和作品以记录为准。',
+  response_execution_timeout: '任务执行已达到时限，输入和已有作品保留，请查看执行记录。',
+  response_execution_stopped: '执行预算或停止条件已触发，输入和已有作品保留，请查看执行记录。',
+  response_reconciliation_required: '前一次任务仍在结算或需要核对，已有作品保留；核对并确认关闭前不会重发。',
+  continuation_not_available: '这项任务当前不能继续，请查看任务记录。',
+  continuation_conflict: '任务已更新或这次继续已被使用，正在同步最新状态。',
+  continuation_expired: '原任务已达到时限，已有作品保留，请明确提出新任务。',
+  reconciliation_snapshot_changed: '任务记录已变化，请重新核对后再确认关闭。',
   native_search_authorization_required: '',
   candidate_not_found: '所选服务商、连接或模型候选已不存在。',
   candidate_unavailable: '所选候选当前不可用于文本回复。',
@@ -146,7 +159,7 @@ const documentErrorMessages: Record<string, string> = {
   unvalidated_output:
     '没有产生可验证的内容变化，原文件未改变。请补充希望改成什么内容。',
   invalid_outline: '文档大纲无效，请调整需求后重试。',
-  page_count_mismatch: 'PPT 页数未达到明确要求，请减少单页内容后重试。',
+  page_count_mismatch: 'PPT 实际页数未满足明确页数约束，请核对总页数与正文页数要求。',
   document_layout_overflow:
     '单个内容组过长，无法在可读字号下排版，请拆分内容后重试。',
   generation_cancelled: '本次文档任务已取消，已有作品保留。',
@@ -379,7 +392,7 @@ function documentGenerationMessage(
     case 'unvalidated_output':
       return '没有产生可验证的内容变化，原文件未改变。请补充希望改成什么内容。';
     case 'page_count_mismatch':
-      return 'PPT 页数未达到明确要求，文档未生成，请减少单页内容后重试。';
+      return 'PPT 实际页数未满足明确约束，本次文档未交付；请核对总页数与正文页数要求。';
     case 'resource_limit':
     case 'document_layout_overflow':
       return '内容超出当前文档生成限制，请精简或拆分后重试。';
@@ -697,6 +710,37 @@ function ChatDraftField({
   );
 }
 
+function AgentSessionNotice({ session, disabled, canExecute, onContinue, onCancel, onCloseUnknown, onNewTask }: {
+  readonly session: ConversationAgentSessionDto;
+  readonly disabled: boolean;
+  readonly canExecute: boolean;
+  readonly onContinue: (action: 'authorize' | 'continue') => void;
+  readonly onCancel: () => void;
+  readonly onCloseUnknown: () => void;
+  readonly onNewTask: () => void;
+}) {
+  const waiting = ['waiting_user', 'waiting_authorization'].includes(session.state);
+  const expired = Date.parse(session.deadlineAt) <= Date.now() || session.state === 'expired';
+  const canContinue = waiting && !expired && Boolean(session.resumeToken);
+  return <section className="uc-chat-page__workflow-status" aria-label="原任务等待状态" role="status">
+    <div className="uc-chat-page__workflow-copy">
+      <span>{session.state === 'needs_reconciliation' ? '执行结果需要核对，系统不会自动重复生成。'
+        : expired ? '原任务已达到时限，已有作品保留。'
+          : session.state === 'waiting_authorization' ? '原任务等待确认，请核对上方需求后继续。'
+            : session.waiting?.reason === 'continuation_required' ? '原任务已安全暂停，可继续使用剩余额度。'
+              : '原任务等待补充，请在输入框中回复上方问题。'}</span>
+    </div>
+    {canContinue && session.waiting?.allowedActions.includes('authorize') ?
+      <Button disabled={disabled || !canExecute} size="xs" onClick={() => onContinue('authorize')}>确认执行原任务</Button> : null}
+    {canContinue && session.waiting?.allowedActions.includes('continue') ?
+      <Button disabled={disabled || !canExecute} size="xs" onClick={() => onContinue('continue')}>继续原任务</Button> : null}
+    {waiting ? <Button disabled={disabled} size="xs" variant="ghost" onClick={onCancel}>停止原任务</Button> : null}
+    {session.state === 'needs_reconciliation' && session.canCloseUnknown ?
+      <Button disabled={disabled} size="xs" variant="ghost" onClick={onCloseUnknown}>确认关闭本次任务</Button> : null}
+    {expired && session.state !== 'needs_reconciliation' ? <Button disabled={disabled} size="xs" variant="secondary" onClick={onNewTask}>发起新任务</Button> : null}
+  </section>;
+}
+
 export function ChatPage({
   initialConversationId,
   onConversationChange,
@@ -741,7 +785,14 @@ export function ChatPage({
   const [responseCandidates, setResponseCandidates] = useState<readonly ConversationResponseCandidateDto[]>([]);
   const [modelSelection, setModelSelection] = useState<ChatModelSelection | undefined>(initialModelSelection);
   const [responseExecution, setResponseExecution] = useState<ConversationResponseExecutionDto>();
+  const [reconciliationInspection, setReconciliationInspection] = useState<ReconciliationInspectionDto>();
+  const [reconciliationConfirmed, setReconciliationConfirmed] = useState(false);
+  const [reconciliationBusy, setReconciliationBusy] = useState(false);
+  const reconciliationScopeRef = useRef('');
+  const reconciliationEpochRef = useRef(0);
+  reconciliationScopeRef.current = `${session?.projectId}:${selectedId}`;
   const [responseStarting, setResponseStarting] = useState(false);
+  const [newAgentTaskRequested, setNewAgentTaskRequested] = useState(false);
   const [activeWorkflow, setActiveWorkflow] = useState<ConversationWorkflowDto>();
   const [webResearchSession, setWebResearchSession] = useState<WebResearchSessionDto>();
   const [cancelRequested, setCancelRequested] = useState(false);
@@ -779,6 +830,7 @@ export function ChatPage({
   const dragDepthRef = useRef(0);
   const cancelRequestedRef = useRef(false);
   const cancelAfterStartRef = useRef(false);
+  const startingClientCommandIdRef = useRef<{ readonly projectId: string; readonly clientCommandId: string }>();
   const inputValueRef = useRef('');
   const selectedIdRef = useRef(selectedId);
   selectedIdRef.current = selectedId;
@@ -793,6 +845,8 @@ export function ChatPage({
   const activeDraftKey = composerDraftKey(session?.projectId, selectedId);
   if (composerOwnerKeyRef.current === null) composerOwnerKeyRef.current = activeDraftKey;
   const workflowSubmissionInFlightRef = useRef(false);
+  const agentContinuationInFlightRef = useRef(false);
+  const agentSessionCloseInFlightRef = useRef(false);
   const planningCommandRef = useRef<{ readonly clientCommandId: string; cancelled: boolean }>();
   const productionCommandSubscriptions = useRef(new Map<string, () => void>());
   const workflowExecutionInFlightRef = useRef(false);
@@ -802,6 +856,7 @@ export function ChatPage({
   }>();
   const composerScopeRef = useRef(0);
   const attachmentImportInFlightRef = useRef(false);
+  const projectOpenInFlightRef = useRef(false);
   const attachmentSelectionChangedRef = useRef(false);
   const sessionProjectIdRef = useRef<string>();
   const documentGenerationInFlightRef = useRef(false);
@@ -837,6 +892,69 @@ export function ChatPage({
     () => findEditableCancelledUserMessage(selected),
     [selected]
   );
+  const recentAgentSessions = [...(selected?.agentSessions ?? [])].reverse();
+  const activeAgentSession = recentAgentSessions.find(item => item.state === 'needs_reconciliation')
+    ?? recentAgentSessions.find(item => ['waiting_user', 'waiting_authorization'].includes(item.state))
+    ?? (recentAgentSessions[0]?.state === 'expired' ? recentAgentSessions[0] : undefined);
+  useEffect(() => { setNewAgentTaskRequested(false); }, [session?.projectId, selectedId]);
+  useEffect(() => { reconciliationEpochRef.current += 1; setReconciliationInspection(undefined); setReconciliationConfirmed(false); setReconciliationBusy(false); }, [session?.projectId, selectedId]);
+  useEffect(() => {
+    const execution = responseExecution;
+    if (!chat || !execution || !['completed', 'failed', 'cancelled', 'interrupted'].includes(execution.state) ||
+        !['running', 'executing_tool'].includes(execution.parentRun?.state ?? '')) return;
+    let active = true;
+    void (async () => {
+      for (let attempt = 0; attempt < 12 && active; attempt += 1) {
+        await new Promise(resolve => setTimeout(resolve, 500));
+        if (!active) return;
+        const current = await chat.getResponseExecution(execution.responseExecutionId);
+        if (!active || !current.ok) return;
+        setResponseExecution(previous => previous?.responseExecutionId === execution.responseExecutionId ? current.value : previous);
+        if (!['running', 'executing_tool'].includes(current.value.parentRun?.state ?? '')) return;
+      }
+    })().catch(() => undefined);
+    return () => { active = false; };
+  }, [chat, responseExecution?.responseExecutionId, responseExecution?.state, responseExecution?.parentRun?.state]);
+
+  async function inspectTaskResult(parent: ConversationParentRunDto) {
+    if (!session || !chat?.reconcileReconciliation) { setNotice('请重新启动本地应用后核对任务记录。'); return; }
+    const scope = reconciliationScopeRef.current;
+    const epoch = reconciliationEpochRef.current;
+    setReconciliationBusy(true);
+    try {
+      const inspected = await chat.reconcileReconciliation({ projectId: session.projectId, responseExecutionId: parent.responseExecutionId });
+      if (scope !== reconciliationScopeRef.current || epoch !== reconciliationEpochRef.current) return;
+      if (!inspected.ok) { setNotice(errorMessages[inspected.error.code] ?? inspected.error.message); return; }
+      setReconciliationInspection(inspected.value); setReconciliationConfirmed(false);
+      setResponseExecution(previous => previous?.responseExecutionId === inspected.value.parentRun.responseExecutionId ? { ...previous, parentRun: inspected.value.parentRun } : previous);
+      if (!inspected.value.inspectToken) { setReconciliationInspection(undefined); setNotice('本地结果已核对，状态已同步。'); }
+    } catch { if (scope === reconciliationScopeRef.current && epoch === reconciliationEpochRef.current) setNotice('执行记录暂时无法核对，请保留已有文件。'); }
+    finally { if (scope === reconciliationScopeRef.current && epoch === reconciliationEpochRef.current) setReconciliationBusy(false); }
+  }
+
+  async function closeInspectedTask() {
+    if (!session || !reconciliationConfirmed || !reconciliationInspection?.inspectToken || !chat?.acknowledgeReconciliation) return;
+    const scope = reconciliationScopeRef.current;
+    const epoch = reconciliationEpochRef.current;
+    setReconciliationBusy(true);
+    try {
+      const closed = await chat.acknowledgeReconciliation({ projectId: session.projectId,
+        responseExecutionId: reconciliationInspection.parentRun.responseExecutionId,
+        expectedRunRevision: reconciliationInspection.parentRun.runRevision, inspectToken: reconciliationInspection.inspectToken, confirmed: true });
+      if (scope !== reconciliationScopeRef.current || epoch !== reconciliationEpochRef.current) return;
+      if (!closed.ok) { setNotice(errorMessages[closed.error.code] ?? closed.error.message); setReconciliationInspection(undefined); return; }
+      setReconciliationInspection(undefined); setReconciliationConfirmed(false);
+      setResponseExecution(previous => previous?.responseExecutionId === closed.value.responseExecutionId ? { ...previous, parentRun: closed.value } : previous);
+      setConversations(previous => previous.map(conversation => ({ ...conversation,
+        parentRuns: conversation.parentRuns?.map(parent => parent.responseExecutionId === closed.value.responseExecutionId ? closed.value : parent) })));
+      if (selectedId) {
+        const refreshed = await chat.getConversation(selectedId);
+        if (scope === reconciliationScopeRef.current && epoch === reconciliationEpochRef.current && refreshed.ok) replaceConversation(refreshed.value);
+      }
+      setNotice('本次任务已确认关闭；未知结果与已有作品记录保留，不会自动重试。');
+    } catch { if (scope === reconciliationScopeRef.current && epoch === reconciliationEpochRef.current) setNotice('关闭确认未完成，请重新核对执行记录。'); }
+    finally { if (scope === reconciliationScopeRef.current && epoch === reconciliationEpochRef.current) setReconciliationBusy(false); }
+  }
   const featureCandidates = responseCandidates.filter(
     (candidate) => candidate.parameterSchema.productFeature === responseFeature
   );
@@ -902,12 +1020,15 @@ export function ChatPage({
     || documentGenerationInFlightRef.current;
   useEffect(() => {
     let active = true;
+    let loadGeneration = 0;
     const unregisterProjectSwitchGuard = registerProjectSwitchGuard(() => {
       if (!projectSwitchBlockedRef.current && !documentGenerationInFlightRef.current) return true;
       setNotice('请先停止当前任务，再切换项目。');
       return false;
     });
     async function load(options?: { readonly quiet?: boolean }) {
+      const generation = ++loadGeneration;
+      const isCurrentLoad = () => active && generation === loadGeneration;
       if (!options?.quiet) setLoading(true);
       if (!chat || !storage) {
         setNotice('当前运行环境未连接桌面对话能力。');
@@ -923,7 +1044,7 @@ export function ChatPage({
           chat.listConversations(true, false),
           projectListPromise
         ]);
-        if (!active) return;
+        if (!isCurrentLoad()) return;
         if (sessionResult.ok) {
           if (sessionResult.value && !initialProjectExpandedRef.current) {
             initialProjectExpandedRef.current = true;
@@ -986,6 +1107,7 @@ export function ChatPage({
               if (refreshed.ok) loadedConversations = refreshed.value;
             }
           }
+          if (!isCurrentLoad()) return;
           setConversations((current) => loadedConversations.map((incoming) => {
             const existing = current.find((item) => item.conversationId === incoming.conversationId &&
               item.projectId === incoming.projectId);
@@ -1004,14 +1126,14 @@ export function ChatPage({
         }
         if (sessionResult.ok && sessionResult.value) {
           const contexts = await chat.listProjectContextCandidates();
-          if (active && contexts.ok) setRegisteredContexts(contexts.value);
-        } else if (active) {
+          if (isCurrentLoad() && contexts.ok) setRegisteredContexts(contexts.value);
+        } else if (isCurrentLoad()) {
           setRegisteredContexts([]);
         }
       } catch {
-        if (active) setNotice('读取本地对话失败，请重试。');
+        if (isCurrentLoad()) setNotice('读取本地对话失败，请重试。');
       } finally {
-        if (active && !options?.quiet) setLoading(false);
+        if (isCurrentLoad()) setLoading(false);
       }
     }
     void load();
@@ -1691,6 +1813,16 @@ export function ChatPage({
       await startChatResponse(inputValueRef.current.trim(), selected);
       return;
     }
+    if (activeAgentSession && !(newAgentTaskRequested && activeAgentSession.state !== 'needs_reconciliation' &&
+        (activeAgentSession.state === 'expired' || Date.parse(activeAgentSession.deadlineAt) <= Date.now()))) {
+      if (!activeAgentSession.resumeToken || !activeAgentSession.waiting?.allowedActions.includes('reply')) {
+        setNotice(activeAgentSession.state === 'needs_reconciliation' ? '请先核对未知结果，系统不会自动重复执行。'
+          : activeAgentSession.state === 'expired' ? errorMessages.continuation_expired : '请使用原任务的确认按钮继续。');
+        return;
+      }
+      await startChatResponse(inputValueRef.current.trim(), selected, undefined, 'reply');
+      return;
+    }
     if (activeWorkflow && ['needs_clarification', 'needs_confirmation', 'ready'].includes(activeWorkflow.status)) {
       await submitWorkflowInput();
       return;
@@ -1699,7 +1831,7 @@ export function ChatPage({
       await submitWorkflowInput();
       return;
     }
-    await startChatResponse(input.trim(), selected);
+    await startChatResponse(inputValueRef.current.trim(), selected);
   }
 
   async function submitWorkflowInput() {
@@ -2343,9 +2475,12 @@ export function ChatPage({
   async function startChatResponse(
     commandContent: string,
     conversation?: ConversationDto,
-    workflow?: ConversationWorkflowDto
+    workflow?: ConversationWorkflowDto,
+    continuationAction?: 'reply' | 'authorize' | 'continue'
   ) {
-    if (!chat || !selectedCandidateId || !selectedCandidate?.available) return;
+    if (!chat || !session || !selectedCandidateId || !selectedCandidate?.available) return;
+    if (continuationAction && agentContinuationInFlightRef.current) return;
+    if (continuationAction) agentContinuationInFlightRef.current = true;
     const executionScope = composerScopeRef.current;
     rendererTrace('sendMessage:start', {
       selectedId,
@@ -2357,9 +2492,11 @@ export function ChatPage({
     setNotice('正在准备回复…');
     clearResponseDraftState();
     const commandEditingMessageId = workflow ? undefined : editingMessageId;
+    const clientCommandId = `chat-start-${crypto.randomUUID()}`;
+    startingClientCommandIdRef.current = { projectId: session.projectId, clientCommandId };
     try {
       const request = {
-        clientCommandId: `chat-start-${crypto.randomUUID()}`,
+        clientCommandId,
         conversation: conversation
           ? {
               conversationId: conversation.conversationId,
@@ -2384,7 +2521,11 @@ export function ChatPage({
               }]
             : [];
         }),
-        parameterValues: {}
+        parameterValues: {},
+        ...(continuationAction && activeAgentSession?.resumeToken ? { continuation: {
+          sessionId: activeAgentSession.sessionId, expectedRevision: activeAgentSession.revision,
+          resumeToken: activeAgentSession.resumeToken, action: continuationAction
+        } } : {})
       } as const;
       const started = workflow
         ? await chat.startResponse({
@@ -2412,6 +2553,22 @@ export function ChatPage({
         }
         return;
       }
+      if (!('execution' in started.value)) {
+        replaceConversation(started.value.conversation);
+        setSelectedId(started.value.conversation.conversationId);
+        setResponseExecution(undefined);
+        setActiveWorkflow(undefined);
+        if (!cancelAfterStartRef.current) { commitAttachments([]); attachmentSelectionChangedRef.current = false; updateInput(''); }
+        else if (chat.cancelAgentSession) {
+          await chat.cancelAgentSession({ projectId: session.projectId, sessionId: started.value.agentSession.sessionId,
+            expectedRevision: started.value.agentSession.revision });
+          const refreshed = await chat.getConversation(started.value.conversation.conversationId);
+          if (refreshed.ok) replaceConversation(refreshed.value);
+        }
+        cancelAfterStartRef.current = false; cancelRequestedRef.current = false; setCancelRequested(false);
+        setNotice('');
+        return;
+      }
       rendererTrace('sendMessage:startResponse-ok', {
         conversationId: started.value.conversation.conversationId,
         executionId: started.value.execution.responseExecutionId,
@@ -2422,10 +2579,11 @@ export function ChatPage({
       setSelectedId(started.value.conversation.conversationId);
       setResponseExecution(started.value.execution);
       setActiveWorkflow(undefined);
-      commitAttachments([]);
-      attachmentSelectionChangedRef.current = false;
-
-      updateInput('');
+      if (!cancelAfterStartRef.current) {
+        commitAttachments([]);
+        attachmentSelectionChangedRef.current = false;
+        updateInput('');
+      }
       setEditingMessageId(undefined);
       setNotice('');
       if (cancelAfterStartRef.current) {
@@ -2444,8 +2602,29 @@ export function ChatPage({
       setNotice(errorMessages.storage_error);
       return;
     } finally {
+      if (continuationAction) agentContinuationInFlightRef.current = false;
+      if (startingClientCommandIdRef.current?.clientCommandId === clientCommandId) startingClientCommandIdRef.current = undefined;
       setResponseStarting(false);
     }
+  }
+
+  async function cancelWaitingAgentSession(closeUnknown = false) {
+    if (!chat?.cancelAgentSession || !session || !activeAgentSession || !selected || busy || agentSessionCloseInFlightRef.current) return;
+    if (closeUnknown && (activeAgentSession.state !== 'needs_reconciliation' || !activeAgentSession.canCloseUnknown)) return;
+    agentSessionCloseInFlightRef.current = true;
+    const scope = composerScopeRef.current;
+    setBusy(true);
+    try {
+      const cancelled = await chat.cancelAgentSession({ projectId: session.projectId,
+        sessionId: activeAgentSession.sessionId, expectedRevision: activeAgentSession.revision,
+        ...(closeUnknown ? { closeUnknown: true } : {}) });
+      if (scope !== composerScopeRef.current) return;
+      if (!cancelled.ok) { setNotice(describeChatError(cancelled.error)); return; }
+      const refreshed = await chat.getConversation(selected.conversationId);
+      if (scope === composerScopeRef.current && refreshed.ok) replaceConversation(refreshed.value);
+      setNotice(closeUnknown ? '本次任务已确认关闭；未知结果与已有作品记录保留，不会自动重试。' : '原任务已停止，已有作品保留。');
+    } catch { if (scope === composerScopeRef.current) setNotice(errorMessages.storage_error); }
+    finally { agentSessionCloseInFlightRef.current = false; if (scope === composerScopeRef.current) setBusy(false); }
   }
 
   async function importDroppedFile(file: File) {
@@ -2763,9 +2942,12 @@ export function ChatPage({
     try {
       const startDocumentResponse = (
         conversation?: Pick<ConversationDto, 'conversationId' | 'revision'>
-      ) =>
-        chat.startResponse({
-          clientCommandId: `chat-doc-${crypto.randomUUID()}`,
+      ) => {
+        const clientCommandId = `chat-doc-${crypto.randomUUID()}`;
+        startingClientCommandIdRef.current = { projectId: session.projectId, clientCommandId };
+        setResponseStarting(true);
+        return chat.startResponse({
+          clientCommandId,
           conversation: conversation
             ? {
                 conversationId: conversation.conversationId,
@@ -2793,7 +2975,11 @@ export function ChatPage({
           }),
           parameterValues: responseParameterValues,
           confirmed: true
+        }).finally(() => {
+          if (startingClientCommandIdRef.current?.clientCommandId === clientCommandId) startingClientCommandIdRef.current = undefined;
+          setResponseStarting(false);
         });
+      };
       let started = await startDocumentResponse(executionConversation);
       if (executionScope !== composerScopeRef.current) return;
       if (!started.ok && started.error.code === 'revision_conflict') {
@@ -2810,6 +2996,12 @@ export function ChatPage({
           code: started.error.code
         }));
         setNotice(describeChatError(started.error));
+        if (started.error.code === 'response_start_cancelled') {
+          cancelAfterStartRef.current = false;
+          cancelRequestedRef.current = false;
+          setCancelRequested(false);
+          if (!inputValueRef.current.trim()) updateInput(sourceMessage?.content ?? execution.requirements);
+        }
         if (executionConversation) {
           const refreshedFailed = await chat.getConversation(executionConversation.conversationId);
           if (refreshedFailed.ok) replaceConversation(refreshedFailed.value);
@@ -2833,6 +3025,7 @@ export function ChatPage({
         setActiveWorkflow(undefined);
       }
       if (documentOrchestrationCancelRef.current) {
+        cancelAfterStartRef.current = false;
         await requestResponseCancellation(started.value.execution, started.value.conversation);
         return;
       }
@@ -3110,7 +3303,7 @@ export function ChatPage({
     const active = activeDocumentGenerationRef.current;
     if (documentCancelRequested) return;
     setDocumentCancelRequested(true);
-    if (responseInProgress) {
+    if (responseInProgress || startingClientCommandIdRef.current) {
       await cancelResponse();
       return;
     }
@@ -3137,12 +3330,22 @@ export function ChatPage({
   }
 
   async function cancelResponse() {
-    if (responseStarting) {
-      if (cancelRequested) return;
+    if (responseStarting || startingClientCommandIdRef.current) {
+      if (cancelRequestedRef.current) return;
       cancelAfterStartRef.current = true;
       cancelRequestedRef.current = true;
       setCancelRequested(true);
       setNotice('已发出停止请求，正在等待执行建立…');
+      const starting = startingClientCommandIdRef.current;
+      if (chat?.cancelResponseStart && starting) {
+        try {
+          const result = await chat.cancelResponseStart(starting);
+          if (!result.ok) setNotice(describeChatError(result.error));
+          else if (result.value.cancelled) setNotice('已请求停止准备，正在确认…');
+        } catch {
+          setNotice('停止准备尚未确认，将在执行建立后继续停止。');
+        }
+      }
       return;
     }
     if (
@@ -3489,27 +3692,36 @@ export function ChatPage({
       selectConversation(conversationId);
       return;
     }
-    if (!storage || busy || responseInProgress || documentGenerationActive) {
+    if (projectOpenInFlightRef.current || !storage || busy || responseInProgress || documentGenerationActive) {
       setNotice('请先停止当前任务，再切换对话。');
       return;
     }
-    const result = await storage.openRecentProject(projectId);
-    if (!result.ok) {
-      setNotice(result.error.message || '打开项目失败，请重试。');
-      return;
+    projectOpenInFlightRef.current = true;
+    setBusy(true);
+    try {
+      const result = await storage.openRecentProject(projectId);
+      if (!result.ok) {
+        setNotice(result.error.message || '打开项目失败，请重试。');
+        return;
+      }
+      if (result.value.cancelled || !result.value.session) return;
+      sealActiveDraft();
+      claimDraft(projectId, conversationId);
+      resetComposerScope();
+      setEditingMessageId(undefined);
+      setSession(result.value.session);
+      setSelectedId(conversationId);
+      setActiveWorkflow(undefined);
+      setWebResearchSession(undefined);
+      setHistoryOpen(false);
+      expandProject(projectId);
+      notifyProjectSessionChanged();
+    } catch {
+      setNotice('打开项目失败，请重试。');
+    } finally {
+      projectOpenInFlightRef.current = false;
+      setBusy(false);
     }
-    if (!result.value.session) return;
-    sealActiveDraft();
-    claimDraft(projectId, conversationId);
-    resetComposerScope();
-    setEditingMessageId(undefined);
-    setSession(result.value.session);
-    setSelectedId(conversationId);
-    setActiveWorkflow(undefined);
-    setWebResearchSession(undefined);
-    setHistoryOpen(false);
-    expandProject(projectId);
-    notifyProjectSessionChanged();
   }
 
   async function openLocalProject() {
@@ -3859,6 +4071,9 @@ export function ChatPage({
                 {displayMessages.map((item) => {
                   const isCurrentAssistant = item.role === 'assistant' &&
                     item.messageId === responseExecution?.assistantMessageId;
+                  const sourceIndex = selected?.messages.findIndex(message => message.messageId === item.messageId) ?? -1;
+                  const sourceMessage = sourceIndex >= 0 ? selected?.messages.slice(0, sourceIndex).reverse().find(message => message.role === 'user') : undefined;
+                  const parentRun = (isCurrentAssistant ? responseExecution?.parentRun : undefined) ?? selected?.parentRuns?.find(parent => parent.sourceMessageId === sourceMessage?.messageId);
                   const executionDuration = responseExecution
                     ? formatExecutionDuration(responseExecution.createdAt, responseExecution.updatedAt)
                     : '';
@@ -3868,7 +4083,7 @@ export function ChatPage({
                     !cancelRequested;
                   const isDocumentDraftMessage =
                     item.role === 'assistant' &&
-                    (Boolean(item.documentResult) ||
+                    (Boolean(item.documentResult || item.retainedDocumentResult) ||
                       Boolean(item.documentGenerationStatus) || (isCurrentAssistant && documentResponseActive));
                   const hideDocumentDraftContent =
                     item.role === 'assistant' &&
@@ -3884,8 +4099,9 @@ export function ChatPage({
                     activeDocumentGenerationRef.current?.messageId === item.messageId;
                   const isDocumentStopping = (isCurrentAssistant && (cancelRequested ||
                     (documentResponseActive && documentCancelRequested))) || (isGeneratingFile && documentCancelRequested);
-                  const generationTerminal = item.documentGenerationStatus &&
-                    ['completed', 'failed', 'cancelled', 'interrupted'].includes(item.documentGenerationStatus.state);
+                  const generationState = item.documentGenerationStatus?.state;
+                  const generationTerminal = generationState === 'completed' || generationState === 'failed' ||
+                    generationState === 'cancelled' || generationState === 'interrupted' ? generationState : undefined;
                   const progressDetail = item.documentResult
                     ? '文档已生成并保存。'
                     : isDocumentStopping
@@ -3928,6 +4144,15 @@ export function ChatPage({
                       ) : null}
                       {item.role === 'assistant' ? (
                         <div className="uc-chat-page__message-content">
+                          <ExecutionSettlementNotice parent={parentRun} responseEnded={!['pending', 'streaming'].includes(item.state)}
+                            busy={reconciliationBusy} onInspect={parent => { void inspectTaskResult(parent); }} />
+                          {parentRun && reconciliationInspection?.parentRun.responseExecutionId === parentRun.responseExecutionId ? (
+                            <section aria-label="确认关闭待核对任务">
+                              <p>本地核对不会向服务商发请求。确认关闭仅结束本次任务，结果仍可能未知，已有作品记录保留。</p>
+                              <label><input type="checkbox" checked={reconciliationConfirmed} onChange={event => setReconciliationConfirmed(event.target.checked)} />我确认关闭本次任务，不自动重试。</label>
+                              <Button size="xs" disabled={!reconciliationConfirmed || reconciliationBusy} onClick={() => { void closeInspectedTask(); }}>确认关闭任务</Button>
+                            </section>
+                          ) : null}
                           {showProductionProgress ? (
                             <DocumentProgress
                               detail={progressDetail}
@@ -3935,13 +4160,23 @@ export function ChatPage({
                               events={traceEvents}
                               requestBySource={productionProjection.requestBySource}
                               incomplete={productionIssues.includes(item.conversationId)}
+                              retainedDocumentResult={item.retainedDocumentResult}
                               bodyContent={(isDocumentDraftMessage || hideDocumentDraftContent)
                                 ? item.documentResult?.validatedContent ?? item.content
                                 : undefined}
                               bodyStreaming={item.state === 'streaming' &&
                                 (isDocumentDraftMessage || hideDocumentDraftContent)}
                               terminalDetail={item.documentResult ? '文档已生成并保存。'
-                                : generationTerminal ? documentGenerationMessage(item.documentGenerationStatus) : undefined}
+                                : parentRun?.state === 'needs_reconciliation' ? '执行结果需要核对。'
+                                  : parentRun?.acknowledged ? '本次任务已关闭，未知结果记录保留。'
+                                    : generationTerminal ? documentGenerationMessage(item.documentGenerationStatus) : undefined}
+                              terminalStatus={item.documentResult ? 'completed'
+                                : parentRun?.state === 'needs_reconciliation' ? 'interrupted'
+                                  : parentRun?.acknowledged ? 'cancelled'
+                                    : item.retainedDocumentResult ? item.state === 'cancelled' ? 'cancelled' : 'failed' : generationTerminal}
+                              genericTerminalFailure={!item.documentResult && item.documentGenerationStatus?.state === 'failed' &&
+                                ['generation_failed', 'response_failed'].includes(item.documentGenerationStatus.errorCode ?? '')}
+                              activeDetail={isGeneratingFile || isDocumentStopping ? progressDetail : undefined}
                               preferDetail={Boolean(item.documentResult || generationTerminal || isGeneratingFile || isDocumentStopping ||
                                 (isCurrentAssistant && responseExecution &&
                                   ['completed', 'failed', 'cancelled', 'interrupted'].includes(responseExecution.state)))}
@@ -3958,7 +4193,8 @@ export function ChatPage({
                             <p aria-label="回复失败原因">
                               {failedResponseNotice(item, isCurrentAssistant &&
                                 responseFailureSafeCodeRef.current?.executionId === responseExecution?.responseExecutionId
-                                ? responseFailureSafeCodeRef.current?.safeCode : undefined)}
+                                ? responseFailureSafeCodeRef.current?.safeCode : undefined,
+                              responseFailureFactsFromTrace(traceEvents))}
                             </p>
                           ) : null}
                           {item.state === 'streaming' && !showProductionProgress ? <span className="uc-chat-page__caret" aria-hidden="true">▌</span> : null}
@@ -4001,6 +4237,10 @@ export function ChatPage({
                           </div>
                         </section>
                       ) : null}
+                      {item.role === 'assistant' && item.retainedDocumentResult ? (
+                        <RetainedDocumentCard result={item.retainedDocumentResult} busy={busy}
+                          onOpen={workId => { void openDocumentWork(workId); }} onOpenLibrary={onOpenLibrary} />
+                      ) : null}
                       {item.state === 'completed' ? (
                         <div className="uc-chat-page__message-meta">
                           <time dateTime={item.createdAt}>{formatMessageTime(item.createdAt)}</time>
@@ -4033,6 +4273,12 @@ export function ChatPage({
               </ol>
             )}
             <div className="uc-chat-page__message-item uc-chat-page__message-item--assistant" aria-label="助手任务回复">
+          {activeAgentSession ? <AgentSessionNotice session={activeAgentSession}
+            disabled={busy || responseInProgress} canExecute={Boolean(selectedCandidate?.available)}
+            onContinue={action => { void startChatResponse(action === 'authorize' ? '确认执行' : '继续', selected, undefined, action); }}
+            onCancel={() => { void cancelWaitingAgentSession(); }}
+            onCloseUnknown={() => { void cancelWaitingAgentSession(true); }}
+            onNewTask={() => { setNewAgentTaskRequested(true); setNotice('请输入新的任务需求，新任务将使用独立预算。'); draftFieldRef.current.focus(); }} /> : null}
           {activeWorkflow && !activeWorkflow.planningFailureCode && !selected?.messages.at(-1)?.workflowReply?.workflowId.startsWith('native-') && !['needs_clarification', 'needs_confirmation'].includes(activeWorkflow.status) ? (
             <div className="uc-chat-page__workflow-status" role="status">
               <div className="uc-chat-page__workflow-copy">

@@ -17,6 +17,9 @@ import {
   type ExecutionId,
   type MessageId,
   type PresentationTemplateId,
+  type PresentationPageRequirement,
+  type assessPresentationPageCount,
+  presentationPlanningTotalPages,
   type ProjectId,
   type TaskId,
   type WorkId
@@ -37,11 +40,12 @@ import {
 } from './document-revision-agent';
 import {
   isSupportedPresentationTotalPages,
-  parseRequestedPresentationTotalPages,
+  parsePresentationPageRequirement,
   presentationBodySectionCount
 } from './presentation-page-count';
 import type { PresentationRevisionMap } from './presentation-revision-map';
 import type { PresentationArtDirectionPlanner, PresentationArtDirectionRequest } from './presentation-art-direction';
+import { ExecutionBudgetError, type HostExecutionBudget } from './execution-budget';
 
 export type DocumentDraftCompilationErrorCode =
   | 'invalid_structure'
@@ -95,6 +99,8 @@ export interface DocumentDraftCompilerPort {
     readonly operation: DocumentOperation;
     readonly attachmentRefs?: readonly string[];
     readonly revision?: DocumentIR['revision'];
+    /** Host-owned stable compilation identity; never supplied by model tool arguments. */
+    readonly identitySeed?: string;
   }): DocumentIR;
   compile(input: {
     readonly content: string;
@@ -159,7 +165,7 @@ export interface DocumentGenerationWorkflowPort {
 
 /** Observable execution facts only; no model text, paths or private document data. */
 export interface DocumentGenerationProgressEvent {
-  readonly code: 'plan_validation' | 'tool_call' | 'tool_result' | 'document_compile' | 'document_render' |
+  readonly code: 'request_received' | 'plan_validation' | 'tool_call' | 'tool_result' | 'document_compile' | 'document_render' |
     'document_check' | 'document_structure_check' | 'document_hash_check' | 'document_publish' | 'document_register';
   readonly status: 'started' | 'progress' | 'completed' | 'failed' | 'cancelled';
   readonly operationId?: string;
@@ -168,6 +174,9 @@ export interface DocumentGenerationProgressEvent {
     readonly documentKind?: DocumentWorkspaceKind;
     readonly count?: number;
     readonly totalPages?: number;
+    readonly requestedPages?: number;
+    readonly pageCountMode?: 'target' | 'exact' | 'max' | 'range';
+    readonly pageCountBasis?: 'total' | 'content';
     readonly bytes?: number;
     readonly tool?: 'read_sources' | 'search' | 'analyze' | 'write_document' | 'render' | 'check' | 'publish' | 'patch';
     readonly designPath?: 'design-aware' | 'legacy-fallback';
@@ -219,6 +228,7 @@ export interface DocumentLlmRepairPlannerRequest {
 /** Durable lifecycle hooks for a local document generation execution. */
 export interface DocumentGenerationRuntimeSession {
   readonly executionId: string;
+  readonly executionBudget?: HostExecutionBudget;
   start(): Promise<void>;
   progress(event: DocumentGenerationProgressEvent): Promise<void>;
   complete(workId: WorkId): Promise<void>;
@@ -226,10 +236,11 @@ export interface DocumentGenerationRuntimeSession {
 }
 
 export interface DocumentGenerationRuntimePort {
-  create(input: GenerateDocumentFromMessageInput): Promise<DocumentGenerationRuntimeSession>;
+  create(input: GenerateDocumentFromMessageInput, signal?: AbortSignal): Promise<DocumentGenerationRuntimeSession>;
 }
 
 export interface DocumentGenerationExecutionInput {
+  readonly executionBudget?: HostExecutionBudget;
   /** Optional durable Task Runtime execution identity supplied by the host. */
   readonly executionId?: string;
   readonly kind: DocumentWorkspaceKind;
@@ -250,6 +261,7 @@ export interface DocumentGenerationExecutionInput {
   readonly revisionPatch?: DocumentRevisionPatch;
   readonly revisionPatches?: readonly DocumentRevisionPatch[];
   readonly requestedTotalPages?: number;
+  readonly pageRequirement?: PresentationPageRequirement;
   readonly theme?: 'blueprint' | 'ink' | 'forest' | 'financing';
   readonly presentationTemplate?: PresentationTemplateId;
   /**
@@ -281,6 +293,7 @@ export interface DocumentGenerationExecutionResult {
   readonly fileName: string;
   readonly sizeBytes: number;
   readonly validatedOutline?: DocumentOutline;
+  readonly pageCountAssessment?: ReturnType<typeof assessPresentationPageCount>;
 }
 
 export interface DocumentGenerationExecutorPort {
@@ -754,7 +767,7 @@ export class DocumentGenerationApplicationService {
     } catch (error) {
       await settle({ conversationId: input.conversationId, messageId: input.messageId, kind: input.kind,
         ...(localExecutionId ? { localExecutionId } : {}),
-        status: error instanceof DocumentGenerationApplicationError && error.code === 'cancelled' ? 'cancelled' : 'failed' }).catch(() => undefined);
+        status: isDocumentCancellation(error) ? 'cancelled' : 'failed' }).catch(() => undefined);
       throw error;
     }
     // runGeneration has persisted the validated document result and Work before advancing the queue.
@@ -796,8 +809,7 @@ export class DocumentGenerationApplicationService {
     } catch (error) {
       await this.dependencies.workflows.finishExecution(
         executionId,
-        error instanceof DocumentGenerationApplicationError &&
-          error.code === 'cancelled'
+        isDocumentCancellation(error)
           ? 'cancelled'
           : 'failed'
       );
@@ -815,7 +827,10 @@ export class DocumentGenerationApplicationService {
     let validatingOutline = false;
     let revisingDocument = false;
     let runtimeSession: DocumentGenerationRuntimeSession | undefined;
+    let removeRuntimeAbort: (() => void) | undefined;
     try {
+    await this.reportProgress({ code: 'request_received', status: 'started', operationId: 'local-document-generation',
+      facts: { documentKind: input.kind, purpose: 'content' } });
     const conversation = await this.waitForCompletedMessage(
       input.conversationId,
       input.messageId
@@ -847,7 +862,14 @@ export class DocumentGenerationApplicationService {
         'The assistant response is empty'
       );
       }
-      runtimeSession = await this.dependencies.runtime?.create(input);
+      runtimeSession = await this.dependencies.runtime?.create(input, abortController.signal);
+      if (runtimeSession?.executionBudget) {
+        const budget = runtimeSession.executionBudget;
+        const interrupt = () => abortController.abort(budget.signal.reason);
+        budget.signal.addEventListener('abort', interrupt, { once: true });
+        removeRuntimeAbort = () => budget.signal.removeEventListener('abort', interrupt);
+        budget.assertCanProceed('prepare');
+      }
       await runtimeSession?.start();
       const reportGenerationProgress = async (event: DocumentGenerationProgressEvent): Promise<void> => {
         // Runtime persistence is a safety boundary. If it cannot claim or
@@ -931,10 +953,11 @@ export class DocumentGenerationApplicationService {
       let revisionTargetSectionHeading: string | undefined;
       let revisionPatch: DocumentRevisionPatch | undefined;
       let revisionPatches: readonly DocumentRevisionPatch[] | undefined;
-      const requestedTotalPages =
+      const pageRequirement =
         input.kind === 'ppt' && requestText !== undefined
-          ? parseRequestedPresentationTotalPages(requestText)
+          ? parsePresentationPageRequirement(requestText)
           : undefined;
+      const requestedTotalPages = pageRequirement ? presentationPlanningTotalPages(pageRequirement) : undefined;
       if (
         requestedTotalPages !== undefined &&
         !isSupportedPresentationTotalPages(requestedTotalPages)
@@ -951,10 +974,11 @@ export class DocumentGenerationApplicationService {
             outline = validateFullPresentationPageCountRevision(
               previousOutline,
               outline,
-              requestedTotalPages
+              pageRequirement!
             );
             revisionApplied = true;
           } else if (this.dependencies.revisionAgent !== undefined) {
+            runtimeSession?.executionBudget?.assertCanProceed('repair');
             if (abortController.signal.aborted) {
               throw new DocumentGenerationApplicationError(
                 'cancelled',
@@ -966,8 +990,8 @@ export class DocumentGenerationApplicationService {
             await reportGenerationProgress({ code: 'tool_call', status: 'started', operationId: 'document-revision',
               facts: { purpose: 'repair', tool: 'patch', documentKind: input.kind } });
             try {
-              revision = await this.dependencies.revisionAgent({
-                baseWorkId: input.parentWorkId,
+              const revise = (signal: AbortSignal) => this.dependencies.revisionAgent!({
+                baseWorkId: input.parentWorkId!,
                 expectedRevision: input.expectedRevision,
                 kind: input.kind,
                 requestText,
@@ -976,9 +1000,13 @@ export class DocumentGenerationApplicationService {
                 ...(useDeterministicClearRevision
                   ? {}
                   : { proposedOutline: outline }),
-                signal: abortController.signal
+                signal
               });
+              revision = runtimeSession?.executionBudget
+                ? await runtimeSession.executionBudget.run('repair', signal => revise(AbortSignal.any([signal, abortController.signal])))
+                : await revise(abortController.signal);
             } catch (error) {
+              if (error instanceof ExecutionBudgetError) throw error;
               if (error instanceof DocumentGenerationApplicationError) throw error;
               if (
                 error instanceof ConversationApplicationError &&
@@ -1052,6 +1080,7 @@ export class DocumentGenerationApplicationService {
           );
         }
       }
+      runtimeSession?.executionBudget?.assertCanProceed('tool');
       if (abortController.signal.aborted) {
         throw new DocumentGenerationApplicationError(
           'cancelled',
@@ -1061,6 +1090,8 @@ export class DocumentGenerationApplicationService {
       const documentIR = this.dependencies.compiler.compileIR?.({
         outline,
         operation,
+        identitySeed: JSON.stringify([input.conversationId, input.messageId, outline,
+          input.parentWorkId === undefined ? attachmentRefs : []]),
         attachmentRefs: input.parentWorkId === undefined ? attachmentRefs : [],
         ...(input.parentWorkId !== undefined
           ? { revision: { baseWorkId: String(input.parentWorkId), expectedRevision: input.expectedRevision } }
@@ -1075,6 +1106,7 @@ export class DocumentGenerationApplicationService {
       });
        const generated = await this.dependencies.generator.run({
        ...(runtimeSession ? { executionId: runtimeSession.executionId } : {}),
+       ...(runtimeSession?.executionBudget ? { executionBudget: runtimeSession.executionBudget } : {}),
       ...(presentationMap ? { sourceChecksumSha256: presentationMap.checksumSha256 } : {}),
       kind: input.kind,
       title: outline.title,
@@ -1087,6 +1119,7 @@ export class DocumentGenerationApplicationService {
         ...(presentationMap ? { sourceChecksumSha256: presentationMap.checksumSha256 } : {}),
         images: input.images,
         outline,
+        ...(pageRequirement ? { pageRequirement } : {}),
         ...(documentIR !== undefined ? { documentIR } : {})
       })),
       draftRevision: 1,
@@ -1107,6 +1140,7 @@ export class DocumentGenerationApplicationService {
       ...(revisionPatch !== undefined ? { revisionPatch } : {}),
       ...(revisionPatches !== undefined ? { revisionPatches } : {}),
       ...(requestedTotalPages !== undefined ? { requestedTotalPages } : {}),
+      ...(pageRequirement ? { pageRequirement } : {}),
       ...(input.theme !== undefined ? { theme: input.theme } : {}),
        ...(input.presentationTemplate !== undefined
         ? { presentationTemplate: input.presentationTemplate }
@@ -1160,8 +1194,9 @@ export class DocumentGenerationApplicationService {
         ...generated
       };
     } catch (error) {
-      const status = abortController.signal.aborted || (error instanceof Error && error.name === 'AbortError') ||
-        (error instanceof DocumentGenerationApplicationError && error.code === 'cancelled') ? 'cancelled' : 'failed';
+      const status = (!runtimeSession?.executionBudget?.stopReason || runtimeSession.executionBudget.stopReason === 'cancelled') &&
+        (abortController.signal.aborted || (error instanceof Error && error.name === 'AbortError') ||
+        (error instanceof DocumentGenerationApplicationError && error.code === 'cancelled')) ? 'cancelled' : 'failed';
       if (runtimeSession) {
         try {
           if (revisingDocument) await runtimeSession.progress({ code: 'tool_result', status, operationId: 'document-revision',
@@ -1181,6 +1216,9 @@ export class DocumentGenerationApplicationService {
         facts: { purpose: 'content', documentKind: input.kind } });
       await this.persistTerminalFailure(input, error);
       throw error;
+    } finally {
+      removeRuntimeAbort?.();
+      runtimeSession?.executionBudget?.dispose();
     }
   }
 
@@ -1251,9 +1289,7 @@ export class DocumentGenerationApplicationService {
     input: GenerateDocumentFromMessageInput,
     error: unknown
   ): Promise<void> {
-    const cancelled =
-      error instanceof DocumentGenerationApplicationError &&
-      error.code === 'cancelled';
+    const cancelled = isDocumentCancellation(error);
     const status: DocumentGenerationStatus = cancelled
       ? { state: 'cancelled', kind: input.kind }
       : {
@@ -1441,6 +1477,10 @@ function documentFailureCode(error: unknown): DocumentGenerationFailureCode {
   return 'generation_failed';
 }
 
+function isDocumentCancellation(error: unknown): boolean {
+  return (error instanceof DocumentGenerationApplicationError || error instanceof ExecutionBudgetError) && error.code === 'cancelled';
+}
+
 function workflowTargetMatches(
   workflow: ConversationWorkflowV1,
   target: { readonly unit: 'page' | 'section'; readonly ordinal: number }
@@ -1511,13 +1551,14 @@ export function collectArtDirectionRequestText(
 function validateFullPresentationPageCountRevision(
   previous: DocumentOutline,
   proposed: DocumentOutline,
-  requestedTotalPages: number
+  requirement: PresentationPageRequirement
 ): DocumentOutline {
+  const requestedTotalPages = presentationPlanningTotalPages(requirement);
   const requiredSections = presentationBodySectionCount(requestedTotalPages);
   if (
     previous.kind !== 'ppt' ||
     proposed.kind !== 'ppt' ||
-    proposed.sections.length !== requiredSections ||
+    (requirement.mode === 'exact' && proposed.sections.length !== requiredSections) ||
     proposed.sections.some(
       (section) => section.pageKind === 'cover' || section.pageKind === 'closing'
     )

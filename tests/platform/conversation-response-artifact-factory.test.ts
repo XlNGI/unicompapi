@@ -1,7 +1,7 @@
 import { mkdtemp, rm, writeFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
   addUserMessage,
   addProjectContextDraftFragment,
@@ -362,7 +362,7 @@ describe('ConversationResponseArtifactFactory', () => {
     });
   });
 
-  it('persists one pending assistant turn before provider dispatch starts', async () => {
+  it.each(['normal', 'prepare_cancel', 'commit_cancel'] as const)('handles %s before provider dispatch starts', async mode => {
     const root = await mkdtemp(path.join(os.tmpdir(), 'unicomp-response-artifacts-'));
     roots.push(root);
     const storage = new NodeProjectStorage(root);
@@ -399,18 +399,33 @@ describe('ConversationResponseArtifactFactory', () => {
     });
     await drafts.create(draft);
 
+    const startup = new AbortController();
+    let preparationStarted!: () => void;
+    const enteredPreparation = new Promise<void>(resolve => { preparationStarted = resolve; });
+    let finishPreparation!: () => void;
+    const latePreparation = new Promise<undefined>(resolve => { finishPreparation = () => resolve(undefined); });
+    if (mode === 'commit_cancel') {
+      const create = executions.create.bind(executions);
+      vi.spyOn(executions, 'create').mockImplementation(async (...args) => { await create(...args); startup.abort(); });
+    }
+    const onPreparationFailed = vi.fn(async () => undefined);
     const factory = new ConversationResponseArtifactFactory({
       conversations,
       drafts,
       contexts,
       executions,
+      ...(mode === 'normal' ? {} : { getStartupSignal: () => startup.signal, onPreparationFailed }),
+      ...(mode !== 'prepare_cancel' ? {} : { documentTools: {
+        prepare: async () => { preparationStarted(); return latePreparation; },
+        registerExecution: async () => { throw new Error('Cancelled preparation must not register tools'); }
+      } }),
       nextMessageId: () => assistantMessageId,
       nextExecutionId: () => 'response-execution-artifact',
       nextStreamEventId: () => 'response-stream-artifact',
       now: () => t1
     });
 
-    const created = await factory.create({
+    const pending = factory.create({
       subject: {
         projectId,
         subject: {
@@ -437,6 +452,26 @@ describe('ConversationResponseArtifactFactory', () => {
       authorizationClaimId: 'claim-artifact',
       createdAt: t1
     });
+
+    if (mode === 'prepare_cancel') {
+      await enteredPreparation;
+      startup.abort();
+    }
+    if (mode !== 'normal') {
+      await expect(pending).rejects.toMatchObject({ name: 'AbortError', code: 'cancelled' });
+      if (mode === 'prepare_cancel') {
+        finishPreparation();
+        await Promise.resolve();
+        expect((await conversations.get(conversation.id))?.messages.some(message => message.role === 'assistant')).toBe(false);
+        expect(await executions.list()).toHaveLength(0);
+        expect(onPreparationFailed).not.toHaveBeenCalled();
+      } else {
+        expect(onPreparationFailed).toHaveBeenCalledWith('response-execution-artifact', expect.objectContaining({ code: 'cancelled' }));
+        expect(await executions.list()).toHaveLength(1);
+      }
+      return;
+    }
+    const created = await pending;
 
     expect(created.subjectArtifacts.kind).toBe('conversation');
     const saved = await conversations.get(conversation.id);

@@ -13,8 +13,10 @@ import {
 } from './path-security';
 import {
   toProjectRelativePath,
+  projectStoragePaths,
   type ProjectRelativePath
 } from './project-paths';
+import { withProjectMetadataTransactionLock, type ProjectMetadataTransactionLockOptions } from './project-metadata-transaction-lock';
 
 export type AtomicJsonWriteStage =
   | 'temporary_synced'
@@ -28,6 +30,7 @@ export interface AtomicJsonWriteEvent {
 }
 
 export interface NodeProjectStorageOptions {
+  readonly metadataTransactionLock?: ProjectMetadataTransactionLockOptions;
   readonly onAtomicWriteStage?: (
     event: AtomicJsonWriteEvent
   ) => void | Promise<void>;
@@ -99,9 +102,9 @@ export class NodeProjectStorage implements ProjectStorageAdapter {
     const paths = options.backup
       ? [relativePath, backupRelativePath(relativePath)]
       : [relativePath];
-    await this.withExclusiveAccess(paths, async () => {
+    await this.withExclusiveAccess(paths, () => this.withMetadataWriteLock(relativePath, async () => {
       await this.writeWithOptionalBackupUnlocked(relativePath, value, options);
-    });
+    }));
   }
 
   async mutateJsonAtomically<T>(
@@ -112,12 +115,12 @@ export class NodeProjectStorage implements ProjectStorageAdapter {
     const paths = options.backup
       ? [relativePath, backupRelativePath(relativePath)]
       : [relativePath];
-    return this.withExclusiveAccess(paths, async () => {
+    return this.withExclusiveAccess(paths, () => this.withMetadataWriteLock(relativePath, async () => {
       const current = await this.readJsonUnlocked<unknown>(relativePath);
       const next = await mutate(current);
       await this.writeWithOptionalBackupUnlocked(relativePath, next, options, current);
       return next;
-    });
+    }));
   }
 
   async withExclusiveAccess<T>(
@@ -129,11 +132,11 @@ export class NodeProjectStorage implements ProjectStorageAdapter {
   }
 
   async remove(relativePath: ProjectRelativePath): Promise<void> {
-    await this.withExclusiveAccess([relativePath], async () => {
+    await this.withExclusiveAccess([relativePath], () => this.withMetadataWriteLock(relativePath, async () => {
       const target = this.resolve(relativePath);
       await assertNoSymbolicLinkTraversal(this.rootDirectory, target);
       await rm(target, { force: true });
-    });
+    }));
   }
 
   async ensureDirectory(relativePath: ProjectRelativePath): Promise<void> {
@@ -156,6 +159,12 @@ export class NodeProjectStorage implements ProjectStorageAdapter {
       if (isNodeError(error) && error.code === 'ENOENT') return undefined;
       throw error;
     }
+  }
+  private withMetadataWriteLock<T>(relativePath: ProjectRelativePath, operation: () => Promise<T>): Promise<T> {
+    const primary = projectStoragePaths.entities.metadataUnit;
+    const normalized = relativePath.toLowerCase();
+    if (normalized !== primary && normalized !== `${primary}.bak`) return operation();
+    return withProjectMetadataTransactionLock(this.rootDirectory, this.resolve(primary), operation, this.options.metadataTransactionLock);
   }
 
   private async writeWithOptionalBackupUnlocked<T>(

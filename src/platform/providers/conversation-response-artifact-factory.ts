@@ -1,4 +1,5 @@
 import type { ConversationNativeSearch } from './conversation-native-search';
+import type { ConversationExecutionCoordinator } from './conversation-execution-coordinator';
 import { randomUUID } from 'node:crypto';
 import {
   beginAssistantMessage,
@@ -43,6 +44,11 @@ export interface ConversationResponseArtifactFactoryDependencies {
   readonly attachments?: Pick<ConversationAttachmentContextService, 'resolve'> & Partial<Pick<ConversationAttachmentContextService, 'resolveImage'>>;
   readonly documentPages?: Pick<ConversationDocumentPageContextService, 'resolve'>;
   readonly documentTools?: Pick<ConversationDocumentToolSessionService, 'prepare' | 'registerExecution'>;
+  readonly executionCoordinator?: ConversationExecutionCoordinator;
+  getStartupSignal?(draftId: string): AbortSignal | undefined;
+  onPreparationFailed?(executionId: string, error: unknown): Promise<void>;
+  bindExecutionOwnership?(executionId: string): Promise<void>;
+  bindDocumentOwnership?(executionId: string): Promise<void>;
   nextMessageId?: () => MessageId;
   nextExecutionId?: () => string;
   nextStreamEventId?: () => string;
@@ -79,6 +85,8 @@ export class ConversationResponseArtifactFactory
     if (!draft || draft.revision !== subject.responseDraftRevision) {
       throw new TypeError('Conversation response draft is unavailable for artifact creation');
     }
+    const startupSignal = this.dependencies.getStartupSignal?.(draft.id);
+    assertStartupSignal(startupSignal);
     const conversation = await this.dependencies.conversations.get(subject.conversationId);
     if (!conversation || conversation.revision !== subject.conversationRevision) {
       throw new TypeError('Conversation revision changed before artifact creation');
@@ -88,7 +96,8 @@ export class ConversationResponseArtifactFactory
       throw new TypeError('Conversation response user message is unavailable for artifact creation');
     }
     const nativeSearch = await this.dependencies.nativeSearch?.dispatch(draft, input.candidate);
-    const toolSelection = await this.dependencies.documentTools?.prepare({ conversation, draft });
+    assertStartupSignal(startupSignal);
+    const toolSelection = await awaitStartup(this.dependencies.documentTools?.prepare({ conversation, draft, signal: startupSignal }), startupSignal);
     const bindsExistingDocument = toolSelection !== undefined &&
       (!('kind' in toolSelection) || toolSelection.kind === 'mutation' ||
         (toolSelection.kind === 'agent' && toolSelection.mutation !== undefined));
@@ -164,6 +173,7 @@ export class ConversationResponseArtifactFactory
       ...contextEnvelope.messages
     ] : contextEnvelope.messages;
     const createdAt = toIsoTimestamp(input.createdAt);
+    assertStartupSignal(startupSignal);
     const assistantMessageId = this.nextMessageId();
     const pendingConversation = beginAssistantMessage(conversation, {
       id: assistantMessageId,
@@ -215,8 +225,19 @@ export class ConversationResponseArtifactFactory
       occurredAt: createdAt
     });
     await this.dependencies.executions.create(responseExecution, createdEvent);
-    if (toolSelection) {
-      await this.dependencies.documentTools!.registerExecution({ selection: toolSelection, responseExecutionId: responseExecution.id });
+    if (startupSignal) this.dependencies.executionCoordinator?.bindStartupSignal(responseExecution.id, startupSignal);
+    try {
+      assertStartupSignal(startupSignal);
+      await this.dependencies.bindExecutionOwnership?.(responseExecution.id);
+      if (toolSelection) {
+        await this.dependencies.documentTools!.registerExecution({ selection: toolSelection, responseExecutionId: responseExecution.id, signal: startupSignal });
+      }
+      await this.dependencies.bindDocumentOwnership?.(responseExecution.id);
+      assertStartupSignal(startupSignal);
+    } catch (error) {
+      this.dependencies.executionCoordinator?.releaseStartupSignal(responseExecution.id);
+      await this.dependencies.onPreparationFailed?.(responseExecution.id, error);
+      throw error;
     }
 
     return {
@@ -235,6 +256,22 @@ export class ConversationResponseArtifactFactory
       }
     };
   }
+}
+
+function assertStartupSignal(signal?: AbortSignal): void {
+  if (signal?.aborted) throw Object.assign(new Error('cancelled'), { name: 'AbortError', code: 'cancelled' });
+}
+
+async function awaitStartup<T>(pending: Promise<T> | T, signal?: AbortSignal): Promise<T> {
+  if (!signal) return await pending;
+  let abort: (() => void) | undefined;
+  const stopped = new Promise<never>((_, reject) => {
+    abort = () => reject(Object.assign(new Error('cancelled'), { name: 'AbortError', code: 'cancelled' }));
+    signal.addEventListener('abort', abort, { once: true });
+    if (signal.aborted) abort();
+  });
+  try { return await Promise.race([pending, stopped]); }
+  finally { if (abort) signal.removeEventListener('abort', abort); }
 }
 
 function runtimeSourceForPackage(

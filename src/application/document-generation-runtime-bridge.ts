@@ -4,6 +4,8 @@ import type {
   DocumentGenerationRuntimeSession
 } from './document-generation-service';
 import type { DocumentTaskRuntimeService, DocumentTaskRuntimeScope } from './document-task-runtime-service';
+import type { HostExecutionBudget } from './execution-budget';
+import { createDocumentToolRegistry } from '../domain';
 
 /**
  * Bridges the existing deterministic document runner lifecycle into the
@@ -19,12 +21,14 @@ export class DocumentGenerationRuntimeBridge implements DocumentGenerationRuntim
     private readonly service: DocumentTaskRuntimeService,
     private readonly scope: DocumentTaskRuntimeScope,
     executionId: string,
-    private readonly operation?: DocumentOperation
+    private readonly operation?: DocumentOperation,
+    readonly executionBudget?: HostExecutionBudget
   ) {
     this.executionId = executionId;
   }
 
   async start(): Promise<void> {
+    this.executionBudget?.assertCanProceed('prepare');
     await this.service.start(this.scope);
   }
 
@@ -34,12 +38,14 @@ export class DocumentGenerationRuntimeBridge implements DocumentGenerationRuntim
     const key = operationKey(event);
     if (event.status === 'started') {
       if (this.active.has(key)) return;
+      this.executionBudget?.assertCanProceed('tool');
       const inputHash = await sha256Hex(JSON.stringify([
         toolId,
         event.operationId ?? event.code,
         event.facts ?? null
       ]));
       const callId = `generation-${this.sequence + 1}`;
+      this.executionBudget?.reserveToolCall(`local:${callId}`, createDocumentToolRegistry().get(toolId)!.maxCostUnits);
       const { runtime } = await this.service.beginToolCall(this.scope, { callId, toolId, inputHash });
       this.sequence += 1;
       const call = runtime.toolCalls?.find((item) => item.id === callId);
@@ -74,6 +80,10 @@ export class DocumentGenerationRuntimeBridge implements DocumentGenerationRuntim
       await this.service.complete(this.scope, String(workId));
       return;
     }
+    // Publishing an artifact and completing its task are separate facts. A
+    // late Work must remain discoverable without thawing an unknown operation.
+    await this.service.recordRegisteredWork(this.scope, String(workId));
+    if (['failed', 'cancelled', 'needs_reconciliation'].includes(runtime.status)) return;
     if (this.active.size > 0) {
       // A runner cannot publish a completed Work while a progress operation
       // is still unsettled. Reconcile instead of guessing its side effect.

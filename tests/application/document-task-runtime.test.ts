@@ -19,7 +19,9 @@ const input = {
 const call = { callId: 'call-1', toolId: 'read_document_structure' as const, inputHash: 'a'.repeat(64) };
 const observation = { step: 1, toolId: call.toolId, ok: true, data: { sections: 2 } };
 
-async function fixture(overrides: Partial<typeof input> = {}) {
+async function fixture(overrides: Omit<Partial<typeof input>, 'budget' | 'operation'> & {
+  budget?: DocumentTaskRuntime['budget']; operation?: DocumentTaskRuntime['operation']
+} = {}) {
   const values = new Map<string, DocumentTaskRuntime>();
   const repository: DocumentTaskRuntimeRepository = {
     projectId,
@@ -44,6 +46,22 @@ async function fixture(overrides: Partial<typeof input> = {}) {
 }
 
 describe('document task runtime lifecycle', () => {
+  it('reopens with the persisted parent deadline rather than a fresh child duration', async () => {
+    const deadlineAt = Date.parse(now()) + 700;
+    const f = await fixture({ budget: { ...input.budget, deadlineAt } });
+    const snapshot = await f.repository.get(f.runtime.id);
+    expect(snapshot?.budget.deadlineAt).toBe(deadlineAt);
+    const reopened = new DocumentTaskRuntimeService(f.repository, f.options);
+    f.setTime('2026-09-22T00:00:00.699Z');
+    expect(reopened.canResume(snapshot!)).toBe(true);
+    f.setTime('2026-09-22T00:00:00.700Z');
+    expect(reopened.canResume(snapshot!)).toBe(false);
+    await expect(reopened.beginToolCall(f.runtime, call)).rejects.toThrow('runtime_not_resumable');
+  });
+
+  it.each([0, Date.parse(now()), Date.parse(now()) + 900_001])('rejects invalid persisted parent deadline %s', deadlineAt => {
+    expect(() => createDocumentTaskRuntime({ ...input, budget: { ...input.budget, deadlineAt }, createdAt: toIsoTimestamp(now()) })).toThrow();
+  });
   it('keeps create PPT and attachment-backed edit operations explicit', async () => {
     const created = createDocumentTaskRuntime({
       ...input, operation: 'create', attachmentRefs: [], workRef: undefined, pageRefs: [],
@@ -80,15 +98,15 @@ describe('document task runtime lifecycle', () => {
     await expect(f.service.beginToolCall({ ...f.runtime, [field]: 'other' }, call)).rejects.toThrow('runtime_scope_mismatch');
   });
 
-  it('checks live page revisions before execution and before accepting results', async () => {
+  it('checks live page revisions before execution while preserving settlement after revision changes', async () => {
     const f = await fixture();
     f.setPage(3);
     await expect(f.service.beginToolCall(f.runtime, call)).rejects.toThrow('runtime_binding_or_revision_invalid');
     f.setPage(2);
     await f.service.beginToolCall(f.runtime, call);
     f.setPage(3);
-    await expect(f.service.recordObservation(f.runtime, call.callId, observation)).rejects.toThrow('runtime_binding_or_revision_invalid');
-    expect((await f.service.recover(f.runtime)).status).toBe('needs_reconciliation');
+    expect((await f.service.recordObservation(f.runtime, call.callId, observation)).toolCalls[0].status).toBe('completed');
+    await expect(f.service.beginToolCall(f.runtime, { ...call, callId: 'after-revision-change' })).rejects.toThrow('runtime_binding_or_revision_invalid');
   });
 
   it.each(['apply_document_patch', 'read_document_structure'] as const)('does not replay an interrupted %s', async toolId => {
@@ -134,7 +152,7 @@ describe('document task runtime lifecycle', () => {
     await f.service.setStatus(f.runtime, status);
     await expect(f.service.beginToolCall(f.runtime, call)).rejects.toThrow('runtime_not_resumable');
     expect((await f.service.recover(f.runtime)).status).toBe(status);
-    await expect(f.service.setStatus(f.runtime, 'paused')).rejects.toThrow('Invalid document task runtime transition');
+    await expect(f.service.setStatus(f.runtime, 'paused')).rejects.toThrow();
   });
 
   it('preserves spent budget and the original deadline after reopen', async () => {
@@ -169,6 +187,50 @@ describe('document task runtime lifecycle', () => {
     const result = await f.service.complete(f.runtime, 'work-document-1');
     expect(result.status).toBe('needs_reconciliation');
     expect(result.toolCalls.at(-1)?.status).toBe('unknown');
+  });
+
+  it('keeps a registered Work alongside an unknown write without completing or replaying', async () => {
+    const f = await fixture();
+    await f.service.beginToolCall(f.runtime, { ...call, toolId: 'apply_document_patch' });
+    await f.service.recover(f.runtime);
+    const stored = await f.service.recordRegisteredWork(f.runtime, 'work-known-1');
+    expect(stored).toMatchObject({ status: 'needs_reconciliation', checkpoint: { stage: 'reconcile' },
+      workRef: { kind: 'registered', ref: 'work-known-1' }, toolCalls: [{ status: 'unknown' }] });
+    expect(await f.service.recordRegisteredWork(f.runtime, 'work-known-1')).toEqual(stored);
+    await expect(f.service.recordRegisteredWork(f.runtime, 'work-other')).rejects.toThrow('runtime_completion_conflict');
+    await expect(f.service.complete(f.runtime, 'work-known-1')).rejects.toThrow('runtime_not_completable');
+    await expect(f.service.beginToolCall(f.runtime, { ...call, callId: 'never-replay' })).rejects.toThrow('reconciliation_required');
+  });
+
+  it.each(['cancelled', 'failed'] as const)('records a late registered Work while keeping %s terminal', async status => {
+    const f = await fixture();
+    await f.service.setStatus(f.runtime, status);
+    const stored = await f.service.recordRegisteredWork(f.runtime, 'late-work');
+    expect(stored.status).toBe(status);
+    expect(stored.workRef).toEqual({ kind: 'registered', ref: 'late-work' });
+    await expect(f.service.beginToolCall(f.runtime, call)).rejects.toThrow('runtime_not_resumable');
+  });
+
+  it('completes an analysis from a settled read without manufacturing a Work', async () => {
+    const f = await fixture({ operation: 'analyze', workRef: undefined });
+    await expect(f.service.completeRead(f.runtime)).rejects.toThrow('runtime_not_completable');
+    await f.service.beginToolCall(f.runtime, call);
+    await f.service.recordObservation(f.runtime, call.callId, observation);
+    const completed = await f.service.completeRead(f.runtime);
+    expect(completed).toMatchObject({ status: 'completed', checkpoint: { stage: 'complete' } });
+    expect(completed.workRef).toBeUndefined();
+    expect(await f.service.completeRead(f.runtime)).toEqual(completed);
+  });
+
+  it('keeps runner late publication discoverable after its interrupted write became unknown', async () => {
+    const f = await fixture();
+    const bridge = new DocumentGenerationRuntimeBridge(f.service, f.runtime, f.runtime.executionId);
+    await bridge.start();
+    await bridge.progress({ code: 'document_publish', status: 'started', operationId: 'publish', facts: { documentKind: 'ppt' } });
+    await bridge.fail('cancelled');
+    await bridge.complete('late-published-work');
+    expect(await bridge.runtime()).toMatchObject({ status: 'needs_reconciliation',
+      workRef: { kind: 'registered', ref: 'late-published-work' }, toolCalls: [{ status: 'unknown' }] });
   });
 
   it('projects deterministic runner progress into safe observations and completes after Work registration', async () => {

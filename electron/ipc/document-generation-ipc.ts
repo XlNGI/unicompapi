@@ -60,6 +60,7 @@ import { JsonProviderExecutionRouteSnapshotRepository } from '../../src/platform
 import { JsonProviderInvocationRepository } from '../../src/platform/repositories/json-provider-invocation-repository';
 import { JsonProviderUsageObservationRepository } from '../../src/platform/repositories/json-provider-usage-repository';
 import { emitProductionEvent } from '../../src/platform/conversation-production-trace';
+import { HostExecutionBudget } from '../../src/application/execution-budget';
 
 export function registerDocumentGenerationIpcHandlers(options: {
   readonly sessionRegistry: StorageProjectSessionRegistry;
@@ -154,7 +155,7 @@ export function registerDocumentGenerationIpcHandlers(options: {
       const application = new DocumentGenerationApplicationService({
         onProgress: async (event) => { await emitProductionEvent(event); },
         runtime: {
-          create: async (input) => {
+          create: async (input, signal) => {
             const executionId = `execution-document-${randomUUID()}`;
             const runtime = await taskRuntimeService.create({
               id: toDocumentTaskRuntimeId(`runtime-document-${randomUUID()}`),
@@ -173,7 +174,11 @@ export function registerDocumentGenerationIpcHandlers(options: {
               projectId: runtime.projectId,
               conversationId: runtime.conversationId,
               executionId: runtime.executionId
-            }, executionId, runtime.operation);
+            }, executionId, runtime.operation, new HostExecutionBudget({ startedAt: Date.parse(runtime.createdAt),
+              deadlineAt: Date.parse(runtime.createdAt) + runtime.budget.timeoutMs,
+              maxToolCalls: runtime.budget.maxSteps, budgetUnits: runtime.budget.budgetUnits }, { signal,
+              onDiagnostic: diagnostic => emitProductionEvent({ code: 'model_response', operationId: 'execution_budget',
+                status: diagnostic.stopReason === 'cancelled' ? 'cancelled' : 'failed', facts: diagnostic }) }));
           }
         },
         projectId: session.projectId,

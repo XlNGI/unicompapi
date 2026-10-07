@@ -36,7 +36,7 @@ function renderElement(slide: PptxGenJS.Slide, element: PresentationRenderPlanEl
     const headerFill = style.tableHeaderFill ?? style.fill ?? 'FFFFFF';
     const bodyFill = style.tableBodyFill ?? style.fill ?? 'FFFFFF';
     slide.addTable([
-      content.header.map(text => ({ text, options: { bold: true, color: style.color, fill: { color: headerFill } } })),
+      content.header.map(text => ({ text, options: { bold: true, color: style.tableHeaderColor ?? style.color, fill: { color: headerFill } } })),
       ...content.rows.map(row => row.map(text => ({ text, options: { color: style.color, fill: { color: bodyFill } } })))
     ], {
       objectName, x, y, w, h,
@@ -62,9 +62,11 @@ function renderElement(slide: PptxGenJS.Slide, element: PresentationRenderPlanEl
       showTitle: Boolean(content.title),
       title: content.title ?? '',
       titleColor: style.color,
+      ...(style.fill ? { chartArea: { fill: { color: style.fill } }, plotArea: { fill: { color: style.fill } } } : {}),
       showLegend: style.showLegend,
       legendColor: style.color,
       showValue: style.showValues,
+      dataLabelColor: style.color,
       catAxisLabelColor: style.mutedColor ?? style.color,
       valAxisLabelColor: style.mutedColor ?? style.color,
       chartColors: [...(style.chartColors ?? [style.color])]

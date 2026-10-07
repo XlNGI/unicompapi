@@ -60,7 +60,11 @@ export class ManagedProcessSupervisor {
       detached: this.platform !== 'win32',
       stdio: ['ignore', 'pipe', 'pipe']
     });
-    if (!child.pid) throw new Error('Managed process did not receive a process id');
+    if (!child.pid) {
+      // spawn failure may still emit asynchronously after the admission check.
+      child.once('error', () => undefined);
+      throw new Error('Managed process did not receive a process id');
+    }
 
     let stdout = '';
     let stderr = '';

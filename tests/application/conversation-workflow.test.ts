@@ -37,6 +37,17 @@ describe('Conversation workflow', () => {
       toConversationWorkflowId(`workflow-language-${nextId++}`));
   }
 
+  it('leaves a leased workflow untouched while recovering only an authorized local workflow', async () => {
+    const service = await regressionService();
+    const first = await service.create({ projectId, conversationId, sourceMessageId: toMessageId('leased-workflow-source'), rawText: '写一份关于龙的 PPT' });
+    const leased = await service.beginExecution({ workflowId: first.id, expectedRevision: first.revision, executionId: 'leased-response' });
+    const second = await service.create({ projectId, conversationId: toConversationId('second-local-conversation'), sourceMessageId: toMessageId('local-workflow-source'), rawText: '写一份关于龙的 PPT' });
+    await service.beginExecution({ workflowId: second.id, expectedRevision: second.revision, executionId: 'local-response' });
+    expect(await service.recoverInterruptedExecutions(async item => item.executionId === 'local-response')).toBe(1);
+    expect(await service.get(first.id)).toEqual(leased);
+    expect((await service.get(second.id))?.status).toBe('failed');
+  });
+
   it('binds an exact confirmation reply to the current plan and rejects an expired confirmation', async () => {
     const root = await mkdtemp(path.join(os.tmpdir(), 'unicomp-workflow-confirmation-'));
     roots.push(root);

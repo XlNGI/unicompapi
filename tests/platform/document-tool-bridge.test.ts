@@ -2,6 +2,8 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { createDocumentToolCallingBridge, parseControlledProviderTools } from '../../src/platform';
 import type { DocumentAtomicExecutionContext, DocumentAtomicToolBinding } from '../../src/application/document-atomic-tools';
 import type { DocumentTaskRuntimeScope } from '../../src/application/document-task-runtime-service';
+import { HostExecutionBudget } from '../../src/application/execution-budget';
+import * as productionTrace from '../../src/platform/conversation-production-trace';
 import {
   canonicalToolIds, canonicalToolInputSchema, createCanonicalToolRegistry,
   type CanonicalToolContract, type CanonicalToolId, type CanonicalToolRegistry,
@@ -49,6 +51,144 @@ function failure(code: string, status = 'failed') { return { schemaVersion: 1, s
 describe('document tool calling bridge', () => {
   afterEach(() => vi.useRealTimers());
 
+  it('reports one complete tool-set validation summary while preserving each canonical Provider schema', () => {
+    const diagnostic = vi.spyOn(productionTrace, 'emitProductionDiagnostic').mockResolvedValue({ recorded: true });
+    try {
+      const bridge = createBridge([binding('read_document_structure'), binding('update_element')]);
+      const tools = bridge.tools;
+      expect(tools.map(tool => tool.function.name)).toEqual(['read_document_structure', 'update_element']);
+      for (const tool of tools) {
+        expect(tool.function.parameters).toEqual(canonicalToolInputSchema(testRegistry.get(tool.function.name as CanonicalToolId)!));
+      }
+      expect(parseControlledProviderTools(tools)).toEqual(tools);
+      expect(diagnostic.mock.calls).toEqual([[{ code: 'plan_validation', status: 'completed',
+        operationId: 'provider_tools_from_contracts_returned', facts: { purpose: 'tool', count: 2 } }]]);
+      expect(() => parseControlledProviderTools([{ ...tools[0], function: { ...tools[0].function, parameters: {} } }])).toThrow();
+    } finally { diagnostic.mockRestore(); }
+  });
+
+  it('rejects changed, duplicate or overridden bindings before reporting a complete tool-set summary', () => {
+    const diagnostic = vi.spyOn(productionTrace, 'emitProductionDiagnostic').mockResolvedValue({ recorded: true });
+    try {
+      const original = binding('read_document_structure');
+      expect(() => createBridge([{ ...original, contract: { ...original.contract, description: 'Unregistered description' } }]))
+        .toThrow('tool_registry_invalid');
+      expect(() => createBridge([{ ...original, contract: { ...original.contract,
+        execution: { ...original.contract.execution, budgetUnits: original.contract.execution.budgetUnits + 1 } } }]))
+        .toThrow('tool_registry_invalid');
+      expect(() => createBridge([original, original])).toThrow('tool_registry_invalid');
+      expect(() => createBridge([{ ...original, fields: {} } as DocumentAtomicToolBinding])).toThrow('tool_registry_invalid');
+      expect(diagnostic).not.toHaveBeenCalled();
+    } finally { diagnostic.mockRestore(); }
+  });
+
+  it('shares parent claims across two bridges and charges an idempotent replay only once', async () => {
+    const startedAt = Date.now();
+    const budget = new HostExecutionBudget({ startedAt, deadlineAt: startedAt + 90_000, maxToolCalls: 2, budgetUnits: 2 });
+    try {
+      const execute = vi.fn(async () => success());
+      const first = createBridge([binding('read_document_structure', execute)], { executionBudget: budget });
+      const second = createBridge([binding('read_document_structure', execute)], { executionBudget: budget });
+      expect(await invoke(first, 'shared-first')).toMatchObject({ status: 'success' });
+      expect(await invoke(first, 'shared-first')).toMatchObject({ status: 'success' });
+      expect(await invoke(second, 'shared-second')).toMatchObject({ status: 'success' });
+      expect(await invoke(second, 'shared-third')).toMatchObject(failure('tool_call_limit'));
+      expect(execute).toHaveBeenCalledTimes(2);
+      expect(budget.snapshot('tool_call_limit')).toMatchObject({ toolCallsUsed: 2, costUnitsUsed: 2 });
+    } finally { budget.dispose(); }
+  });
+
+  it('refunds known pre-execution refusals while retaining the shared admission ceiling', async () => {
+    const startedAt = Date.now();
+    const budget = new HostExecutionBudget({ startedAt, deadlineAt: startedAt + 90_000, maxToolCalls: 1, budgetUnits: 1 });
+    try {
+      const rejected = createBridge([{ ...binding('read_document_structure'), authorize: async () => false }], { executionBudget: budget });
+      expect(await invoke(rejected, 'denied')).toMatchObject(failure('authorization_or_revision_invalid'));
+      expect(budget.snapshot('cancelled')).toMatchObject({ toolCallsUsed: 0, costUnitsUsed: 0 });
+      const approved = createBridge([binding('read_document_structure')], { executionBudget: budget });
+      expect(await invoke(approved, 'approved')).toMatchObject({ status: 'success' });
+      expect(budget.snapshot('cancelled')).toMatchObject({ toolCallsUsed: 1, costUnitsUsed: 1 });
+    } finally { budget.dispose(); }
+  });
+
+  it('preserves the actual preflight refusal even when other admitted calls already consumed the execution budget', async () => {
+    const startedAt = Date.now();
+    const budget = new HostExecutionBudget({ startedAt, deadlineAt: startedAt + 90_000, maxToolCalls: 1, budgetUnits: 1 });
+    try {
+      budget.reserveToolCall('other-admitted-call', 1);
+      const execute = vi.fn(async () => success()), admission = vi.fn();
+      const refused = createBridge([{ ...binding('read_document_structure', execute), preflight: async () => ({ schemaVersion: 1,
+        status: 'failed', diagnostics: [{ code: 'TOOL_PRECONDITION_FAILED', severity: 'error', message: 'TOOL_PRECONDITION_FAILED' }] }) }], { executionBudget: budget });
+      expect(await refused.bridge.execute({ call: { id: 'known-refusal', name: 'read_document_structure', arguments: {} },
+        signal: budget.signal, onExecutionAdmitted: admission })).toMatchObject(failure('TOOL_PRECONDITION_FAILED'));
+      expect(budget.stopReason).toBeUndefined();
+      expect(budget.snapshot('cancelled')).toMatchObject({ toolCallsUsed: 1, costUnitsUsed: 1 });
+      expect(execute).not.toHaveBeenCalled(); expect(admission).not.toHaveBeenCalled();
+    } finally { budget.dispose(); }
+  });
+
+  it('awaits the durable parent admission after the child checkpoint and before performing an actual Host operation', async () => {
+    let release!: () => void, entered!: () => void;
+    const gate = new Promise<void>(resolve => { release = resolve; }), ready = new Promise<void>(resolve => { entered = resolve; });
+    const order: string[] = [];
+    const beginToolCall = vi.fn(async () => { order.push('child-checkpoint'); return { execute: true, runtime: { checkpoint: { step: 1 }, observations: [], toolCalls: [] } }; });
+    const recordObservation = vi.fn(async () => { order.push('child-observation'); });
+    const runtime = { service: { beginToolCall, recordObservation }, scope: {} as DocumentTaskRuntimeScope } as unknown as BridgeOptions['runtime'];
+    const execute = vi.fn(async () => { order.push('execute'); return success(); });
+    const current = createBridge([binding('read_document_structure', execute)], { runtime });
+    const result = current.bridge.execute({ call: { id: 'parent-admission', name: 'read_document_structure', arguments: {} }, signal: new AbortController().signal,
+      onExecutionAdmitted: async () => { order.push('parent-admission'); entered(); await gate; order.push('parent-committed'); } });
+    await ready;
+    expect(execute).not.toHaveBeenCalled(); expect(recordObservation).not.toHaveBeenCalled();
+    release(); expect(await result).toMatchObject({ status: 'success' });
+    expect(order).toEqual(['child-checkpoint', 'parent-admission', 'parent-committed', 'execute', 'child-observation']);
+  });
+
+  it('freezes an uncertain parent admission receipt and retains the Host claim without starting or replaying execution', async () => {
+    const startedAt = Date.now();
+    const budget = new HostExecutionBudget({ startedAt, deadlineAt: startedAt + 90_000, maxToolCalls: 2, budgetUnits: 2 });
+    const execute = vi.fn(async () => success());
+    const current = createBridge([binding('read_document_structure', execute)], { executionBudget: budget });
+    try {
+      expect(await current.bridge.execute({ call: { id: 'lost-admission-receipt', name: 'read_document_structure', arguments: {} }, signal: new AbortController().signal,
+        onExecutionAdmitted: async () => { throw new Error('journal write result unknown'); } })).toMatchObject(failure('execution_journal_failed', 'unknown'));
+      expect(execute).not.toHaveBeenCalled(); expect(current.hasUnknownResult()).toBe(true);
+      expect(budget.snapshot('unknown_result')).toMatchObject({ toolCallsUsed: 1, costUnitsUsed: 1 });
+      expect(await invoke(current, 'after-lost-receipt')).toMatchObject(failure('unknown_result', 'unknown'));
+      expect(execute).not.toHaveBeenCalled();
+    } finally { budget.dispose(); }
+  });
+
+  it('aborts an in-flight write at the original parent deadline and freezes sibling admission without refund', async () => {
+    vi.useFakeTimers();
+    const startedAt = Date.now();
+    const budget = new HostExecutionBudget({ startedAt, deadlineAt: startedAt + 25, maxToolCalls: 4, budgetUnits: 16 });
+    let finish!: (value: DocumentToolResult) => void;
+    let entered!: () => void;
+    const writing = new Promise<void>(resolve => { entered = resolve; });
+    const write = createBridge([binding('apply_document_patch', async (_args, context) => {
+      expect(context.abortSignal.aborted).toBe(false);
+      entered();
+      return new Promise(resolve => { finish = resolve; });
+    })], { executionBudget: budget });
+    const read = vi.fn(async () => success());
+    const sibling = createBridge([binding('read_document_structure', read)], { executionBudget: budget });
+    const pending = invoke(write, 'parent-write', {}, 'apply_document_patch');
+    await writing;
+    await vi.advanceTimersByTimeAsync(25);
+    expect(await pending).toMatchObject(failure('tool_timeout', 'unknown'));
+    expect(budget.stopReason).toBe('timeout');
+    expect(await invoke(sibling, 'after-parent-timeout')).toMatchObject(failure('timeout'));
+    expect(read).not.toHaveBeenCalled();
+    const used = budget.snapshot('timeout');
+    expect(used.toolCallsUsed).toBe(1);
+    expect(used.costUnitsUsed).toBe(testRegistry.get('apply_document_patch')!.execution.budgetUnits);
+    finish(success({ changed: true }));
+    await vi.advanceTimersByTimeAsync(0);
+    expect(budget.snapshot('timeout').costUnitsUsed).toBe(used.costUnitsUsed);
+    budget.dispose();
+  });
+
   it('publishes canonical Provider parameters and forwards business arguments separately from Host context', async () => {
     const execute = vi.fn(async (_args, _context) => success({ revision: 3, sourceId: 'source-1' }));
     const bridge = bridgeWith(binding('read_document_structure', execute));
@@ -85,6 +225,8 @@ describe('document tool calling bridge', () => {
     host = { ...rebound, projectContext: { ...rebound.projectContext, projectId: 'other-project' } };
     expect(() => bridge.tools).toThrow('runtime_scope_mismatch');
     host = { ...rebound, taskContext: { ...rebound.taskContext, taskId: 'other-task' } };
+    expect(() => bridge.tools).toThrow('runtime_scope_mismatch');
+    host = { ...rebound, projectContext: { ...rebound.projectContext, responseExecutionId: 'other-response' } };
     expect(() => bridge.tools).toThrow('runtime_scope_mismatch');
     host = rebound;
     expect(bridge.tools).toHaveLength(1);
@@ -236,7 +378,7 @@ describe('document tool calling bridge', () => {
     const first = invoke(bridge, 'same', {}, 'apply_document_patch');
     const duplicate = invoke(bridge, 'same', {}, 'apply_document_patch');
     const conflict = invoke(bridge, 'same');
-    expect(await first).toEqual(await duplicate);
+    expect(await duplicate).toEqual({ ...await first, metadata: { ...(await first).metadata as Record<string, unknown>, replayed: true } });
     expect(await conflict).toMatchObject(failure('call_id_conflict'));
     expect(execute).toHaveBeenCalledOnce();
     expect(bridge.spentCostUnits()).toBe(testRegistry.get('apply_document_patch')!.execution.budgetUnits);
@@ -248,9 +390,10 @@ describe('document tool calling bridge', () => {
     const first = invoke(bridge, 'ordered', { scope: 'page', ordinal: 1 });
     const duplicate = invoke(bridge, 'ordered', { ordinal: 1, scope: 'page' });
     const conflict = invoke(bridge, 'ordered', { scope: 'page', ordinal: 2 });
-    expect(await first).toEqual(await duplicate);
+    expect(await duplicate).toEqual({ ...await first, metadata: { ...(await first).metadata as Record<string, unknown>, replayed: true } });
     expect(await conflict).toMatchObject(failure('call_id_conflict'));
-    expect(await invoke(bridge, 'defaults')).toEqual(await invoke(bridge, 'defaults', { scope: 'document' }));
+    const defaultResult = await invoke(bridge, 'defaults');
+    expect(await invoke(bridge, 'defaults', { scope: 'document' })).toEqual({ ...defaultResult, metadata: { ...defaultResult.metadata as Record<string, unknown>, replayed: true } });
     expect(execute).toHaveBeenCalledTimes(2);
   });
 
@@ -401,7 +544,7 @@ describe('document tool calling bridge', () => {
     expect(await invoke(bridge, 'durable')).toMatchObject({ status: 'success', observation: { revision: 4, sourceId: 'source-1' } });
     expect(beginToolCall).toHaveBeenCalledWith(expect.anything(), expect.objectContaining({ callId: 'durable', toolId: 'read_document_structure', inputHash: expect.stringMatching(/^[a-f0-9]{64}$/) }), expect.objectContaining({ currentDocumentId: 'document-1', revision: 3 }));
     expect(recordObservation).toHaveBeenCalledWith(expect.anything(), 'durable', {
-      step: 1, toolId: 'read_document_structure', ok: true, data: { revision: 4, sourceId: 'source-1' }
+      step: 1, toolId: 'read_document_structure', ok: true, data: { revision: 4, sourceId: 'source-1', readWorkId: 'document-1' }
     }, { outcomeUnknown: false });
     expect(order).toEqual(['checkpoint', 'execute', 'observation']);
   });

@@ -106,6 +106,13 @@ export function registerChatContextIpcHandlers(options: {
   ipcMain.handle(chatContextIpcChannels.startAgentResponse, (_event, request: unknown) =>
     runtime.responses.startAgent(request)
   );
+  ipcMain.handle(chatContextIpcChannels.cancelAgentSession, (_event, request: unknown) => runtime.responses.cancelAgentSession(request));
+  ipcMain.handle(chatContextIpcChannels.cancelResponseStart, (_event, request: unknown) =>
+    runtime.responses.cancelResponseStart(request)
+  );
+  ipcMain.handle(chatContextIpcChannels.inspectReconciliation, (_event, request: unknown) => runtime.responses.inspectReconciliation(request));
+  ipcMain.handle(chatContextIpcChannels.reconcileReconciliation, (_event, request: unknown) => runtime.responses.reconcileReconciliation(request));
+  ipcMain.handle(chatContextIpcChannels.acknowledgeReconciliation, (_event, request: unknown) => runtime.responses.acknowledgeReconciliation(request));
   ipcMain.handle(chatContextIpcChannels.startWorkflow, (_event, request: unknown) =>
     workflows.start(request)
   );

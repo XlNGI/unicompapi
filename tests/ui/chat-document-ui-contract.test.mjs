@@ -137,7 +137,7 @@ test('document outline payload is never rendered as ordinary chat markdown', () 
   assert.match(page, /showProductionProgress \? \(\s*<DocumentProgress/);
 });
 
-test('production trace is expanded by default and legacy task progress stays compatible', () => {
+test('production trace starts collapsed around a visible real status and preserves legacy progress', () => {
   assert.equal((page.match(/<DocumentProgress\b/g) ?? []).length, 1);
   assert.match(page, /taskProgress=\{taskProgress\}/);
   assert.match(page, /events=\{traceEvents\}/);
@@ -146,14 +146,19 @@ test('production trace is expanded by default and legacy task progress stays com
   assert.match(page, /productionTrace\.list\(selectedId\)/);
   assert.match(progress, /aria-label="生产进度"/);
   assert.match(progress, /<ol className="uc-chat-production-trace" aria-label="完整生产链路">/);
-  assert.match(progress, /displayEvents\.map\(\(\{ event, key \}, displayIndex\) =>/);
+  assert.match(progress, /displayEvents\.map\(\(\{ event, key \}\) =>/);
+  assert.match(progress, /<details className="uc-chat-document-progress__details">/);
+  assert.doesNotMatch(progress, /<details[^>]*\bopen(?:=|\s|>)/);
+  assert.match(progress, /<span className="uc-chat-document-progress__summary" role="status" aria-live="polite">/);
+  assert.match(progress, /LuChevronRight/);
+  assert.match(progress, /data-status=\{status\}/);
   assert.match(progress, /data-status=\{event\.status\}/);
   assert.match(progress, /本地 → 模型/);
   assert.match(progress, /模型 → 本地/);
   assert.match(progress, /生产记录不完整/);
   assert.match(progress, /taskProgress\.filter\(\(event\) => event\.progressStatus === 'completed'\)/);
   assert.match(progress, /completedSteps\.length > 0/);
-  assert.match(progress, /查看已完成步骤/);
+  assert.match(progress, /aria-label="已完成步骤"/);
   assert.doesNotMatch(progress, /生成步骤|步骤\s*\d|stepLabels|progressSteps|生成大纲.*校验.*生成文件/);
   assert.doesNotMatch(page, /AI 工作过程|模型返回的思考内容/);
 });
@@ -166,6 +171,8 @@ test('document production exposes readable body content without rendering the ra
   assert.match(progress, /projectDocumentBody\(bodyContent \?\? ''\)/);
   assert.match(progress, /<StreamingMarkdown content=\{body\} streaming allowImages=\{false\} \/>/);
   assert.match(progress, /<MarkdownMessage content=\{body\} allowImages=\{false\} \/>/);
+  assert.match(progress, /<\/details>\s*\) : summaryContent\}[\s\S]*?\{bodyPreview\}/);
+  assert.doesNotMatch(progress, /bodyEventIndex|uc-chat-generated-body__heading/);
 });
 
 test('document execution consumes the validated workflow plan without re-parsing in React', () => {

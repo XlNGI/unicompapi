@@ -1,11 +1,24 @@
 import { ConversationNativeSearch } from '../providers/conversation-native-search';
-import { randomUUID } from 'node:crypto';
+import { randomUUID, createHash } from 'node:crypto';
+import { ExecutionBudgetError, type ExecutionStopReason } from '../../application/execution-budget';
+import { ConversationCompletionCoordinator } from '../../application/conversation-completion-coordinator';
+import { ConversationAgentRuntimeService } from '../../application/conversation-agent-runtime-service';
+import { ConversationAgentSessionService, ConversationAgentSessionError } from '../../application/conversation-agent-session-service';
+import { JsonConversationAgentSessionRepository } from '../repositories/json-conversation-agent-session-repository';
+import { ConversationAgentContinuationRuntime } from './conversation-agent-continuations';
+import { ConversationAgentRecoveryRuntime } from './conversation-agent-recovery-runtime';
+import { JsonConversationAgentRuntimeRepository } from '../repositories/json-conversation-agent-runtime-repository';
+import { bindProductionTraceCanonicalEvents, replayCanonicalProductionEvents } from '../conversation-production-trace';
+import { JsonConversationCompletionJournal } from '../repositories/json-conversation-completion-journal';
+import { JsonDocumentTaskRuntimeRepository } from '../repositories/json-document-task-runtime-repository';
+import { projectConversationParentRun } from './conversation-parent-run-projection';
 import path from 'node:path';
 import {
   ConversationApplicationService,
   ConversationIntentOrchestrator,
   ConversationWorkflowService,
   ConversationWebResearchService,
+  DocumentTaskRuntimeService,
   ProjectContextRegistryService,
   type ConversationIdFactory,
   type ProjectContextIdFactory
@@ -14,6 +27,10 @@ import {
   addUserMessage,
   appendAssistantMessageChunk,
   beginAssistantMessage,
+  cancelAssistantMessage,
+  attachDocumentResultToMessage,
+  attachRetainedDocumentResultToMessage,
+  presentationDocumentPageLimits,
   completeAssistantMessage,
   createConversation,
   createProviderInvocationEvent,
@@ -21,6 +38,7 @@ import {
   setDocumentGenerationStatusOnMessage,
   startAssistantMessageStreaming,
   toConversationId,
+  toDocumentTaskRuntimeId,
   toConversationResponseExecutionId,
   toConversationResponseStreamEventId,
   toIsoTimestamp,
@@ -30,10 +48,12 @@ import {
   toProjectContextId,
   toSubmissionIntentId,
   transitionSubmissionIntent,
-  transitionConversationAgentRun,
   type Conversation,
+  type ConversationAgentRunId,
+  type ConversationResponseExecutionId,
+  type ConversationResponseExecutionV1,
   type ProjectId,
-  type SubmissionIntentStatus
+  type WorkId,
 } from '../../domain';
 import {
   JsonConversationRepository,
@@ -55,12 +75,13 @@ import { ConversationDocumentToolSessionService } from '../documents/conversatio
 import { PlatformDocumentDraftCompiler, PlatformDocumentGenerationExecutor } from '../documents/document-generation-application-adapters';
 import { DocumentGenerationRunner } from '../documents/document-generation-runner';
 import { createConfiguredOfficeRenderAdapter } from '../documents/office-render-adapter';
-import { createPresentationWorkflowScope } from '../documents/registered-presentation-reader';
+import { createPresentationWorkflowScope, RegisteredPresentationReader } from '../documents/registered-presentation-reader';
 import { documentDeliveryFailureReason } from '../documents/conversation-document-workflow';
 import { ConversationSemanticClassifier, conversationSemanticLimits } from '../providers/conversation-semantic-classifier';
 import { featureCandidateId } from '../providers/provider-registry-feature-candidates';
 import { ConversationController } from './conversation-controller';
 import { toConversationDto } from './conversation-controller';
+import { verifyRetainedDocumentArtifacts } from './retained-document-artifact-projection';
 import {
   ConversationWorkflowController,
   type ConversationWorkflowControllerRuntime
@@ -142,6 +163,8 @@ export interface ChatContextRuntimeDependencies {
     readonly configuration?: ConstructorParameters<typeof ConversationWebResearchService>[1];
   };
   now?: () => string;
+  executionNow?: () => number;
+  executionLeaseTtlMs?: number;
   conversationIds?: ConversationIdFactory;
   projectContextIds?: ProjectContextIdFactory;
   onError?(error: unknown): void;
@@ -177,6 +200,9 @@ export function createChatContextRuntime(
   dependencies: ChatContextRuntimeDependencies
 ): ChatContextRuntime {
   const now = dependencies.now ?? (() => new Date().toISOString());
+  const executionNow = dependencies.executionNow ?? Date.now;
+  const executionTimestamp = () => new Date(executionNow()).toISOString();
+  const sessionOwnerId = `chat-host-${randomUUID()}`;
   const conversationIds = dependencies.conversationIds ?? createConversationIds();
   const contextIds = dependencies.projectContextIds ?? createProjectContextIds();
   const legacyRepository = new JsonConversationRepository(
@@ -213,6 +239,9 @@ export function createChatContextRuntime(
     readonly contextService: ProjectContextRegistryService;
   readonly workflowService: ConversationWorkflowService;
     readonly agentRuns: JsonConversationAgentRunRepository;
+    readonly agentRuntime: ConversationAgentRuntimeService;
+    readonly sessionService: ConversationAgentSessionService;
+    readonly canInterruptResponse: (id: ConversationResponseExecutionId) => Promise<boolean>;
     readonly attachments: ConversationAttachmentContextService;
     readonly documentTools: ConversationDocumentToolSessionService;
     readonly webResearch: ConversationWebResearchControllerRuntime;
@@ -259,7 +288,16 @@ export function createChatContextRuntime(
       storage,
       session.projectId
     );
-    const agentRuns = new JsonConversationAgentRunRepository(storage, session.projectId, now);
+    const agentRuns = new JsonConversationAgentRunRepository(storage, session.projectId, executionTimestamp);
+    const ownedRunsByResponse = new Map<string, ConversationAgentRunId>();
+    const sessions = new JsonConversationAgentSessionRepository(storage, session.projectId, executionTimestamp);
+    let continuationRuntime: ConversationAgentContinuationRuntime;
+    const sessionService = new ConversationAgentSessionService({ repository: sessions, ownerId: sessionOwnerId,
+      leaseTtlMs: dependencies.executionLeaseTtlMs,
+      now: executionNow, hash: value => createHash('sha256').update(value).digest('hex'),
+      nextResumeToken: () => randomUUID().replace(/-/g, '') + randomUUID().replace(/-/g, ''),
+      recheckContinuation: ({ session: task, inputReference }) => continuationRuntime.validateReferences(task, inputReference),
+      onLeaseLost: (_id, error) => dependencies.onError?.(error) });
     const invocationRoutes = new JsonProviderExecutionRouteSnapshotRepository(
       storage,
       session.projectId
@@ -299,6 +337,7 @@ export function createChatContextRuntime(
     const mutationRenderer = createConfiguredOfficeRenderAdapter();
     const documentTools = new ConversationDocumentToolSessionService({
       rootDirectory: session.rootDirectory, projectId: session.projectId, conversations: projectConversations,
+      getInheritedExecutionContext: id => continuationRuntime.executionContext(id),
       ...(classifier ? { artDirectionPlanner: async (request) => {
         const active = dependencies.getSession();
         if (request.signal.aborted || active?.projectId !== session.projectId || active.rootDirectory !== session.rootDirectory) {
@@ -326,6 +365,15 @@ export function createChatContextRuntime(
         })),
         revalidateAuthorization: async context => {
           const active = dependencies.getSession();
+          const responseId = context.projectContext.responseExecutionId;
+          const indexedRunId = typeof responseId === 'string' ? ownedRunsByResponse.get(responseId) : undefined;
+          if (indexedRunId) await sessionService.assertExecutionOwnershipIfPresent(indexedRunId);
+          else {
+            const child = await new JsonDocumentTaskRuntimeRepository(storage, session.projectId).get(toDocumentTaskRuntimeId(context.taskContext.taskId));
+            if (typeof responseId === 'string' && child?.executionId !== responseId) return false;
+            const run = child ? await agentRuns.findByResponseExecutionId(toConversationResponseExecutionId(child.executionId)) : undefined;
+            if (run) await sessionService.assertExecutionOwnershipIfPresent(run.id);
+          }
           return !context.abortSignal.aborted && context.authorization.generationAuthorization === 'approved' &&
             active?.projectId === session.projectId && active.rootDirectory === session.rootDirectory;
         }
@@ -336,7 +384,7 @@ export function createChatContextRuntime(
       }
     });
     const workflowService = new ConversationWorkflowService(
-      new JsonConversationWorkflowRepository(storage, session.projectId, now),
+      new JsonConversationWorkflowRepository(storage, session.projectId, executionTimestamp),
       new ConversationIntentOrchestrator({
         classifier,
         classifierTimeoutMs: conversationSemanticLimits.timeoutMs,
@@ -345,7 +393,7 @@ export function createChatContextRuntime(
         // legacy business routing. Saved workflows remain readable offline.
         routingMode: 'agent_first'
       }),
-      now, undefined, undefined, createPresentationWorkflowScope({ rootDirectory: session.rootDirectory, projectId: session.projectId })
+      executionTimestamp, undefined, undefined, createPresentationWorkflowScope({ rootDirectory: session.rootDirectory, projectId: session.projectId })
     );
     const retrieval = new RagRetrievalService({
       rootDirectory: session.rootDirectory,
@@ -400,14 +448,370 @@ export function createChatContextRuntime(
       () => toIsoTimestamp(now())
     );
     const executionCoordinator = new ConversationExecutionCoordinator();
-    // After a process restart no in-memory adapter exists to resume these streams.
-    const responseRecovery = interruptOrphanedConversationResponses(responseLifecycle, projectConversations, now)
-      .then(() => settleRecoverableConversationDocuments(workflowService, responseExecutions, projectConversations, now))
-      .then(() => workflowService.recoverInterruptedExecutions())
+    const ownedResponseIds = new Set<string>();
+    continuationRuntime = new ConversationAgentContinuationRuntime({ storage, projectId: session.projectId, sessions, sessionService,
+      agentRuns, conversations: service, now: executionTimestamp, classifier, supportsGeneration: true, supportsMutation: Boolean(mutationRenderer),
+      isCurrent: () => { const active = dependencies.getSession(); return active?.projectId === session.projectId && active.rootDirectory === session.rootDirectory; },
+      replayExecution: async id => {
+        const execution = await responseLifecycle.readModel(toConversationResponseExecutionId(id));
+        return { execution, conversation: { ...toConversationDto(await service.get(toConversationId(execution.conversationId))),
+          agentSessions: await continuationRuntime.list(execution.conversationId) } };
+      },
+      cancelExecution: async id => { await executionCoordinator.cancel(toConversationResponseExecutionId(id)); } });
+    const agentRuntimeRepository = new JsonConversationAgentRuntimeRepository(storage, session.projectId, now);
+    const agentRuntime = new ConversationAgentRuntimeService({ repository: agentRuntimeRepository, now,
+      executionOwnershipGuard: runId => sessionService.assertExecutionOwnershipIfPresent(runId),
+      nextEventId: () => `run-event-${randomUUID()}`, hash: serialized => createHash('sha256').update(serialized).digest('hex') });
+    const projectVerifiedDocumentArtifact = async (responseExecution: ConversationResponseExecutionV1,
+      workIds: readonly WorkId[], completionRequired = false) => {
+      const tasks = (await documentTools.collectResponseFacts(responseExecution.id)).documentTasks;
+      const verified = tasks.filter(task => task.readBackConfirmed && task.registeredWork &&
+        task.runtime.projectId === session.projectId && task.runtime.conversationId === responseExecution.snapshot.conversationId &&
+        task.runtime.sourceMessageId === responseExecution.snapshot.userMessageId && task.runtime.executionId === responseExecution.id &&
+        task.registeredWork.sourceTaskRuntimeId === task.runtime.id && task.registeredWork.projectId === session.projectId);
+      if (completionRequired && workIds.some(id => !verified.some(task => task.registeredWork!.id === id))) {
+        throw new Error('completion_artifact_changed');
+      }
+      const deliveredWorkId = workIds.filter(id => verified.some(task => task.registeredWork!.id === id)).at(-1);
+      if (!deliveredWorkId || !['completed', 'failed', 'cancelled', 'interrupted'].includes(responseExecution.state)) return;
+      let document: Awaited<ReturnType<RegisteredPresentationReader['read']>>;
+      try {
+        // Re-read the current local file and its Hash. A saved Work alone is not
+        // authority to expose a usable retained artifact after a failed reply.
+        document = await new RegisteredPresentationReader({ rootDirectory: session.rootDirectory, projectId: session.projectId })
+          .read(deliveredWorkId);
+      } catch (error) {
+        if (completionRequired) throw error;
+        return;
+      }
+      const task = verified.find(item => item.registeredWork!.id === deliveredWorkId)!;
+      const receipt = [...task.runtime.observations].reverse().find(item => item.ok &&
+        item.data?.registeredWorkId === deliveredWorkId);
+      // Only a successful Host publication receipt can supply the page goal.
+      const goal = receipt?.data?.planningTargetTotalPages;
+      const target = Number.isSafeInteger(goal) && Number(goal) > 0 && Number(goal) <= presentationDocumentPageLimits.maximumPages ? Number(goal) : undefined;
+      const result = { workId: document.work.id, fileName: document.fileName, sizeBytes: document.file.sizeBytes!, kind: 'ppt' as const };
+      const retained = { ...result, actualPageCount: document.pages.length,
+        ...(target === undefined ? {} : { planningTargetTotalPages: target }) };
+      for (let attempt = 0; attempt < 4; attempt += 1) {
+        const conversation = await projectConversations.get(responseExecution.snapshot.conversationId);
+        const assistant = conversation?.messages.find(message => message.id === responseExecution.snapshot.assistantMessageId);
+        if (!conversation || !assistant) throw new Error('completion_assistant_unavailable');
+        if (conversation.status !== 'active') return;
+        const active = dependencies.getSession();
+        if (active?.projectId !== session.projectId || active.rootDirectory !== session.rootDirectory) {
+          if (completionRequired) throw new Error('completion_artifact_changed');
+          return;
+        }
+        const completed = responseExecution.state === 'completed' && assistant.state === 'completed';
+        if (!completed && !['failed', 'cancelled'].includes(assistant.state)) return;
+        if (completed ? assistant.documentResult?.workId === result.workId
+          : assistant.retainedDocumentResult?.workId === result.workId) return;
+        try {
+          const updatedAt = toIsoTimestamp([now(), conversation.updatedAt, assistant.updatedAt].sort().at(-1)!);
+          await projectConversations.save(completed
+            ? attachDocumentResultToMessage(conversation, assistant.id, result, updatedAt)
+            : attachRetainedDocumentResultToMessage(conversation, assistant.id, retained, updatedAt), conversation.revision);
+          return;
+        } catch (error) {
+          if (!(error instanceof ConversationRevisionConflictError) || attempt === 3) throw error;
+        }
+      }
+    };
+    let completionAcceptances: ProjectSubmissionAcceptanceStore | undefined;
+    const completionJournal = new JsonConversationCompletionJournal(storage, session.projectId, executionTimestamp);
+    const completion = new ConversationCompletionCoordinator({ agentRuns, responseExecutions,
+      documentTasks: new JsonDocumentTaskRuntimeRepository(storage, session.projectId),
+      journal: completionJournal, now: executionTimestamp,
+      reconciliationOwnershipGuard: async id => {
+        const run = await agentRuns.findByResponseExecutionId(id);
+        const response = run ? undefined : await responseExecutions.get(id);
+        const roots = (await sessions.list()).filter(task => run && task.childSegments.some(segment => segment.runId === run.id) ||
+          task.childSegments.some(segment => segment.responseExecutionId === id) || !run && response && task.projectId === response.projectId &&
+          task.conversationId === response.snapshot.conversationId && task.childSegments.some(segment => segment.sourceMessageId === response.snapshot.userMessageId));
+        if (roots.length > 1) throw new ConversationAgentSessionError('scope_mismatch');
+        const root = roots[0];
+        if (!root?.lease || root.lease.expiresAt <= executionNow()) return;
+        if (root.lease.ownerId !== sessionOwnerId) throw new ConversationAgentSessionError('lease_lost');
+        await sessionService.assertSessionOwnership(root.id);
+      },
+      collectFacts: async (execution) => {
+        const facts = await documentTools.collectResponseFacts(execution.id);
+        const canonical = await agentRuntime.findByResponse(execution.id);
+        const run = await agentRuns.findByResponseExecutionId(execution.id);
+        const root = run ? await sessions.findByRunId(run.id) : undefined;
+        const pinnedSources = new Set(root?.inputReferences.filter(reference => reference.kind === 'message').map(reference => reference.id));
+        const plannedDocument = root && (await workflowService.list(root.conversationId)).some(workflow =>
+          pinnedSources.has(workflow.sourceMessageId) && workflow.plan.kind === 'document' && workflow.plan.documentKind === 'ppt' &&
+          ['ready', 'executing', 'completed'].includes(workflow.status));
+        const acceptance = await completionAcceptances?.getByInvocationAttemptId(execution.providerInvocationAttemptId);
+        const events = await responseExecutions.listEvents(execution.id);
+        return { ...facts,
+          unknownResult: facts.unknownResult || canonical?.runtime.status === 'needs_reconciliation' || acceptance?.intent.status === 'unknown_outcome' || execution.state === 'interrupted' ||
+            events.some(event => /tool_loop_unknown_result|submission_outcome_unknown/u.test(event.safeCode ?? '')),
+          documentTasks: facts.documentTasks.map(task => ({ ...task,
+            required: task.required || Boolean(plannedDocument && task.runtime.operation === 'create'),
+            // This host receipt already persisted the verified public artifact reference.
+            // The completion WAL owns the dependent assistant/link projection below.
+            deliveryConfirmed: task.deliveryConfirmed || Boolean(task.readBackConfirmed && task.registeredWork &&
+              task.runtime.observations.some(item => item.ok && item.data?.registeredWorkId === task.registeredWork!.id)) })) };
+      },
+      projectTerminal: async ({ run, responseExecution, decision, intent }) => {
+        await agentRuntime.recordRegisteredWorks(responseExecution.id, decision.registeredWorkIds);
+        await projectVerifiedDocumentArtifact(responseExecution, decision.registeredWorkIds, decision.status === 'completed');
+        if (['completed', 'failed', 'cancelled'].includes(decision.status)) {
+          await workflowService.finishExecution(responseExecution.id, decision.status as 'completed' | 'failed' | 'cancelled');
+        }
+        if (intent.freezeOrigin === 'local_projection' && run.reconciliationAcknowledgement?.kind === 'closed_without_replay' && ['completed', 'failed', 'cancelled'].includes(run.status)) {
+          await sessionService.settleVerifiedLocalProjectionAfterChild(run);
+        } else if (run.reconciliationAcknowledgement?.kind === 'closed_without_replay' && run.status === 'cancelled') {
+          await sessionService.acknowledgeReconciliationAfterChild(run);
+        }
+      } });
+    const settleOwnedExecution = async (id: ConversationResponseExecutionId, unknownResult = false,
+      counters?: { readonly toolCallsUsed: number; readonly costUnitsUsed: number }, reason?: ExecutionStopReason) => {
+      if (counters) await agentRuntime.recordBudget(id, counters);
+      await agentRuntime.finish(id, unknownResult ? 'unknown_result' : reason);
+      const settled = await completion.settle(id, unknownResult ? { unknownResult: true } : {});
+      if (settled && ['completed', 'failed', 'cancelled'].includes(settled.run.status)) await agentRuntime.settle(id);
+      const canonical = await agentRuntime.findByResponse(id);
+      const run = settled?.run ?? await agentRuns.findByResponseExecutionId(id);
+      const root = run ? await sessions.findByRunId(run.id) : undefined;
+      if (root && run) {
+        const works = settled?.intent?.decision.registeredWorkIds ?? canonical?.runtime.registeredWorkIds ?? [];
+        if (works.length) await sessionService.recordVerifiedWorks(run.id, works);
+        if (['closed', 'expired'].includes(root.status) && !root.reconciliationAcknowledgement && (unknownResult || settled?.run.status === 'needs_reconciliation' || canonical?.runtime.status === 'needs_reconciliation')) {
+          await sessionService.freezeObserved({ sessionId: root.id, registeredWorkIds: works });
+        }
+        if (root.status === 'active') {
+          try {
+            await sessionService.assertExecutionOwnership(run.id);
+            const budget = canonical?.runtime.budget;
+            await sessionService.recordSegment({ runId: run.id, toolCallsUsed: budget?.toolCallsUsed ?? counters?.toolCallsUsed ?? 0,
+              costUnitsUsed: budget?.costUnitsUsed ?? counters?.costUnitsUsed ?? 0,
+              toolAttemptsUsed: budget?.toolAttemptsUsed ?? canonical?.runtime.toolCalls.length ?? counters?.toolCallsUsed ?? 0,
+              registeredWorkIds: works });
+            if (unknownResult || settled?.run.status === 'needs_reconciliation' || canonical?.runtime.status === 'needs_reconciliation') {
+              await sessionService.freeze(root.id, works);
+            } else if (settled && ['completed', 'failed', 'cancelled'].includes(settled.run.status)) {
+              await sessionService.settle(root.id, settled.run.status as 'completed' | 'failed' | 'cancelled');
+            }
+          } catch (error) {
+            // Loss of ownership cannot grant a new execution or overwrite a live successor.
+            // Durable child facts remain available to the fenced recovery coordinator.
+            if (unknownResult || settled?.run.status === 'needs_reconciliation' || canonical?.runtime.status === 'needs_reconciliation') {
+              const observed = await sessions.get(root.id);
+              if (observed && (!observed.lease || observed.lease.expiresAt <= executionNow())) {
+                await sessionService.freezeObserved({ sessionId: observed.id, expectedRevision: observed.revision,
+                  registeredWorkIds: works }).catch(freezeError => dependencies.onError?.(freezeError));
+              }
+            }
+            dependencies.onError?.(error);
+          }
+        }
+        continuationRuntime.discardPreparation(root.id);
+      }
+    };
+    // Artifact creation may fail after acquiring a document session but before
+    // dispatch owns a Provider handle. Those paths must revoke the same session
+    // and enter the same bounded, durable settlement as normal handle completion.
+    const closeAndSettleOwnedExecution = async (id: ConversationResponseExecutionId, unknownResult = false,
+      reason?: ExecutionStopReason) => {
+      const toolSession = await documentTools.forExecution({ responseExecutionId: id });
+      const stopReason = toolSession?.executionBudget?.stopReason ?? reason;
+      const counters = toolSession?.executionBudget?.snapshot(stopReason ?? 'cancelled');
+      let known = true;
+      if (toolSession) {
+        let timer: ReturnType<typeof setTimeout> | undefined;
+        let closed: Promise<boolean>;
+        try { closed = toolSession.close().then(() => true, () => false); }
+        catch { closed = Promise.resolve(false); }
+        try {
+          known = await Promise.race([closed, new Promise<boolean>(resolve => {
+            timer = setTimeout(() => resolve(false), 5_000);
+          })]);
+        } finally { clearTimeout(timer); }
+      } else if (executionCoordinator.has(id)) {
+        // A plain response has no document budget whose disposal can abort the
+        // Provider. Revoke its actual handle explicitly and bound the receipt.
+        let timer: ReturnType<typeof setTimeout> | undefined;
+        try {
+          known = await Promise.race([executionCoordinator.cancel(id).catch(() => false),
+            new Promise<boolean>(resolve => { timer = setTimeout(() => resolve(false), 5_000); })]);
+        } finally { clearTimeout(timer); }
+      }
+      await settleOwnedExecution(id, unknownResult || !known, counters, stopReason);
+    };
+    // These projections only inspect and repair persisted local records. Each
+    // write is gated by the root recovery owner before the older scans run.
+    const recoverLocal = async (
+      canResponse: (id: string) => Promise<boolean>,
+      canRun: (id: ConversationAgentRunId) => Promise<boolean>,
+      repairKnownLocalProjection = false
+    ) => {
+        await interruptOrphanedConversationResponses(responseLifecycle, projectConversations, now, canResponse);
+        await settleRecoverableConversationDocuments(workflowService, responseExecutions, projectConversations, now, canResponse);
+        await workflowService.recoverInterruptedExecutions(async workflow => {
+          if (workflow.executionId) return canResponse(workflow.executionId);
+          const owners = (await sessions.list()).filter(task => task.conversationId === workflow.conversationId && task.sourceMessageId === workflow.sourceMessageId);
+          if (owners.length > 1) return false;
+          return owners[0] ? canRun(owners[0].id) : true;
+        });
+        await agentRuntime.recoverInterrupted(canRun);
+        // No old in-memory tool owner survives restart. Settle only persisted
+        // local facts; ambiguous calls are frozen by Runtime recovery, never replayed.
+        for (const run of await agentRuns.list()) {
+          if (!run.responseExecutionId || ['completed', 'failed', 'cancelled'].includes(run.status)) continue;
+          if (!await canRun(run.id) || !await canResponse(run.responseExecutionId)) continue;
+          const childFacts = await documentTools.collectResponseFacts(run.responseExecutionId);
+          for (const child of childFacts.documentTasks) {
+            if (!['planning', 'running', 'paused'].includes(child.runtime.status)) continue;
+            const taskRecovery = new DocumentTaskRuntimeService(new JsonDocumentTaskRuntimeRepository(storage, session.projectId),
+              { now: () => [now(), child.runtime.updatedAt].sort().at(-1)!, validateBindings: async () => true });
+            const scope = { id: child.runtime.id, projectId: child.runtime.projectId,
+              conversationId: child.runtime.conversationId, executionId: child.runtime.executionId };
+            const recovered = await taskRecovery.recover(scope);
+            if (recovered.status === 'needs_reconciliation') continue;
+            if (child.readBackConfirmed && child.runtime.operation === 'analyze' && child.active) await taskRecovery.completeRead(scope);
+            else if (child.readBackConfirmed && child.registeredWork) await taskRecovery.complete(scope, child.registeredWork.id);
+          }
+        }
+        for (const snapshot of await agentRuntimeRepository.list()) {
+          const runtime = snapshot.runtime;
+          if (!await canRun(runtime.runId)) continue;
+          await replayCanonicalProductionEvents({ rootDirectory: session.rootDirectory, projectId: session.projectId,
+            conversationId: runtime.conversationId, sourceMessageId: runtime.sourceMessageId, traceId: runtime.sourceMessageId },
+          agentRuntime.canonicalEvents(runtime.runId));
+        }
+        await completion.reconcilePending(canResponse);
+        for (const run of await agentRuns.list()) {
+          if (!run.responseExecutionId) continue;
+          if (!await canRun(run.id) || !await canResponse(run.responseExecutionId)) continue;
+          const pending = await completion.inspect(run.responseExecutionId);
+          if (repairKnownLocalProjection && pending?.intent?.freezeOrigin === 'local_projection') {
+            await completion.reconcile(run.responseExecutionId);
+          } else if (!['completed', 'failed', 'cancelled'].includes(run.status)) await completion.settle(run.responseExecutionId);
+          const recovered = await completion.inspect(run.responseExecutionId);
+          // Older failed responses may predate retained artifact cards. Backfill
+          // only a verified local projection; keep the saved Run/WAL untouched.
+          if (recovered?.intent && ['failed', 'cancelled', 'needs_reconciliation'].includes(recovered.run.status)) {
+            const execution = await responseExecutions.get(run.responseExecutionId);
+            if (execution) await projectVerifiedDocumentArtifact(execution, recovered.intent.decision.registeredWorkIds);
+          }
+          if (recovered && ['completed', 'failed', 'cancelled'].includes(recovered.run.status) &&
+            recovered.intent?.stage !== 'needs_reconciliation') await agentRuntime.settle(run.responseExecutionId);
+        }
+    };
+    const recovery = new ConversationAgentRecoveryRuntime({ rootDirectory: session.rootDirectory,
+      projectId: session.projectId, storage, sessions, sessionService, runtimeRepository: agentRuntimeRepository,
+      agentRuns, responses: responseExecutions, completionJournal, documentTools, now: executionNow,
+      recoverLocal: async input => {
+        const responseIds = new Set<string>(input.responseExecutionIds);
+        const runIds = new Set(input.session.childSegments.map(segment => segment.runId));
+        await recoverLocal(async id => { await input.claim.assertCurrent(); return responseIds.has(id); },
+          async id => { await input.claim.assertCurrent(); return runIds.has(id); }, true);
+      },
+      onWaitingChallenge: input => continuationRuntime.cacheChallenge(input),
+      onSafeContinuation: async input => {
+        // Missing output is insufficient evidence. Recheck all primary model,
+        // tool, mutation and Work facts while this owner still holds its lease.
+        await input.claim.assertCurrent();
+        const facts = await recovery.inspectSession(input.session.id);
+        if (!facts.noEffectProven || facts.modelBoundary !== 'not_started' || facts.mutationJournal !== 'none' || facts.registeredWorks.length) {
+          throw new Error('recovery_no_effect_proof_lost');
+        }
+        for (const id of input.responseExecutionIds) {
+          await input.claim.assertCurrent();
+          const execution = await responseExecutions.get(id);
+          if (!execution) throw new Error('recovery_response_missing');
+          const acceptance = await completionAcceptances?.getByInvocationAttemptId(execution.providerInvocationAttemptId);
+          if (acceptance?.intent.status === 'authorization_claimed') {
+            // Only the primary acceptance supplies this claim identity. A
+            // started or unidentifiable ledger claim cannot be refunded or
+            // turned into a continuation by missing HTTP/WAL output.
+            if (acceptance.subjectArtifacts.kind !== 'conversation' || acceptance.subjectArtifacts.responseExecution.id !== id ||
+              acceptance.intent.projectId !== input.session.projectId) throw new Error('recovery_authorization_scope_invalid');
+            try {
+              await input.claim.assertCurrent();
+              const claim = await authorization?.getClaim?.(acceptance.intent.authorizationClaimId);
+              if (!claim || !['claimed', 'released_before_request'].includes(claim.state) || !authorization?.releaseBeforeRequest) {
+                throw new Error('recovery_authorization_outcome_unknown');
+              }
+              await input.claim.assertCurrent();
+              await authorization.releaseBeforeRequest(acceptance.intent.authorizationClaimId, executionTimestamp());
+              await input.claim.assertCurrent();
+              const occurredAt = toIsoTimestamp([executionTimestamp(), acceptance.intent.updatedAt].sort().at(-1)!);
+              await completionAcceptances!.advance({ intent: transitionSubmissionIntent(acceptance.intent, 'failed_before_submission', occurredAt,
+                { safeCode: 'authorization.released_during_recovery' }),
+                invocationEvent: createProviderInvocationEvent({ id: `conversation-recovery-release-${randomUUID()}` as never,
+                  invocationAttemptId: acceptance.invocationAttempt.id, sequence: acceptance.invocationEvents.length + 1,
+                  type: 'submission_failed_before_request', safeCode: 'authorization.released_during_recovery', occurredAt }) });
+              await input.claim.assertCurrent();
+            } catch (error) {
+              await input.claim.assertCurrent();
+              await completion.settle(id, { unknownResult: true });
+              throw error;
+            }
+          }
+          if (['pending', 'streaming'].includes(execution.state)) {
+            const event = await responseLifecycle.failDeferredPublish(id, 'conversation.recovery_prepared_not_submitted');
+            await input.claim.assertCurrent();
+            await projectInterruptedAssistant(projectConversations, execution.snapshot.conversationId, execution.snapshot.assistantMessageId, now);
+            await responseLifecycle.publish(event);
+          }
+          await input.claim.assertCurrent();
+          const result = await completion.settle(id);
+          if (result && result.run.status !== 'failed' && result.run.status !== 'cancelled') throw new Error('recovery_prepared_retirement_failed');
+          await input.claim.assertCurrent();
+        }
+      },
+      onError: error => dependencies.onError?.(error) });
+    // Root ownership/classification precedes legacy recovery, so a live foreign
+    // owner or an explicit no-effect continuation can never be swept up by it.
+    const responseRecovery = recovery.recover()
+      .then(() => recoverLocal(id => recovery.canRecoverResponse(id), id => recovery.canRecoverRun(id)))
       .then(() => undefined);
     // Recovery may finish before any operation waits for ready. Observe a
     // failure immediately, while preserving the rejected barrier for writes.
     void responseRecovery.catch((error: unknown) => dependencies.onError?.(error));
+    let lazyRecoveryTail: Promise<void> = Promise.resolve();
+    const refreshRecovery = (scope: { readonly conversationId?: string; readonly responseExecutionId?: string }): Promise<void> => {
+      const operation = lazyRecoveryTail.then(async () => {
+        await responseRecovery;
+        const active = dependencies.getSession();
+        if (active?.projectId !== session.projectId || active.rootDirectory !== session.rootDirectory) throw new ConversationAgentSessionError('scope_mismatch');
+        // This Host already owns the actual handle, which the lazy path would
+        // leave alone. All model/tool effect guards still read the primary lease.
+        if (scope.responseExecutionId && ownedResponseIds.has(scope.responseExecutionId) &&
+          executionCoordinator.has(toConversationResponseExecutionId(scope.responseExecutionId))) return;
+        const execution = scope.responseExecutionId ? await responseExecutions.get(toConversationResponseExecutionId(scope.responseExecutionId)) : undefined;
+        if (scope.responseExecutionId && (!execution || execution.projectId !== session.projectId)) return;
+        const scopedRun = execution ? await agentRuns.findByResponseExecutionId(execution.id) : undefined;
+        const conversationId = scope.conversationId ?? execution?.snapshot.conversationId;
+        if (!conversationId || scope.conversationId && execution && execution.snapshot.conversationId !== scope.conversationId) return;
+        const now = executionNow();
+        const eligible = (await sessions.list()).filter(root => root.projectId === session.projectId && root.conversationId === conversationId &&
+          root.status === 'active' && root.lease && root.lease.expiresAt <= now &&
+          (root.lease.ownerId !== sessionOwnerId || !root.childSegments.some(segment => segment.responseExecutionId &&
+            executionCoordinator.has(segment.responseExecutionId))) &&
+          (!execution || root.childSegments.some(segment => segment.responseExecutionId === execution.id || scopedRun && segment.runId === scopedRun.id ||
+            !scopedRun && segment.sourceMessageId === execution.snapshot.userMessageId)));
+        if (!eligible.length) return;
+        // Only the selected scope is investigated. The recovery claim reads the
+        // lease again, so a live owner renewed after this read remains untouched.
+        const rootIds = eligible.map(root => root.id);
+        await recovery.recoverSpecificRootIds(rootIds);
+        const refreshed = await Promise.all(rootIds.map(id => sessions.get(id)));
+        const runIds = new Set(refreshed.flatMap(root => root?.childSegments.map(segment => segment.runId) ?? []));
+        const responseIds = new Set<string>(refreshed.flatMap(root => root?.childSegments.flatMap(segment => segment.responseExecutionId ? [segment.responseExecutionId] : []) ?? []));
+        for (const run of await agentRuns.list(toConversationId(conversationId))) {
+          if (runIds.has(run.id) && run.responseExecutionId) responseIds.add(run.responseExecutionId);
+        }
+        await recoverLocal(async id => responseIds.has(id) && await recovery.canRecoverResponse(id),
+          async id => runIds.has(id) && await recovery.canRecoverRun(id));
+      });
+      lazyRecoveryTail = operation.catch(() => undefined); return operation;
+    };
     const responses: ConversationResponseControllerRuntime = {
       conversationService: service,
       conversations: projectConversations,
@@ -419,6 +823,18 @@ export function createChatContextRuntime(
       streamChannel,
       workflowService,
       agentRuns,
+      completion,
+      refreshRecovery,
+      continuations: { ...continuationRuntime.controller, validate: async input => {
+        await refreshRecovery({ conversationId: input.conversation.id });
+        // Published text can precede local completion and root receipts. Await the
+        // existing bounded owner barrier before judging a new command's eligibility.
+        await executionCoordinator.waitForCompletedOperations(async id => {
+          const current = await responseLifecycle.readModel(id);
+          return current.conversationId === input.conversation.id && ['completed', 'failed', 'cancelled', 'interrupted'].includes(current.state);
+        });
+        return continuationRuntime.controller.validate?.(input);
+      } },
       attachments,
       documentPages,
       documentTools,
@@ -429,7 +845,9 @@ export function createChatContextRuntime(
       const acceptances = new ProjectSubmissionAcceptanceStore(
         new ProjectMetadataUnitOfWork(storage, now)
       );
+      completionAcceptances = acceptances;
       const journal = new SubmissionIntentJournal(storage, now);
+      const startupSignals = new Map<string, AbortSignal>();
       const artifacts = new ConversationResponseArtifactFactory({
         nativeSearch,
         conversations: projectConversations,
@@ -439,6 +857,51 @@ export function createChatContextRuntime(
         attachments,
         documentPages,
         documentTools,
+        executionCoordinator,
+        bindExecutionOwnership: async id => {
+          const run = await completion.bindExecution(toConversationResponseExecutionId(id));
+          if (run && await sessions.findByRunId(run.id)) await sessionService.bindExecution(run.id, toConversationResponseExecutionId(id));
+          if (run) ownedRunsByResponse.set(id, run.id);
+          ownedResponseIds.add(id);
+        },
+        bindDocumentOwnership: async id => {
+          const responseId = toConversationResponseExecutionId(id);
+          const run = await completion.bindTasks(responseId);
+          if (!run) return;
+          const toolSession = await documentTools.forExecution({ responseExecutionId: id });
+          const inherited = await continuationRuntime.executionContext(id);
+          const startedAt = Date.now();
+          await agentRuntime.open(run, toolSession?.executionBudget?.policy ?? inherited?.policy ?? { startedAt, deadlineAt: startedAt + 900_000,
+            maxToolCalls: 64, budgetUnits: 1_000_000 });
+          bindProductionTraceCanonicalEvents(agentRuntime.canonicalEvents(run.id));
+        },
+        getStartupSignal: draftId => startupSignals.get(draftId),
+        onPreparationFailed: async (id, error) => {
+          const executionId = toConversationResponseExecutionId(id);
+          const current = await responseLifecycle.readModel(executionId);
+          const cancelled = error instanceof Error && error.name === 'AbortError' ||
+            error instanceof ExecutionBudgetError && error.code === 'cancelled';
+          const event = cancelled
+            ? await responseLifecycle.confirmCancelledDeferredPublish(executionId)
+            : await responseLifecycle.failDeferredPublish(executionId,
+              error instanceof ExecutionBudgetError ? `conversation.${error.scope}_${error.code}` : 'conversation.prepare_failed');
+          for (let attempt = 0; attempt < 4; attempt += 1) {
+            const conversation = await projectConversations.get(toConversationId(current.conversationId));
+            if (!conversation) break;
+            try {
+              await projectConversations.save(cancelled
+                ? cancelAssistantMessage(conversation, toMessageId(current.assistantMessageId), toIsoTimestamp(now()))
+                : failAssistantMessage(conversation, toMessageId(current.assistantMessageId), 'unavailable', toIsoTimestamp(now())), conversation.revision);
+              break;
+            } catch (saveError) {
+              if (!(saveError instanceof ConversationRevisionConflictError) || attempt === 3) throw saveError;
+            }
+          }
+          await workflowService.finishExecution(executionId, cancelled ? 'cancelled' : 'failed');
+          await responseLifecycle.publish(event);
+          await closeAndSettleOwnedExecution(executionId, false,
+            error instanceof ExecutionBudgetError ? error.code : cancelled ? 'cancelled' : undefined);
+        },
         nextMessageId: () => conversationIds.nextMessageId(),
         now
       });
@@ -451,16 +914,26 @@ export function createChatContextRuntime(
         lifecycle: responseLifecycle,
         conversations: projectConversations,
         coordinator: executionCoordinator,
+        settleExecution: settleOwnedExecution,
+        executionLifecycle: async id => {
+          const snapshot = await agentRuntime.findByResponse(id);
+          return snapshot ? agentRuntime.providerLifecycle(snapshot.runtime.runId) : undefined;
+        },
+        executionSignal: async id => {
+          const run = await agentRuns.findByResponseExecutionId(id);
+          return run ? sessionService.signalForRun(run.id) : undefined;
+        },
         usage: new JsonProviderUsageObservationRepository(storage),
         terminalObserver: createConversationTerminalObserver(
           acceptances,
           authorization as RuntimeAuthorizationOrchestrationPort,
           workflowService,
-          agentRuns,
+          completion,
           invocationRoutes,
           invocations,
           now,
-          responseFinalizers
+          responseFinalizers,
+          dependencies.onError
         ),
         now
       });
@@ -495,7 +968,12 @@ export function createChatContextRuntime(
         );
       };
       responses.start = async (input) => {
-        const started = await orchestrator.beginConversationResponse(input);
+        if (input.subject.kind !== 'conversation_response_draft') throw new TypeError('Response start requires a conversation draft');
+        const draftId = input.subject.responseDraftId;
+        if (input.signal) startupSignals.set(draftId, input.signal);
+        let started: Awaited<ReturnType<typeof orchestrator.beginConversationResponse>>;
+        try { started = await orchestrator.beginConversationResponse(input); }
+        finally { if (startupSignals.get(draftId) === input.signal) startupSignals.delete(draftId); }
         if (started.subjectArtifacts.kind !== 'conversation') {
           throw new Error('Conversation response acceptance artifacts are missing');
         }
@@ -520,13 +998,9 @@ export function createChatContextRuntime(
                 routes: invocationRoutes,
                 invocations
               });
-              if (completed.subjectArtifacts.kind === 'conversation') {
-                await settleConversationAgentRun(
-                  agentRuns,
-                  completed.subjectArtifacts.responseExecution.id,
-                  completed.intent.status,
-                  now
-                );
+              if (completed.subjectArtifacts.kind === 'conversation' && !executionCoordinator.has(completed.subjectArtifacts.responseExecution.id)) {
+                await completion.settle(completed.subjectArtifacts.responseExecution.id,
+                  completed.intent.status === 'unknown_outcome' ? { unknownResult: true } : {});
               }
             }
           } catch (error) {
@@ -536,7 +1010,12 @@ export function createChatContextRuntime(
           dependencies.onError?.(error);
           try {
             const current = await responseLifecycle.readModel(executionId);
-            if (current.state !== 'pending' && current.state !== 'streaming') return;
+            if (current.state !== 'pending' && current.state !== 'streaming') {
+              await closeAndSettleOwnedExecution(executionId,
+                error instanceof SubmissionOrchestrationError && error.code === 'submission_outcome_unknown',
+                error instanceof ExecutionBudgetError ? error.code : current.state === 'cancelled' ? 'cancelled' : undefined);
+              return;
+            }
             const event = await responseLifecycle.failDeferredPublish(
               executionId,
               backgroundSubmissionSafeCode(error)
@@ -573,7 +1052,9 @@ export function createChatContextRuntime(
                 invocations
               });
             }
-            await settleConversationAgentRun(agentRuns, executionId, 'failed', now);
+            await closeAndSettleOwnedExecution(executionId,
+              error instanceof SubmissionOrchestrationError && error.code === 'submission_outcome_unknown',
+              error instanceof ExecutionBudgetError ? error.code : undefined);
           } catch (terminalError) {
             dependencies.onError?.(terminalError);
           }
@@ -588,11 +1069,36 @@ export function createChatContextRuntime(
       conversations: new ConversationController({
         service,
         getSession: dependencies.getSession,
+        refreshRecovery: conversationId => refreshRecovery({ conversationId }),
+        readAgentSessions: async conversationId => {
+          await refreshRecovery({ conversationId }); return continuationRuntime.list(conversationId);
+        },
+        readParentRuns: async conversationId => {
+          await refreshRecovery({ conversationId });
+          const summaries = [];
+          for (const run of await agentRuns.list(toConversationId(conversationId))) {
+            if (!run.responseExecutionId) continue;
+            const snapshot = await completion.inspect(run.responseExecutionId);
+            if (snapshot) summaries.push(projectConversationParentRun(snapshot));
+          }
+          return summaries;
+        },
+        canStartNewResponse: conversationId => completion.canStartNewResponse(toConversationId(conversationId)),
+        canEditUserMessage: async (conversationId, messageId) =>
+          !(await agentRuns.list(toConversationId(conversationId))).some(run => run.sourceMessageId === messageId &&
+            (run.status === 'needs_reconciliation' || run.reconciliationReason !== undefined)),
         projectRequired: true,
         storageScope: 'current_project',
         onError: dependencies.onError
       }),
       conversationRepository: projectConversations,
+      agentRuntime,
+      sessionService,
+      canInterruptResponse: async id => {
+        const run = await agentRuns.findByResponseExecutionId(id);
+        const task = run ? await sessions.findByRunId(run.id) : undefined;
+        return !task || ownedResponseIds.has(id) && (!task.lease || task.lease.ownerId === sessionOwnerId);
+      },
       contextService,
       workflowService,
       agentRuns,
@@ -635,10 +1141,21 @@ export function createChatContextRuntime(
       const session = dependencies.getSession();
       const runtime = session ? getProjectRuntime(session) : undefined;
       await runtime?.responses.ready;
+      const requested = chatContextRequestParsers.conversationId(request);
+      // The UI refresh triggered by a terminal stream event must observe the
+      // owned document close and retained artifact projection from that handle.
+      await runtime?.responses.executionCoordinator.waitForCompletedOperations(async id => {
+        const execution = await runtime.responses.executions.readModel(id);
+        return execution.conversationId === requested.conversationId && ['completed', 'failed', 'cancelled', 'interrupted'].includes(execution.state);
+      });
       const project = runtime?.conversations;
       if (project) {
         const result = await project.get(request);
-        if (result.ok || result.error.code !== 'conversation_not_found') return result;
+        if (result.ok) return { ok: true, value: await verifyRetainedDocumentArtifacts(result.value, {
+          rootDirectory: session!.rootDirectory, projectId: session!.projectId,
+          isCurrent: () => { const current = dependencies.getSession(); return current?.projectId === session!.projectId && current.rootDirectory === session!.rootDirectory; }
+        }) };
+        if (result.error.code !== 'conversation_not_found') return result;
       }
       const input = chatContextRequestParsers.conversationId(request);
       const legacy = await legacyRepository.get(toConversationId(input.conversationId));
@@ -667,6 +1184,10 @@ export function createChatContextRuntime(
         ? await getProjectRuntime(session).conversations.list(request)
         : { ok: true as const, value: [] };
       if (!projectItems.ok) return projectItems;
+      const verifiedItems = session ? await Promise.all(projectItems.value.map(item => verifyRetainedDocumentArtifacts(item, {
+        rootDirectory: session.rootDirectory, projectId: session.projectId,
+        isCurrent: () => { const current = dependencies.getSession(); return current?.projectId === session.projectId && current.rootDirectory === session.rootDirectory; }
+      }))) : projectItems.value;
       const projectIds = new Set(projectItems.value.map((item) => item.conversationId));
       const legacyItems = (await legacyService.list({ statuses }))
         .filter((item) =>
@@ -680,7 +1201,7 @@ export function createChatContextRuntime(
         ));
       return {
         ok: true,
-        value: [...projectItems.value, ...legacyItems].sort((left, right) =>
+        value: [...verifiedItems, ...legacyItems].sort((left, right) =>
           right.updatedAt.localeCompare(left.updatedAt) ||
           left.conversationId.localeCompare(right.conversationId)
         )
@@ -774,6 +1295,7 @@ export function createChatContextRuntime(
     workflows,
     webResearch,
     interruptActiveResponses: async () => {
+      const cancelledStarts = responses.cancelActiveStarts();
       const cancelledPlanning = workflows.cancelActivePlanning();
       const interrupted = await Promise.all([...runtimes].map(async (runtime) => {
         // Adapter completion owns the terminal transition. Only persisted handles
@@ -781,16 +1303,20 @@ export function createChatContextRuntime(
         const cancelled = await runtime.responses.executionCoordinator.cancelAll();
         await runtime.documentTools.dispose();
         const orphaned = await runtime.responses.executions.listActive();
+        let orphanedCount = 0;
         for (const execution of orphaned) {
+          if (!await runtime.canInterruptResponse(toConversationResponseExecutionId(execution.responseExecutionId))) continue;
           await runtime.responses.executions.interrupt(
             execution.responseExecutionId,
             'application_shutdown'
           );
           await projectInterruptedAssistant(runtime.conversationRepository, execution.conversationId, execution.assistantMessageId, now);
+          orphanedCount += 1;
         }
-        return cancelled + orphaned.length;
+        runtime.sessionService.dispose();
+        return cancelled + orphanedCount;
       }));
-      return interrupted.reduce((total, count) => total + count, cancelledPlanning);
+      return interrupted.reduce((total, count) => total + count, cancelledPlanning + cancelledStarts);
     },
     waitForMutations: async () => {
       await Promise.all([
@@ -798,9 +1324,15 @@ export function createChatContextRuntime(
         responses.waitForOperations(),
         projectContexts.waitForMutations(),
         workflows.waitForOperations(),
-        webResearch.waitForOperations(),
-        ...responseFinalizers
+        webResearch.waitForOperations()
       ]);
+      await Promise.all([...runtimes].map(runtime => runtime.responses.executionCoordinator.waitForCompletedOperations(async id =>
+        ['completed', 'failed', 'cancelled', 'interrupted'].includes((await runtime.responses.executions.readModel(id)).state))));
+      // Provider completion may have registered a terminal projection after the
+      // initial mutation snapshot. Drain it only after the real handle settles.
+      await Promise.all([...responseFinalizers]);
+      await Promise.all([...runtimes].map(runtime => runtime.responses.completion?.waitForOperations()));
+      await Promise.all([...runtimes].map(runtime => runtime.agentRuntime.flushProjectedEvents().catch(error => dependencies.onError?.(error))));
     }
   };
 }
@@ -828,11 +1360,13 @@ async function settleRecoverableConversationDocuments(
   workflows: ConversationWorkflowService,
   executions: JsonConversationResponseExecutionRepository,
   conversations: JsonProjectConversationRepository,
-  now: () => string
+  now: () => string,
+  canRecover?: (responseExecutionId: string) => Promise<boolean>
 ): Promise<void> {
   for (const workflow of await workflows.list()) {
     const executionId = workflow.executionId;
     if (workflow.status !== 'executing' || workflow.plan.kind !== 'document' || !executionId) continue;
+    if (canRecover && !await canRecover(executionId)) continue;
     const execution = (await executions.list(workflow.conversationId)).find((item) => item.id === executionId);
     const messageId = execution?.snapshot.assistantMessageId ?? workflow.deliveries?.find((item) =>
       item.status === 'executing' && item.executionId === executionId)?.resultMessageId;
@@ -881,39 +1415,14 @@ async function settleRecoverableConversationDocuments(
 async function interruptOrphanedConversationResponses(
   executions: ConversationResponseExecutionLifecycle,
   conversations: JsonProjectConversationRepository,
-  now: () => string
+  now: () => string,
+  canRecover?: (responseExecutionId: string) => Promise<boolean>
 ): Promise<void> {
   const active = await executions.listActive();
   for (const execution of active) {
+    if (canRecover && !await canRecover(execution.responseExecutionId)) continue;
     await executions.interrupt(execution.responseExecutionId, 'application_shutdown');
     await projectInterruptedAssistant(conversations, execution.conversationId, execution.assistantMessageId, now);
-  }
-}
-
-async function settleConversationAgentRun(
-  agentRuns: JsonConversationAgentRunRepository,
-  responseExecutionId: string,
-  submissionStatus: SubmissionIntentStatus,
-  now: () => string
-): Promise<void> {
-  const status = submissionStatus === 'completed'
-    ? 'completed'
-    : submissionStatus === 'cancelled'
-      ? 'cancelled'
-      : ['failed', 'failed_before_submission', 'unknown_outcome'].includes(submissionStatus)
-        ? 'failed'
-        : undefined;
-  if (!status) return;
-  const run = await agentRuns.findByResponseExecutionId(toConversationResponseExecutionId(responseExecutionId));
-  if (!run || ['completed', 'failed', 'cancelled'].includes(run.status)) return;
-  try {
-    await agentRuns.save(
-      transitionConversationAgentRun(run, status, toIsoTimestamp(now())),
-      run.revision
-    );
-  } catch (error) {
-    const latest = await agentRuns.get(run.id);
-    if (!latest || !['completed', 'failed', 'cancelled'].includes(latest.status)) throw error;
   }
 }
 
@@ -921,11 +1430,12 @@ function createConversationTerminalObserver(
   acceptances: ProjectSubmissionAcceptanceStore,
   authorization: RuntimeAuthorizationOrchestrationPort,
   workflows: ConversationWorkflowService,
-  agentRuns: JsonConversationAgentRunRepository,
+  completion: ConversationCompletionCoordinator,
   routes: JsonProviderExecutionRouteSnapshotRepository,
   invocations: JsonProviderInvocationRepository,
   now: () => string,
-  finalizers: Set<Promise<void>>
+  finalizers: Set<Promise<void>>,
+  onError?: (error: unknown) => void
 ) {
   const advance = async (
     input: {
@@ -936,48 +1446,40 @@ function createConversationTerminalObserver(
     status: 'completed' | 'failed' | 'cancelled' | 'unknown_outcome',
     eventType: 'completed' | 'failed' | 'cancelled' | 'outcome_unknown'
   ): Promise<void> => {
-    const acceptance = await acceptances.getByInvocationAttemptId(
-      input.invocationAttemptId as never
-    );
-    if (!acceptance || ['completed', 'failed', 'cancelled', 'unknown_outcome'].includes(acceptance.intent.status)) {
-      return;
-    }
     const occurredAt = toIsoTimestamp(now());
-    const intent = transitionSubmissionIntent(acceptance.intent, status, occurredAt, {
-      providerOperationId: input.providerOperationId,
-      ...(input.safeCode ? { safeCode: input.safeCode } : {})
-    });
-    const updated = await acceptances.advance({
-      intent,
-      invocationEvent: createProviderInvocationEvent({
-        id: `conversation-terminal-${randomUUID()}` as never,
-        invocationAttemptId: acceptance.invocationAttempt.id,
-        sequence: acceptance.invocationEvents.length + 1,
-        type: eventType,
-        ...(input.safeCode ? { safeCode: input.safeCode } : {}),
-        occurredAt
-      })
-    });
+    let updated: ProjectSubmissionAcceptanceV1 | undefined;
+    for (let attempt = 0; attempt < 4; attempt += 1) {
+      const acceptance = await acceptances.getByInvocationAttemptId(input.invocationAttemptId as never);
+      if (!acceptance) return;
+      if (['completed', 'failed', 'cancelled', 'unknown_outcome'].includes(acceptance.intent.status)) { updated = acceptance; break; }
+      try {
+        updated = await acceptances.advance({
+          intent: transitionSubmissionIntent(acceptance.intent, status, occurredAt, {
+            providerOperationId: input.providerOperationId, ...(input.safeCode ? { safeCode: input.safeCode } : {}) }),
+          invocationEvent: createProviderInvocationEvent({ id: `conversation-terminal-${randomUUID()}` as never,
+            invocationAttemptId: acceptance.invocationAttempt.id, sequence: acceptance.invocationEvents.length + 1,
+            type: eventType, ...(input.safeCode ? { safeCode: input.safeCode } : {}), occurredAt }) });
+        break;
+      } catch (error) { if (attempt === 3) throw error; }
+    }
+    if (!updated) throw new Error('completion_acceptance_unavailable');
     await persistConversationCallRecordFacts({ acceptance: updated, routes, invocations });
-    await authorization.recordOutcome(acceptance.intent.authorizationClaimId, occurredAt);
-    if (acceptance.subjectArtifacts.kind === 'conversation') {
-      await settleConversationAgentRun(
-        agentRuns,
-        acceptance.subjectArtifacts.responseExecution.id,
-        status === 'completed' ? 'completed' : status === 'cancelled' ? 'cancelled' : 'failed',
-        now
-      );
+    await authorization.recordOutcome(updated.intent.authorizationClaimId, occurredAt);
+    if (updated.subjectArtifacts.kind === 'conversation') {
+      const settled = await completion.settle(updated.subjectArtifacts.responseExecution.id,
+        updated.intent.status === 'unknown_outcome' ? { unknownResult: true } : {});
+      if (!settled) await workflows.finishExecution(updated.subjectArtifacts.responseExecution.id,
+        updated.intent.status === 'completed' ? 'completed' : updated.intent.status === 'cancelled' ? 'cancelled' : 'failed');
     }
-    if (acceptance.subjectArtifacts.kind === 'conversation') {
-      await workflows.finishExecution(
-        acceptance.subjectArtifacts.responseExecution.id,
-        status === 'completed'
-          ? 'completed'
-          : status === 'cancelled'
-            ? 'cancelled'
-            : 'failed'
-      );
-    }
+  };
+  const stopSafely = async (error: unknown, invocationAttemptId: string) => {
+    onError?.(error);
+    try {
+      const acceptance = await acceptances.getByInvocationAttemptId(invocationAttemptId as never);
+      if (acceptance?.subjectArtifacts.kind === 'conversation') {
+        await completion.settle(acceptance.subjectArtifacts.responseExecution.id, { unknownResult: true });
+      }
+    } catch (settlementError) { onError?.(settlementError); }
   };
   const track = (operation: Promise<void>): Promise<void> => {
     let tracked: Promise<void>;
@@ -987,13 +1489,13 @@ function createConversationTerminalObserver(
   };
   return {
     completed: (input: { providerOperationId: string; invocationAttemptId: string }) =>
-      track(advance(input, 'completed', 'completed').catch(() => undefined)),
+      track(advance(input, 'completed', 'completed').catch(error => stopSafely(error, input.invocationAttemptId))),
     failed: (input: { providerOperationId: string; invocationAttemptId: string; safeCode: string }) =>
-      track(advance(input, 'failed', 'failed').catch(() => undefined)),
+      track(advance(input, 'failed', 'failed').catch(error => stopSafely(error, input.invocationAttemptId))),
     cancelled: (input: { providerOperationId: string; invocationAttemptId: string }) =>
-      track(advance(input, 'cancelled', 'cancelled').catch(() => undefined)),
+      track(advance(input, 'cancelled', 'cancelled').catch(error => stopSafely(error, input.invocationAttemptId))),
     interrupted: (input: { providerOperationId: string; invocationAttemptId: string }) =>
-      track(advance(input, 'unknown_outcome', 'outcome_unknown').catch(() => undefined))
+      track(advance(input, 'unknown_outcome', 'outcome_unknown').catch(error => stopSafely(error, input.invocationAttemptId)))
   };
 }
 

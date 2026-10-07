@@ -1,6 +1,7 @@
 import type { NativeSearchEvidence, NativeSearchRequest } from '../../domain/entities/native-search';
 import type { UsageFactV1 } from '../../domain';
 import type { NewApiEventStreamSession } from './newapi/newapi-runtime';
+import { providerExecutionHash } from './provider-tool-calling';
 
 export interface NativeSearchMessage {
   readonly role: 'system' | 'user' | 'assistant' | 'tool';
@@ -34,6 +35,7 @@ export async function runNativeSearch(input: {
   readonly signal: AbortSignal;
   readonly open: (messages: readonly NativeSearchMessage[]) => Promise<NewApiEventStreamSession>;
   readonly observe: (evidence: NativeSearchEvidence) => Promise<void>;
+  readonly observeModelResult?: (summary: { readonly resultHash: string; readonly contentLength: number; readonly finishReason: string; readonly toolCallCount: number }) => Promise<void>;
 }): Promise<{ finishReason: 'stop' | 'length'; content: string; contentLength: number; usage?: readonly UsageFactV1[] }> {
   let session = input.session;
   const messages = [...input.messages];
@@ -61,6 +63,11 @@ export async function runNativeSearch(input: {
           await input.observe(evidence('started'));
           checkCancelled();
         }
+      });
+      checkCancelled();
+      await input.observeModelResult?.({
+        resultHash: providerExecutionHash({ content: parsed.content, calls: parsed.calls, finishReason: parsed.finish }),
+        contentLength: parsed.content.length, finishReason: parsed.finish, toolCallCount: parsed.calls.length
       });
       checkCancelled();
       requestUsage.push(parsed.usage ?? null);

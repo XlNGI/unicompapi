@@ -69,7 +69,8 @@ import {
   type ConversationStreamDeltaSegment
 } from './conversation-stream-delta-batcher';
 import { ConversationRevisionConflictError } from '../repositories/json-conversation-repository';
-import type { ControlledProviderToolBridge, ControlledProviderToolDefinition } from './provider-tool-calling';
+import type { ControlledProviderToolBridge, ControlledProviderToolDefinition, ProviderExecutionLifecyclePort } from './provider-tool-calling';
+import type { ExecutionStopReason, HostExecutionBudget } from '../../application/execution-budget';
 import { bindProductionTraceAssistant, emitProductionEvent, getProductionTraceScope,
   withProductionTrace, type ProductionTraceScope } from '../conversation-production-trace';
 
@@ -88,7 +89,9 @@ export interface ConversationTextSubmissionRuntimes {
     readonly maxRounds?: number;
   };
   readonly documentToolCalling?: {
-    forExecution(input: { readonly responseExecutionId: string }): Promise<{
+    forExecution(input: { readonly responseExecutionId: string; readonly signal?: AbortSignal }): Promise<{
+      readonly executionBudget?: HostExecutionBudget;
+      readonly cancel?: () => Promise<void>;
       readonly prepareTools: (signal: AbortSignal) => Promise<readonly ControlledProviderToolDefinition[] | undefined>;
       readonly bridge: ControlledProviderToolBridge;
       readonly close: () => Promise<void>;
@@ -115,6 +118,10 @@ export function createConversationTextDispatchBridge(
     readonly lifecycle: ConversationResponseExecutionLifecycle;
     readonly conversations: ProjectConversationRepository;
     readonly coordinator: ConversationExecutionCoordinator;
+    readonly settleExecution?: (id: ConversationResponseExecutionId, unknownResult: boolean,
+      counters?: { readonly toolCallsUsed: number; readonly costUnitsUsed: number }, reason?: ExecutionStopReason) => Promise<void>;
+    readonly executionLifecycle?: (id: ConversationResponseExecutionId) => Promise<ProviderExecutionLifecyclePort | undefined>;
+    readonly executionSignal?: (id: ConversationResponseExecutionId) => Promise<AbortSignal | undefined>;
     now?: () => string;
   }
 ): ProviderSubmissionDispatchBridge {
@@ -159,6 +166,9 @@ export function createConversationTextDispatchBridge(
       submit: (input) => deepSeekAdapter.submit(input),
       toolCalling: options.toolCalling,
       documentToolCalling: options.documentToolCalling,
+      settleExecution: options.settleExecution,
+      executionLifecycle: options.executionLifecycle,
+      executionSignal: options.executionSignal,
       cancel: (providerOperationId) => deepSeekAdapter.cancel(providerOperationId),
       coordinator: options.coordinator,
       onCancellationTimeout: async (responseExecutionId) => {
@@ -186,6 +196,9 @@ export function createConversationTextDispatchBridge(
       }),
       toolCalling: options.toolCalling,
       documentToolCalling: options.documentToolCalling,
+      settleExecution: options.settleExecution,
+      executionLifecycle: options.executionLifecycle,
+      executionSignal: options.executionSignal,
       cancel: (providerOperationId) => newApiAdapter.cancel(providerOperationId),
       coordinator: options.coordinator,
       onCancellationTimeout: async (responseExecutionId) => {
@@ -212,9 +225,16 @@ function wrapChatAdapter(input: {
     readonly toolBridge?: ControlledProviderToolBridge;
     readonly prepareTools?: (signal: AbortSignal) => Promise<readonly ControlledProviderToolDefinition[] | undefined>;
     readonly maxToolRounds?: number;
+    readonly signal?: AbortSignal;
+    readonly executionBudget?: HostExecutionBudget;
+    readonly executionLifecycle?: ProviderExecutionLifecyclePort;
   }): Promise<{ readonly providerOperationId: string; readonly completion: Promise<unknown> }>;
   cancel(providerOperationId: string): Promise<boolean>;
   readonly coordinator: ConversationExecutionCoordinator;
+  readonly settleExecution?: (id: ConversationResponseExecutionId, unknownResult: boolean,
+    counters?: { readonly toolCallsUsed: number; readonly costUnitsUsed: number }, reason?: ExecutionStopReason) => Promise<void>;
+  readonly executionLifecycle?: (id: ConversationResponseExecutionId) => Promise<ProviderExecutionLifecyclePort | undefined>;
+  readonly executionSignal?: (id: ConversationResponseExecutionId) => Promise<AbortSignal | undefined>;
   onCancellationTimeout(
     responseExecutionId: ConversationResponseExecutionId
   ): Promise<void>;
@@ -230,40 +250,90 @@ function wrapChatAdapter(input: {
     async submit(dispatchRequest): Promise<SubmissionDispatchOutcome> {
       let prepared: Awaited<ReturnType<NonNullable<ConversationTextSubmissionRuntimes['documentToolCalling']>['forExecution']>> | undefined;
       let closeStarted = false;
-      const closePrepared = () => {
-        if (!prepared || closeStarted) return;
+      let closing: Promise<boolean> | undefined;
+      let starting: ReturnType<ConversationExecutionCoordinator['beginStarting']> | undefined;
+      let removeStartingAbort: (() => void) | undefined;
+      const closePrepared = (): Promise<boolean> => {
+        if (closing) return closing;
+        if (!prepared) return Promise.resolve(true);
         closeStarted = true;
-        // The session revokes its in-memory grant before its first await. Persistence
-        // cleanup must neither reject nor hold a completed/cancelled response open.
-        try { void prepared.close().catch(() => undefined); } catch { /* Cleanup cannot change the response outcome. */ }
+        // Revoke synchronously, observe the real settlement, and bound its acknowledgement.
+        // A timed-out close stays unknown; no tool or Provider is replayed.
+        let pending: Promise<boolean>;
+        try { pending = prepared.close().then(() => true, () => false); } catch { pending = Promise.resolve(false); }
+        let timer: ReturnType<typeof setTimeout> | undefined;
+        closing = input.settleExecution ? Promise.race([pending, new Promise<boolean>(resolve => {
+          timer = setTimeout(() => resolve(false), 5_000);
+        })]).finally(() => clearTimeout(timer)) : pending;
+        return closing;
       };
       try {
         const responseExecutionId = responseExecutionIdFromDispatchRequest(dispatchRequest.request);
+        starting = input.coordinator.beginStarting(responseExecutionId, () => input.onCancellationTimeout(responseExecutionId));
+        const leaseSignal = await awaitStarting(input.executionSignal?.(responseExecutionId) ?? Promise.resolve(undefined), starting.signal);
+        const requestSignal = leaseSignal ? AbortSignal.any([starting.signal, leaseSignal]) : starting.signal;
+        const abortPrepared = () => {
+          prepared?.executionBudget?.cancel('cancelled');
+          void prepared?.cancel?.().catch(() => undefined);
+        };
+        requestSignal.addEventListener('abort', abortPrepared, { once: true });
+        removeStartingAbort = () => requestSignal.removeEventListener('abort', abortPrepared);
         const acceptsDocumentTools = isRecord(dispatchRequest.request) && !dispatchRequest.request.nativeSearch;
-        if (acceptsDocumentTools) prepared = await input.documentToolCalling?.forExecution({ responseExecutionId });
+        if (acceptsDocumentTools && input.documentToolCalling) {
+          const pending = input.documentToolCalling.forExecution({ responseExecutionId, signal: requestSignal });
+          void pending.then(session => {
+            if (requestSignal.aborted && session) {
+              session.executionBudget?.cancel('cancelled');
+              void session.cancel?.().catch(() => undefined);
+              void session.close().catch(() => undefined);
+            }
+          }, () => undefined);
+          prepared = await awaitStarting(pending, requestSignal);
+        }
         const staticToolCalling = acceptsDocumentTools && !input.documentToolCalling ? input.toolCalling : undefined;
+        const lifecycle = await awaitStarting(input.executionLifecycle?.(responseExecutionId) ?? Promise.resolve(undefined), requestSignal);
         // A configured factory owns this response's capabilities, including an empty result.
         const adapterRequest = acceptsDocumentTools && (input.documentToolCalling || staticToolCalling)
           ? { ...(dispatchRequest.request as Record<string, unknown>), tools: staticToolCalling?.tools }
           : dispatchRequest.request;
-        const handle = await input.submit({
+        prepared?.executionBudget?.assertCanProceed('model');
+        const pendingHandle = input.submit({
           routeSnapshot: dispatchRequest.routeSnapshot,
           request: adapterRequest,
           beforeRequestStarted: async () => {
+            if (requestSignal.aborted) throw Object.assign(new Error('cancelled'), { name: 'AbortError', code: 'cancelled' });
+            prepared?.executionBudget?.assertCanProceed('model');
             await dispatchRequest.beforeRequestStarted();
             await emitProductionEvent({ code: 'model_request', status: 'started',
               operationId: responseExecutionIdFromDispatchRequest(adapterRequest), facts: { purpose: 'content' } });
           },
+          signal: requestSignal,
+          ...(lifecycle ? { executionLifecycle: lifecycle } : {}),
+          ...(prepared?.executionBudget ? { executionBudget: prepared.executionBudget } : {}),
           ...(prepared ? { toolBridge: prepared.bridge, prepareTools: prepared.prepareTools }
             : staticToolCalling ? { toolBridge: staticToolCalling.bridge, maxToolRounds: staticToolCalling.maxRounds } : {})
         });
-        const completion = prepared ? handle.completion.finally(closePrepared) : handle.completion;
+        void pendingHandle.then(handle => {
+          if (requestSignal.aborted || prepared?.executionBudget?.signal.aborted) void input.cancel(handle.providerOperationId).catch(() => undefined);
+        }, () => undefined);
+        const handle = await awaitStarting(pendingHandle, requestSignal);
+        const completion = input.settleExecution ? handle.completion.finally(async () => {
+          const stopReason = prepared?.executionBudget?.stopReason;
+          const counters = prepared?.executionBudget?.snapshot(stopReason ?? 'cancelled');
+          const known = await closePrepared();
+          await input.settleExecution!(responseExecutionId, !known, counters ?
+            { toolCallsUsed: counters.toolCallsUsed, costUnitsUsed: counters.costUnitsUsed } : undefined, stopReason);
+        }) : prepared ? handle.completion.finally(() => { void closePrepared(); }) : handle.completion;
         void completion.catch(() => undefined);
         try {
           input.coordinator.register({
             responseExecutionId,
             providerOperationId: handle.providerOperationId,
-            cancel: () => input.cancel(handle.providerOperationId),
+            cancel: () => {
+              prepared?.executionBudget?.cancel('cancelled');
+              void prepared?.cancel?.().catch(() => undefined);
+              return input.cancel(handle.providerOperationId);
+            },
             completion,
             onCancellationTimeout: () => input.onCancellationTimeout(responseExecutionId)
           });
@@ -276,15 +346,30 @@ function wrapChatAdapter(input: {
           providerOperationId: handle.providerOperationId
         };
       } catch (error) {
-        closePrepared();
-        await emitProductionEvent({ code: 'model_request', status: 'failed', facts: { purpose: 'content' } });
+        if (input.settleExecution) await closePrepared();
+        else void closePrepared();
+        await emitProductionEvent({ code: 'model_request', status: starting?.signal.aborted ? 'cancelled' : 'failed', facts: { purpose: 'content' } });
         return {
           kind: 'failed_before_submission',
           safeCode: dispatchFailureSafeCode(input.adapterKey, error)
         };
+      } finally {
+        removeStartingAbort?.(); starting?.release();
+        if (closeStarted) input.coordinator.releaseStartupSignal(responseExecutionIdFromDispatchRequest(dispatchRequest.request));
       }
     }
   };
+}
+
+async function awaitStarting<T>(pending: Promise<T>, signal: AbortSignal): Promise<T> {
+  let abort: (() => void) | undefined;
+  const stopped = new Promise<never>((_, reject) => {
+    abort = () => reject(Object.assign(new Error('cancelled'), { name: 'AbortError', code: 'cancelled' }));
+    signal.addEventListener('abort', abort, { once: true });
+    if (signal.aborted) abort();
+  });
+  try { return await Promise.race([pending, stopped]); }
+  finally { if (abort) signal.removeEventListener('abort', abort); }
 }
 
 function responseExecutionIdFromDispatchRequest(value: unknown): ConversationResponseExecutionId {

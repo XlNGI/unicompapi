@@ -81,7 +81,7 @@ import type {
 } from '../ids';
 import type { DocumentTaskRuntimeId } from '../ids';
 import type { IsoTimestamp } from '../timestamps';
-import type { ConversationAgentRunV1 } from '../entities/conversation-agent-run';
+import type { AgentRunReconciliationReason, ConversationAgentRunV1 } from '../entities/conversation-agent-run';
 
 export interface ConversationListOptions {
   readonly statuses?: readonly ConversationStatus[];
@@ -123,6 +123,10 @@ export interface ConversationAgentRunRepository {
   findByResponseExecutionId(responseExecutionId: ConversationResponseExecutionId): Promise<ConversationAgentRunV1 | undefined>;
   create(run: ConversationAgentRunV1): Promise<void>;
   save(run: ConversationAgentRunV1, expectedRevision: number): Promise<void>;
+  /** A controlled acknowledgement closes the original attempt without replaying an unknown effect. */
+  acknowledgeReconciliation?(id: ConversationAgentRunId, expectedRevision: number, at: IsoTimestamp, reason?: AgentRunReconciliationReason): Promise<ConversationAgentRunV1>;
+  /** Only a verified completion WAL may use this CAS to confirm local projections. */
+  confirmProjectedCompletion?(id: ConversationAgentRunId, expectedRevision: number, status: 'completed' | 'failed' | 'cancelled', at: IsoTimestamp): Promise<ConversationAgentRunV1>;
 }
 
 export interface ConversationResponseExecutionRepository {

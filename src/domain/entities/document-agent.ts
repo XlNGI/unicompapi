@@ -1,5 +1,9 @@
 import type { DocumentOutline } from './document-generation';
 import { createCanonicalToolRegistry, type CanonicalToolId } from './canonical-tool-contract';
+import {
+  buildDocumentContentSnapshot, documentContentSnapshotToLegacyContent,
+  parseDocumentContentSnapshot, type DocumentContentSnapshotV1
+} from './document-content-snapshot';
 
 /** Compatibility identity view. Registration is owned by the canonical catalog. */
 export const documentToolIds: readonly CanonicalToolId[] = Object.freeze([...createCanonicalToolRegistry().keys()]);
@@ -68,6 +72,7 @@ export interface DocumentIR {
   readonly workRef?: string;
   readonly toolCalls?: readonly DocumentToolRequest[];
   readonly content?: DocumentIRContent;
+  readonly canonicalContent?: DocumentContentSnapshotV1;
   readonly preserve?: readonly string[];
   readonly revision?: DocumentIRRevision;
 }
@@ -77,33 +82,25 @@ export function buildDocumentIRFromOutline(input: {
   readonly operation: DocumentOperation;
   readonly attachmentRefs?: readonly string[];
   readonly revision?: DocumentIRRevision;
+  readonly identityScope?: string;
+  readonly previousSnapshot?: DocumentContentSnapshotV1;
+  readonly identityMap?: Readonly<Record<string, string>>;
 }): DocumentIR {
   const sourceRefs = input.attachmentRefs ?? [];
-  const content: DocumentIRContent = {
-    title: input.outline.title,
-    sections: input.outline.sections.map((section, sectionIndex) => ({
-      sectionId: `section-${sectionIndex + 1}`,
-      heading: section.heading,
-      ...(section.takeaway !== undefined ? { purpose: section.takeaway } : {}),
-      blocks: section.blocks.map((block, blockIndex) => ({
-        blockId: `section-${sectionIndex + 1}-block-${blockIndex + 1}`,
-        kind: block.type === 'table' ? 'table' : block.type === 'chart' ? 'chart' : block.type === 'bullets' || block.type === 'numbered' ? 'bullets' : 'text',
-        content: block.type === 'paragraph' || block.type === 'quote' ? block.text : block.type === 'bullets' || block.type === 'numbered' ? block.items.join('\n') : JSON.stringify(block),
-        sourceRefs
-      })),
-      preserve: []
-    })),
-    sourceRefs,
-    styleConstraints: []
-  };
-  return parseDocumentIR({ operation: input.operation, attachmentRefs: sourceRefs, content, ...(input.revision !== undefined ? { revision: input.revision } : {}) });
+  const canonicalContent = buildDocumentContentSnapshot({ outline: input.outline,
+    sourceRefs: input.attachmentRefs ?? input.previousSnapshot?.sourceRefs ?? [],
+    ...(input.identityScope === undefined ? {} : { identityScope: input.identityScope }),
+    ...(input.previousSnapshot === undefined ? {} : { previousSnapshot: input.previousSnapshot }),
+    ...(input.identityMap === undefined ? {} : { identityMap: input.identityMap }) });
+  return parseDocumentIR({ operation: input.operation, attachmentRefs: sourceRefs, canonicalContent,
+    ...(input.revision !== undefined ? { revision: input.revision } : {}) });
 }
 
 export function parseDocumentIR(value: unknown): DocumentIR {
   const record = requireRecord(value, 'DocumentIR');
   requireExactKeys(record, [
     'operation', 'attachmentRefs', 'documentRef', 'pageRefs', 'workRef', 'toolCalls',
-    'content', 'preserve', 'revision'
+    'content', 'canonicalContent', 'preserve', 'revision'
   ]);
   const operation = requireEnum(record.operation, documentOperations, 'DocumentIR.operation');
   const attachmentRefs = parseReferenceList(record.attachmentRefs, 'DocumentIR.attachmentRefs');
@@ -115,6 +112,12 @@ export function parseDocumentIR(value: unknown): DocumentIR {
       workRef !== undefined || toolCalls !== undefined || record.revision !== undefined)) {
     throw new TypeError('DocumentIR.create must not reference an existing document or invoke document tools');
   }
+  const canonicalContent = record.canonicalContent === undefined ? undefined : parseDocumentContentSnapshot(record.canonicalContent);
+  const canonicalView = canonicalContent === undefined ? undefined : documentContentSnapshotToLegacyContent(canonicalContent);
+  const content = record.content === undefined ? canonicalView : parseDocumentIRContent(record.content, canonicalContent !== undefined);
+  if (canonicalView !== undefined && JSON.stringify(content) !== JSON.stringify(canonicalView)) {
+    throw new TypeError('DocumentIR.content conflicts with canonical content');
+  }
   return {
     operation,
     attachmentRefs,
@@ -122,27 +125,28 @@ export function parseDocumentIR(value: unknown): DocumentIR {
     ...(pageRefs !== undefined ? { pageRefs } : {}),
     ...(workRef !== undefined ? { workRef } : {}),
     ...(toolCalls !== undefined ? { toolCalls } : {}),
-    ...(record.content !== undefined ? { content: parseDocumentIRContent(record.content) } : {}),
+    ...(content !== undefined ? { content } : {}),
+    ...(canonicalContent !== undefined ? { canonicalContent } : {}),
     ...(record.preserve !== undefined ? { preserve: parseTextList(record.preserve, 'DocumentIR.preserve', 64, 500) } : {}),
     ...(record.revision !== undefined ? { revision: parseDocumentIRRevision(record.revision) } : {})
   };
 }
 
-function parseDocumentIRContent(value: unknown): DocumentIRContent {
+function parseDocumentIRContent(value: unknown, canonical = false): DocumentIRContent {
   const record = requireRecord(value, 'DocumentIR.content');
   requireExactKeys(record, ['title', 'sections', 'sourceRefs', 'styleConstraints', 'pageCount']);
   const sections = requireArray(record.sections, 'DocumentIR.content.sections');
-  if (sections.length === 0 || sections.length > 80) throw new TypeError('DocumentIR.content.sections has an invalid length');
+  if ((!canonical && sections.length === 0) || sections.length > 80) throw new TypeError('DocumentIR.content.sections has an invalid length');
   return {
     title: requireSafeText(record.title, 'DocumentIR.content.title', 240),
-    sections: sections.map((section, index) => parseDocumentIRSection(section, index)),
+    sections: sections.map((section, index) => parseDocumentIRSection(section, index, canonical)),
     sourceRefs: parseTextList(record.sourceRefs, 'DocumentIR.content.sourceRefs', 128, 240),
     styleConstraints: parseTextList(record.styleConstraints, 'DocumentIR.content.styleConstraints', 32, 500),
     ...(record.pageCount === undefined ? {} : { pageCount: positiveInteger(record.pageCount, 'DocumentIR.content.pageCount', 500) })
   };
 }
 
-function parseDocumentIRSection(value: unknown, index: number): DocumentIRSection {
+function parseDocumentIRSection(value: unknown, index: number, canonical = false): DocumentIRSection {
   const label = `DocumentIR.content.sections[${index}]`;
   const record = requireRecord(value, label);
   requireExactKeys(record, ['sectionId', 'heading', 'purpose', 'blocks', 'preserve']);
@@ -151,23 +155,23 @@ function parseDocumentIRSection(value: unknown, index: number): DocumentIRSectio
   return {
     sectionId: requireSafeReference(record.sectionId, `${label}.sectionId`),
     heading: requireSafeText(record.heading, `${label}.heading`, 240),
-    ...(record.purpose === undefined ? {} : { purpose: requireSafeText(record.purpose, `${label}.purpose`, 500) }),
-    blocks: blocks.map((block, blockIndex) => parseDocumentIRBlock(block, `${label}.blocks[${blockIndex}]`)),
-    preserve: parseTextList(record.preserve, `${label}.preserve`, 32, 500)
+    ...(record.purpose === undefined ? {} : { purpose: requireSafeText(record.purpose, `${label}.purpose`, canonical ? 2_000 : 500) }),
+    blocks: blocks.map((block, blockIndex) => parseDocumentIRBlock(block, `${label}.blocks[${blockIndex}]`, canonical)),
+    preserve: parseTextList(record.preserve, `${label}.preserve`, canonical ? 64 : 32, 500)
   };
 }
 
-function parseDocumentIRBlock(value: unknown, label: string): DocumentIRBlock {
+function parseDocumentIRBlock(value: unknown, label: string, canonical = false): DocumentIRBlock {
   const record = requireRecord(value, label);
   requireExactKeys(record, ['blockId', 'kind', 'content', 'sourceRefs']);
   if (!documentIRBlockKinds.includes(record.kind as DocumentIRBlockKind)) throw new TypeError(`${label}.kind is invalid`);
-  const content = record.content === undefined ? undefined : requireSafeText(record.content, `${label}.content`, 4_000);
+  const content = record.content === undefined ? undefined : requireSafeText(record.content, `${label}.content`, canonical ? 8_000_000 : 4_000);
   if (content === undefined && record.kind !== 'image') throw new TypeError(`${label}.content is required`);
   return {
     blockId: requireSafeReference(record.blockId, `${label}.blockId`),
     kind: record.kind as DocumentIRBlockKind,
     ...(content === undefined ? {} : { content }),
-    sourceRefs: parseTextList(record.sourceRefs, `${label}.sourceRefs`, 32, 240)
+    sourceRefs: parseTextList(record.sourceRefs, `${label}.sourceRefs`, canonical ? 128 : 32, 240)
   };
 }
 

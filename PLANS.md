@@ -1,5 +1,218 @@
 # UniComp 开发计划
 
+### 维护实施：内容组织计划与关系驱动布局（2026-10-06—07；本地主链路验收完成）
+
+负责人反馈样式改善仍未达到“按内容设计，每页有变化”的目标，并在明确下一步为“内容分组与关系 → 布局”后要求“继续”。当前为维护优化，保留既有内容、样式、Runtime 与恢复的全部授权改动。依据负责人最新决策、AGENTS.md、当前样式方案、合同与真实样例。
+
+允许范围：版本化、封闭的 page 内容组织扩展（同页既有内容引用组成业务组及比较/顺序/支撑关系），Provider 规划能力和 Prompt 接线，Host 别名展开/完整覆盖/唯一成员/关系校验，组织驱动的 Header/业务组/来源说明布局，唯一 Layout IR 的稳定组织归属与候选 Hash/正式读回，有限修正中的组织保持及必要的硬失败边界，直接测试/真实 PPTX/Office/编译 Host 样例和工程记录。现有 Design IR v2 与无组织旧记录继续兼容；原内容与 physical identity 不换成模型指定身份。
+
+目标验收：对比两侧按业务对象而非标题/辅助内容分组，指标与标签/说明保持关联，步骤按显式关系而非数组顺序排列，Header 与整行来源说明有合理区域。模型只提出语义，不输出任意坐标、正文事实、代码、路径、凭证或执行预算。缺失/重复/跨页成员、别名重叠、环及不可能落实的明确组织不得以旧模板冒充成功；在实际 OOXML/几何/来源/Hash中验证执行结果，而非只通过 Schema。保留全部文案、原字号下限、重叠/越界、固定预算/取消/最大修正与原子发布/Work 门禁，不引入第二个循环或审美评分。
+
+实际修改：新增 page.organization v1 与 Host 叶子展开、重复/缺漏/跨页/关系环校验；无组织旧 v2 保持兼容并只在边界清晰时推断。Layout Constraint Model 保存 explicit/inferred organization，solver 为 header、comparison-side、metric、step、evidence、supporting 生成独立区域；支持关系保持证据/结论同组，sequence 关系决定步骤顺序，比较两侧和指标并列组共享对应 track。Production Layout IR 保存稳定 Host groupId、canonical sourceRefs 和关系，digest/读回/修正均核对组织与实际几何。明确组织无法落实时硬失败，不回退旧模板正式交付。
+
+最终验证：组织核心及真实生产测试通过；编译 Host 严格样例 7 页 Office QA diagnostics 为空，登记/读回 1 Work、Hash/privatePlan 与组织一致，Provider/HTTP(S) 请求 0。实际页面确认对比两侧并列、指标值同行、步骤按显式关系排序、来源说明完整。指标共享行修复前的错位约 0.8134 英寸已由真实 XML 回归复现并修复；原 epsilon 未放宽。首轮 Node/UI 审计因两个新 compiled 验收脚本未加入既有平台规则而失败，已仅补入两个具名脚本 allowlist，最终审计通过；不改变业务平台规则。
+
+完整最终门禁：Node/UI 387/387、Vitest 317 文件/3307 项，零失败、零跳过；总计 **3694** 项。typecheck、全仓 lint、生产 build、平台/恢复/阶段 9 基线/计划审计与 diff 检查通过。此前第一轮 full Vitest 的单条旧 `evidenceCount` 断言按明确 evidence 优先级修正后重跑全绿；失败日志保留。所有 Provider 合成，不读凭证、不收费、不外发企业资料、不重启用户应用；macOS 实机延期。
+
+证据：[组织布局工程验收](docs/current/ppt-content-organization-validation.md)、`outputs/ppt-organization-vitest-final.log`、`ppt-organization-node-verified.log`、`ppt-organization-typecheck-final.log`、`ppt-organization-lint-final.log`、`ppt-organization-build-final.log`、最终 audit/diff 日志、`ppt-organization-source-manifest.json` 与 `outputs/ppt-organization-proof/20261007031233113-b7964cf4/report.json`。第一版错位样例 `outputs/ppt-organization-proof/20261007030455248-4ccde753/` 保留未覆盖。
+
+范围收口：当前文字/表格/图表的组织关系与稳定布局本地主链路完成；独立 chrome、连接线、图片/复杂自由构图、完整 D-02 策略、逐页预览与审美评分仍独立/暂停。改动尚未提交、推送、合并或部署；新后端需重启应用后加载。
+
+### 维护实施：内容驱动 PPT 样式编译第一批（2026-10-06；本地主链路验收完成）
+
+负责人确认“按内容设计，每页有变化”并明确要求“直接实施”。当前维护范围是已讨论优先级第一批：现有 Design IR 语义与求解后的内容角色映射为实际样式，保留当前 feature 分支全部授权改动。依据负责人最新决策、AGENTS.md、[样式方案](docs/current/content-driven-ppt-style-remediation-plan.md) 与当前源码。
+
+允许修改：新增确定性 Style Compiler 与直接测试，生产 Render Plan Compiler 接线、现有 text/table/chart renderer 的必要样式属性、对应封闭样式合同与验证、真实 PPTX/Office/修正回归和工程记录。复用已有背景、文字填充、字号/字重、表头与图表颜色；配色随语义角色和强调变化，不按页号轮换固定模板。几何和字体大小仍由原 solver 负责，canonical 来源/稳定身份/Hash、私有写前计划、预算/取消/有限修正、文件/原子发布/Work 门禁保持。
+
+验收：同主题的封面/内容/指标/证据/对比/流程实际表达对应可见样式；正文和几何不被样式改写，单色与明暗主题可读，表头/表体颜色分别匹配背景；颜色、填充、字号等确实写入真实 PPTX，旧文件、修正设计和私有读回保持。用本地 Office、直接与完整测试、类型/lint/生产 build/工程审计核验，记录失败事实。所有 Provider 合成，无外发/付费/真实任务重跑，不重启用户应用，macOS 实机延期。
+
+实际修改：新增纯 Style Compiler，根据现有设计 tone/colorDirection 与页面语义、层级、强调、内容引用计算背景、前景、fill、表格/图表 paint；同一主题有对应语义变化，不用页号轮播，字号、坐标、尺寸和对齐保持 solver 结果。样式进入原 Layout/Render digest、私有写前候选和文件核验；新可选 tableHeaderColor 为表头/表体各自匹配可读前景，旧记录保持原 fallback。Renderer 明确消费表头色、图表值标签色与计划中的 chart fill，元数据与实际 OOXML 一致。
+
+最终验证：Node/UI 387/387、Vitest 313 文件/3260 项，合计 3647 项通过，零失败、零跳过；typecheck、全仓 lint、生产 build、平台/恢复/阶段 9 基线/计划审计和 diff 通过。真实七角色浅/深两套 14 页 Office fixture 约 5.5 秒、原三方向 9 页约 4.2 秒，均保持原 10 秒门禁和原检查。新实际 PPTX 核对背景/字色/fill/表头/图表/EMU/身份与版本，单色只变 paint；指定页修正保持风格与其他页。新 compiled Runner/Reader + 严格 requireRenderForPpt 在 Windows/Node v24.20.0 完成真实 7 页 QA，diagnostics/warnings 空、登记和读回 1 Work、Hash/私有计划一致，无 Provider/HTTP(S) 请求。新增 readonly helper 接口准确兼容既有 unassigned 层级，最初类型失败日志保留；完整冻结无新失败，源/编译 Hash 保持。
+
+证据：[第一批工程验收](docs/current/ppt-content-driven-style-validation.md)、`outputs/ppt-style-vitest-complete.log`、对应 node/type/lint/build/audit/diff 日志、`ppt-style-source-manifest.json`，以及 `outputs/ppt-style-proof/20261006135810512-c52405aa/report.json`、合成样例 PPT、PDF 与逐页 PNG。实际查看封面/指标/对比：样式已落地；指标来源窄栏仍有单字换行、卡片沿用原 margin0，未把 paint 补丁称为完整精美排版。
+
+范围收口与下一步：第一批当前 design-aware 的确定性样式编译本地验收完成，无已知范围内阻断；完整 groups/relationships、独立卡片容器/内边距、page.chrome/流程图元、图片/复杂构图、D-02 全策略/整篇重生成继承仍属后续批次。逐页预览和审美评分暂停；不改已有用户文件、不重跑真实任务、不读凭证或外发收费，不重启用户应用，macOS 实机延期。当前未提交、推送、合并或部署；新后端需应用重新启动后加载。
+
+### 维护讨论：内容驱动的 PPT 样式目标与修补方案（2026-10-06；方案已记录）
+
+负责人在核对最新 PPT 缺少明显样式后，明确选择目标“按内容设计，每页有变化”。当前为维护优化；本轮只诊断实际文件/安全运行事实、读取当前合同与渲染源码，并新增 [内容驱动样式方案](docs/current/content-driven-ppt-style-remediation-plan.md)，没有修改业务代码、重启应用或发起新的模型/收费/联网调用。
+
+实际事实：最新 4 页文件 Hash 与登记一致，走 design-aware，fallback 为空，修正次数为 0；每页浅灰背景/深灰文字、不同字号，装饰图形为 0。当前新 Renderer 只支持 text/table/chart，缺少风格与装饰的完整转换；此前内容/布局/修正验收保持，不以“暂停审美 QA”解释样式缺失。
+
+方案顺序：先落实已有设计意图与角色对应的受控 Style Compiler；再以稳定内容引用、分组和关系驱动页面表达，并在唯一 Layout IR 中加入有界 chrome；最后补设计执行策略、能力覆盖与修改/重生成的风格继承。主题提供字体、配色和间距，不按页码轮换固定模板，不规定每页必须不同或用审美分数验收。复用 canonical 内容、稳定身份、预算、取消、有限修正、文件/Hash/原子发布/Work 门禁；图片/复杂构图、逐页预览与审美评分维持现有独立/暂停边界。
+
+本轮验证为来源事实/源码合同核对与 diff 检查，无新增业务构建/测试结果。下一步实施从确定性样式映射的小补丁开始，各批真实 PPTX/Office/结构与越界验证后再推进；上述方案尚未标记实现完成。
+
+### 维护记录：D-01 / D-03 内容与布局事实源、D-05 修正设计保持（2026-10-05—06；本地主链路验收完成）
+
+负责人在了解剩余目标和建议顺序后明确授权“根据你的建议直接执行”。当前为阶段 9 基线收口后的维护；先补 D-01/D-03 的合同及生产接线，再接 D-05 有限修正。依据最新明确决策、AGENTS.md、当前 Design 缺口登记/修补方案与源码，保留当前 feature 工作树所有已授权改动。
+
+允许范围：版本化无损内容快照、稳定内容/页/元素引用及兼容投影，唯一生产 Layout IR 与只读 Render Plan 投影，当前生成/设计/布局/渲染/读回接线和旧临时流程明确适配；受控修正仅更新匹配的设计/布局并逐候选重新编译、记录输入/输出版本/Hash/父候选关系，沿用已有预算、最大修正次数、取消、Hash/原子发布/作品登记。维护已有 physical PresentationIdentityManifest、version pin、opaque IDs、tombstone 和精确 mutation，不用数组位置取代其身份。
+
+不新增一级页面、第二套 Agent Loop、逐页预览、视觉审美评分、图片/复杂构图新能力或服务商绑定；D-02 完整策略与 D-04/D-06 能力仍独立。本轮保留旧模板兼容兜底及明确原因，不允许修正隐式丢设计。QA 维持已授权的文案、文件、结构、可读/越界与明确硬约束，不用提高预算/放宽时限/删校验作为修复。原文件和已登记作品保留。
+
+实际修改：版本化无损 canonical content 成为当前生成/Art Direction/Layout/Render 唯一内容输入；Outline/旧 content 只作校验过的兼容投影。Host seed 使不同消息/工具上下文身份独立、同一输入重试一致，生产复用已有快照并保留层级来源、preserve 和已发放身份历史。Production Layout IR 记录来源、稳定页/元素 ID、几何、样式及 Hash，Render Plan 仅派生内容；solver 逐页来源完整且不重复，重新 Hash 不能掩盖漏项。旧 scene 明确为显式文本框局部投影，旧输出仍受控兼容。
+
+有限修正：每次 candidate 重新编译匹配的设计/布局/渲染，布局 Patch 只改变目标页 composition/pageRole，保留正文、全局主题、内容角色和其他页面。私有计划在 writer 产出字节前 awaited 不可覆盖写入，逐 attempt 关联版本/Hash/父候选/目标与诊断；QA receipt 不授权发布。callback 深拷贝隔离、遗漏 callback 与 QA 后文件 Hash 改变均阻断交付。正式读回从当前 Work/File/Task/Execution 主记录、真实文件 Hash 和唯一 passed 候选关联私有计划；备份不授权。已有 physical identity/head/journal/version pin 继续生效，受控版本缺 identity 时禁止重建 lineage。
+
+最终验证（2026-10-06）：Node/UI 387/387、Vitest 311 文件 3238/3238，共 3625 项通过，零失败、零跳过。typecheck、全仓 lint、生产 build、平台/恢复/阶段 9 基线/计划审计及 diff 检查通过；构建保留既有大 chunk/Vite Node API 提示。真实本地 PPTX 强制修正证明目标页几何改变、全部事实保留、其余页 XML 不变；失败/取消/私有写入失败/缺 callback/文件变动均不登记并保留旧作品。原 Office 三方向 9 页实际渲染和既定 QA 通过，约 7.3 秒，原 10 秒门禁不变。当前编译 Host/preload 的隔离恢复三个进程 19 项、真实 ChatPage 生产/StrictMode 各 7 项通过，HTTP(S) 外发为零，仅 3 次合成明确续接请求。
+
+修复与性能记录：初轮暴露旧格式转换、重新编译生成随机身份造成重试重复作品、布局页数失败未落 failed 事件，以及原 5 秒 known retry 超时；均保留日志并修补。已完成的布局事实、物理页数决策和 render 诊断结果仅写单条 completed/failed，保留全部事实和门禁；真正编译、渲染、三次 Hash、发布与登记仍有原执行边界。私有计划/receipt 探针合计约 16ms，主要耗时在状态/进度重复读写，不以推测环境归因。最终全量 native 约 3.0 秒、普通目标约 3.5 秒、known retry 约 4.0 秒，原 5 秒不变；另一次 native 尖峰独立复验约 3.2 秒，完整冻结复验通过。新增只读攻击 fixture 的测试类型错误改为不可变重建，断言未削弱。
+
+证据：[D-01/D-03/D-05 工程验收](docs/current/d01-d03-d05-content-layout-repair-validation.md)，`outputs/d0135-vitest-final.log`、`d0135-node-final-complete.log`、`d0135-typecheck-verified.log`、`d0135-lint-final-complete.log`、`d0135-build-final.log`、对应 audit/diff 日志及 `d0135-source-manifest.json`。恢复报告为 `outputs/d0135-built-recovery/report.json`、`outputs/d0135-ui-recovery/report-r45.json` 与 StrictMode 报告；此前基线报告另保存，未以本轮结果覆盖历史结论。
+
+范围收口：D-01/D-03 当前支持的生成与读回主链路、D-05 同一生成任务的有界修正本地验收完成。旧父作品整篇重生成保留明确 `existing_parent_work_regeneration` 兼容原因，精确源 XML 修改不伪称完整新 Layout IR；未迁移全部旧流程或替换成熟 physical identity。D-02 完整设计执行策略、D-04 图片/复杂构图、D-06 进一步质量覆盖仍独立，逐页预览与审美评分暂停决定保持。所有模型 Transport 合成，不读真实凭证、不收费、不外发企业资料，不重启用户应用；macOS 实机仍延期。本轮无已知范围内阻断，改动尚未提交、推送、合并或部署。
+
+### 维护记录：新构建会话恢复流程隔离验证（2026-10-05；验证通过）
+
+R-04/R-05 验收后，负责人选择“验证新构建的会话恢复流程”。本轮仅新增验收脚本/合成 fixture 与工程说明，不继续 Design IR、预览或审美 QA，不更改业务源代码，不提交/部署/重启用户应用。
+
+实际验证：使用 `dist-electron` 的 Host、生产 `registerChatContextIpcHandlers` 和生产 preload，三个不同 Electron 进程依次打开同一隔离项目，19 项检查通过。前两次进程 0 合成模型请求；第三次仅有效补充、明确关闭未知规划后新任务、过期后明确新任务各 1 次，共 3 次合成请求。真实 HTTP(S) 外发 0。等待恢复两轮各更新一次令牌，旧令牌均拒绝且不新增调用；原身份/预算/deadline/计数未重置；重复命令返回同一执行。未知提交保持冻结，原 PPT 目标收到纯文本正确判为文件交付失败且无虚假 Work。
+
+真实 ChatPage 的 R-04/R-05 生产/StrictMode 场景各重新验证 7/7，通过且渲染错误、外发请求为零。新增脚本 lint 与 diff 检查通过；业务源未修改，既有 3520 项完整门禁结论保持。首次 runner 启动失败来自合成目录异步创建后才设置 Electron 启动开关，已修正初始化顺序并保留 `attempt-harness-startup-failure.json`，不是放宽超时或业务门禁。
+
+证据与限制：`outputs/r04-r05-built-recovery/report.json` 和 `validation.log` 记录实际编译文件 Hash、进程与全部检查，`r04-r05-new-build-ui-production.log` / `r04-r05-new-build-ui-strict-mode.log` 为界面复验。runner 为 `scripts/verify-r45-built-recovery.cjs` 与 `scripts/lib/r45-built-fixture.cjs`。采用最小 fixture renderer 加实际 IPC/preload，未宣称完整 AppLayout 端到端验收；未知模型提交/过期边界是主记录故障种子，不是真实收费请求或强杀用户进程；本轮合成模型只回文字，真实 Office 文件生成沿用此前门禁。未读取/复制用户真实 profile、凭证或项目资料。当前运行的用户应用仍需另行启动新构建才会加载新的后端。
+
+### 维护记录：R-05 统一恢复/执行租约与 R-04 同父任务等待恢复（2026-10-04—05；本地主链路验收完成）
+
+负责人在确认下一批建议后明确授权“可以，直接做”。当前仍为阶段 9 基线收口后的维护；依据最新决策、AGENTS.md、当前 Runtime/完成门和缺口 R-05/R-04。允许修改新增稳定父 Session/受控输入引用/等待版本/执行租约合同及主记录 CAS、Application 恢复和继续协议、现有 Controller/工作流/受控 Provider/工具准入接线、会话等待/继续显示和 IPC、直接测试及工程记录。保留旧 AgentRun/Runtime 单 Response 不可重绑约束、现有预算/入场/Hash/文件/授权门；不新增一级页面、预览/审美评分、第二个执行 Loop、登录/云同步或服务商绑定。
+
+实施顺序：先 R-05 主记录所有权/epoch/有界租约、有限统一扫描与安全分类；再 R-04 等待/版本化单次 token/后续消息与多子响应关联。稳定 root Session 是父任务，各 child AgentRun/Response 只追加且保留旧身份；输入由 Host 选择既有消息、Draft/Workflow 与版本/Hash 引用，不让模型决定路径、预算、凭证或复用权。等待保持原截止时间与消耗，过期不静默重置；继续前再次校验项目、来源、授权与模型候选。
+
+恢复边界：先核对 Run/DocTask/Response/提交与修改日志/已登记 Work；未知请求/副作用保守冻结并留存已知文件，不能由租约过期推出“可以重发”。只有可证未提交且无效果的步骤提供显式继续，准备过的模型/工具参数不能从 Hash 猜测；无法重建受控输入时停止或待核对。现有本地幂等结算/Outbox/保留文件修复复用，恢复器不直接调用付费模型或执行工具。每次真实准入核验当前 owner/epoch，取消、失效、重复 token、跨项目、陈旧版本均拒绝。
+
+实际实现：稳定 root Session 关联不可重绑的 child AgentRun/Response，原消息 Hash/版本、等待版本、单次令牌摘要和固定预算持久化。受控继续消费主记录 CAS；每次真实模型/工具准入核对当前 owner/epoch，失效信号抵达真实请求。metadata 增加跨进程锁，存活进程不能被年龄驱逐；统一恢复器核对主记录和本地文件，旧局部扫描受所有权过滤，未知效果冻结、已知本地投影幂等收尾。补信息后仍执行原 PPT 交付门，纯文字不冒充文件；未知结果明确关闭后才允许新任务，不恢复旧执行权。
+
+最终复核修补：两处 Response 绑定之间崩溃时由主 Run/Response/消息 pin 补不可变收据；可证未提交的过期响应本地收尾，只有核验未开始的 claim 释放调用额度。正常结束历史不再挤满恢复候选，取消/过期未决记录仍调查；1025 条历史场景不阻断启动。首次恢复跳过仍有效的旧租约后，同一 Host 按读取/新请求范围重新核对失主任务，不依赖第二次重启，也不旋转正常等待 nonce。热路径索引只存归属，每个效果仍 fresh primary lease/active child 校验；无 renderer 的已有 PPT 会话不误用组合预算。
+
+最终验证（2026-10-05）：Node/UI 387/387、Vitest 303 文件 3133/3133，共 3520 项通过，零失败、零跳过。typecheck、全仓 lint、生产 build、平台/恢复/阶段 9 基线/计划审计与 diff 检查通过；构建保留既有大 chunk 提示。真实隔离 Electron 的 R-04/R-05 生产与 StrictMode 各 7 项通过，渲染错误和 HTTP(S) 外发均为零。所有 Provider 为合成 Transport，不使用真实凭证、真实收费服务或用户项目；未重启用户开发应用，macOS 实机维持延期。
+
+失败与性能记录：早期接入修复了时钟、绑定/Root 收口、已确认关闭后的父状态和读取结算竞态；首轮全量在测试增补期间出现两条旧模块加载未包含新方法，以及 Office 原 10 秒用例超时。后续稳定全量暴露重复归属读取使一次生成恢复超原 5 秒；仅索引已核验身份、保留真实准入检查后，最终该闭环约 4.37 秒。独立 Office 探针确认三方向串行转换约 12—14 秒而 9 页 QA 均通过；仅将三个独立、隔离的测试 fixture 有界并行，保留全部检查与原 10 秒时限，最终全量该文件 7/7 通过。生产渲染器、QA 规则、等待时限和预算均未因此放宽。
+
+证据：`outputs/r04-r05-vitest-complete.log`、`r04-r05-node-final.log`、`r04-r05-typecheck-final.log`、`r04-r05-lint-final.log`、`r04-r05-build-final.log` 与对应 audit 日志；真实 UI 报告为 `outputs/chat-production-progress/r45/report-r45.json` 与 `report-r45-strict-mode.json`。断点/按需恢复/性能及失败日志保留，详见 [R-04/R-05 工程验收](docs/current/r04-r05-session-recovery-validation.md)。
+
+范围收口与下一步：R-04/R-05 按当前拥有 Session 的会话 Agent/受控 PPT 主链路验收完成；只恢复已有受控消息/工作流引用，不从 Hash 重建原工具参数或自动重发未知请求。旧无 Session 独立工作流维持兼容，未全面迁移；不确定 recovery guard 锁继续保守停止。模板/Design IR、逐页预览、审美 QA 和 macOS 实机未在本轮实施。建议用新构建在 Windows 验收补信息、停止和重开场景；后续设计一致性维护另按负责人范围开展。改动尚未提交、推送、合并、部署或重启当前应用。
+
+### 维护记录：真实 PPT 调用的入场预算、生成收口与已保存结果（2026-10-04；本地验收完成）
+
+负责人要求核对最新调用并明确授权“修吧”。当前为阶段 9 基线收口后的维护；依据最新决策、AGENTS.md、当前源码与最新脱敏调用事实。允许修改现有父 Runtime/Host 工具入场记账、唯一 Provider Loop/Bridge 与两类适配器的受控交付、PPT 内容编译和页结构预检、已登记文件的失败/取消结果投影、直接回归及工程记录；保留此前全部授权改动，不新增业务入口、预览、审美评分、第二个执行循环或完整 Recovery/等待恢复协议。
+
+复现事实：最新主调用约 133 秒，目标 12 页；首次生成失败、第二次成功登记 6 页、成功后旧生成调用被拒绝、再次提案触发 budget_exceeded。父 Runtime 记 3 次/24 单位，文档实际入场记录为 2 次/16 单位；被拒绝的旧工具仍按完整 8 单位记入父预算。文件已经保存，响应失败却没有结果卡。已有新布局因 font_below_minimum 回退，但正式文件结构/发布门已通过；本轮不以提高预算、删除校验或统一放宽字号处理。
+
+实施目标：区分有界提案次数与可信 Host 实际执行额度；预检/权限拒绝、已撤销工具及已知回放不消费完整执行单位，真实入场失败/未知提交继续计入并冻结，写前事件和文件/Hash/授权门不变。单纯生成成功后进入受控读回和一次最终说明，过期生成请求不再触发整篇重做；组合生成/修改仍按真实目标执行。生成前编译/页结构预检，普通页数只进行最多一次规划反馈，不填空页或重复内容，不把目标变成硬门。已核验的独立 Work 可在失败/取消/未知响应下展示保留文件与实际页数/目标偏差，旧终态和未知冻结不解除。
+
+实际修改：父 Runtime 独立记录有界提案次数，预检、权限拒绝与已知回放不消费完整执行单位；真实 Host admission 在效果前 awaited 持久扣额，实际失败/未知不通退费，旧账不自动回退。提案 prepared 一次 CAS，实际 started/admitted/扣额一次 CAS，结果/Observation 完整。单纯生成成功后一次读回和一次 tool_choice:none 最终说明，Host 重定向有独立审计、保留原模型结果 Hash；组合生成/修改不提前终结。PPT 内容/IR 编译纯预检与最多一次普通页结构反馈，明确硬条件仍由实际文件门验证。新增失败/取消/中断的独立保留文件卡与实际/目标页数，启动仅补当前 Hash/权限/绑定有效的已知 Work；原终态、WAL、未知冻结和原文件不变。
+
+真实合成回归：一次实际生成失败、一次成功、一次撤销提案后三账均 16 单位（提案 3、执行 2）；纯预检拒绝 0 单位，真实未知入场 8 单位且冻结。完整目标/生成失败后成功/陈旧生成请求/读回/最终交付只登记一次 Work；后续回复 failed/cancelled/unknown 保留文件但不冒充任务完成。新请求/目标会话刷新/关闭屏障扩到四类响应终态且有界，不等待 running，也不释放仍未结算 owner。
+
+最终验证：Node/UI 387/387、Vitest 294 文件 2949/2949，共 3336 项通过，零失败、零跳过。typecheck、全仓 lint、生产 build、平台/恢复/阶段 9 基线/计划审计与 diff 检查通过；构建保留既有大 chunk 提示。真实隐藏 Electron 生产/StrictMode 各 28 项通过，包含 failed/cancelled/unknown 原状态、实际页数/目标偏差、重开无重复或新请求、旧收据仅实际页数；异常和 HTTP(S) 外发 0，仍为组件/合成 IPC，不覆盖完整 AppLayout/preload/OS 输入。
+
+修复过程与边界：新增多轮曾超过原 5 秒等待，合并冗余提案 CAS 和准备 enter/exit 诊断为业务摘要后约 3.5/3.8 秒通过。首次全量还发现无工具终答提前返回跳过读回后撤权核验、权限拒绝缺 tool_result；已补回当前权限/Hash检查及失败记录，相关 31 项生成/读取/权限边界复验通过。既有三方向 Office 渲染在初次 10 秒超时并留下临时文件占用错误；最终相同等待全量通过（约 8.8 秒），原日志保留，不作确定环境归因。没有增预算/deadline/test waits、跳过用例、降低字号/QA/文件/Hash门禁。
+
+证据：`outputs/ppt-budget-delivery-vitest-final.log`、`ppt-budget-delivery-node-complete.log`、`ppt-budget-delivery-typecheck-complete.log`、`ppt-budget-delivery-lint-complete.log`、`ppt-budget-delivery-build-complete.log` 与对应 audit 日志。首次/独立日志为 `ppt-budget-delivery-vitest-complete.log`、`ppt-budget-delivery-production-recheck.log`、`ppt-budget-delivery-production-after-admission.log`、`ppt-budget-delivery-production-summary-recheck.log`、`ppt-budget-delivery-final-boundary-recheck.log`。真实 UI 位于 `outputs/chat-production-progress/retained-results/report-retained.json`、`report-retained-strict-mode.json`，旧报告未覆盖；详见 [工程验收记录](docs/current/ppt-execution-admission-and-delivery-validation.md)。
+
+本轮无已知范围内阻断。不复跑最新真实任务，不改其历史预算/状态或原文件，不使用真实服务商凭证、收费调用或企业资料外发，不重启用户应用。Design IR/旧模板回退、审美 QA、预览及 R-05/R-04完整恢复范围未推进；macOS 实机继续延期。改动在当前功能分支未提交、推送、合并或部署。下一步建议用户重启本地开发应用验收新任务的预算与交付；其他架构编号按原范围另行推进。
+
+### 维护记录：R-01 / R-03 / R-06 持久父 Run、唯一循环与事件提交（2026-10-04；本地验收完成）
+
+负责人在确认下一批范围后明确授权“可以实施”。当前仍为阶段 9 基线收口后的维护；依据最新决策、AGENTS.md、缺口登记和修补方案 D。允许范围为持久 Conversation Agent Runtime/事件/Outbox 合同和本地单 CAS 仓库、Application 生命周期服务、现有唯一 Provider Loop 的写前/结果/Observation 钩子、NewAPI/DeepSeek 初次及续轮模型生命周期、受控 Native Search 的同类摘要、公开 Trace/UI 幂等投影、完成/未知结算接线及直接测试和工程记录。保留前几轮授权改动；不新增第二个 Agent Loop，不扩模板、审美 QA、预览或完整 Recovery/等待恢复协议。
+
+实际修改：Run 身份、固定 deadline/可信预算、checkpoint、模型/工具调用、Observation 引用、登记作品及统一 run sequence/eventId/eventKey 成为持久事实。Runtime/checkpoint/事件/安全 outbox 同一 metadata CAS；公开进度由 outbox 派生，补投影不重新调用模型或工具。各调用前写入，未知提交/副作用保持冻结、禁止重放；已登记文件与迟到的已知收据保留。只保存受控枚举、计数、Hash 和引用，不公开路径、文案原文、思维链、凭证或附件；模型不能选择归属、预算或事件存储路径。备份只作只读证据，缓存仍校验实际主记录内容。
+
+最终审查修复：公开事件固化原 Host traceId/clientCommandId/assistantMessageId，重开即使丢失原 scope 也不会冲突或串绑；准备取消、授权失败、关闭确认丢失和无 session 的已开 HTTP 异常均统一撤销/结算，未知保持冻结。真实预算停止原因传入持久 Run；重开只收尾已知本地终态。补充诊断拒绝被消费并报告，必需模型/工具写前失败仍阻止执行。确认收据按同 Run 排队并以 1000ms/64 条批量写入，工具集只记录完整 Schema 校验摘要，保留实际逐字段/逐工具校验及调用前/结果/Observation 持久边界。
+
+最终验证：Node/UI 387/387、Vitest 289 文件 2881/2881，共 3268 项通过，零失败、零跳过。typecheck、全仓 lint、生产 build、平台/恢复/阶段 9 基线/计划审计和 diff 检查通过；构建保留既有大 chunk 提示。真实 Electron 生产与 StrictMode 各 25 项通过，包含 canonical 同事件不同投影序号的去重、顺序及内部编号不展示；异常、生命周期告警和 HTTP(S) 外发零。Provider 均为合成 Transport，不使用真实服务商凭证，没有真实收费调用或企业资料外发。
+
+性能/失败记录：首轮全量有三条 Agent 生成超过既有 5 秒、连续修改超过 20 秒，另有既有 Office 用例超过 10 秒；独立复验保留日志。消除细粒度 Schema 诊断的重复持久写与确认 CAS 抢写后，生成/修改闭环 21/21 通过；生成约 4 秒、连续修改约 7.8 秒。最终全量同原等待全部通过，其中真实 Office 三方向渲染约 9 秒；未放宽时限、跳过用例、降低 QA 或删除文件/Hash/授权门禁。Office 初次耗时未作确定归因。
+
+证据：`outputs/r0136-vitest-complete.log`、`r0136-node-complete.log`、`r0136-typecheck-complete.log`、`r0136-lint-complete.log`、`r0136-build-complete.log` 及对应 audit 日志；初次与独立复验见 `r0136-vitest-final.log`、`r0136-production-office-recheck.log`、`r0136-office-isolated.log`，闭环优化为 `r0136-loop-performance-recheck.log`。真实 UI 为 `outputs/chat-production-progress/r0136/report-r0136.json`、`report-r0136-strict-mode.json`，未覆盖旧 R-07/R-02/R-08/R-09 报告。详情见 [工程验收记录](docs/current/r01-r03-r06-persistent-runtime-validation.md)。
+
+范围收口：R-01/R-03/R-06 按当前拥有 AgentRun 的会话 Agent/受控文档主链路验收完成。跨进程租约/epoch、统一系统 Recovery、任意 step 自动续跑及同 Run 等待/授权恢复仍属 R-05/R-04；旧独立无 AgentRun 工作流未强制迁移，未将多文件顺序写入称为原子提交。新的事件只存 Hash/引用，不能从摘要自动重建并重发原始参数。模板/Design IR、逐页预览及新的审美 QA 未实施，macOS 实机继续延期；Electron 仅组件/合成 IPC，完整 AppLayout/真实 preload/OS 输入仍未覆盖。本轮无已知范围内阻断；下一步为 R-05/R-04，尚未启动。当前改动未提交、推送、合并、部署或重启用户开发应用。
+
+### 维护记录：R-02 / R-08 / R-09 状态归属、完成门与未知结果（2026-10-03；本地验收完成）
+
+负责人明确授权实施 R-02、R-08、R-09。当前为阶段 9 基线收口后的稳定性维护；依据最新负责人决策、AGENTS.md、缺口登记与修补方案 C/E 的对应边界。允许范围为 AgentRun/ResponseExecution/DocumentTaskRuntime/Work 的机器状态与所有权合同、薄 Completion Coordinator、本地 WAL/幂等投影、会话层未知结果冻结和安全对账入口、直接测试、UI 状态说明及工程记录。继续复用唯一 Provider Loop 与 R-07 预算；不实施持久 Agent Loop、统一全量 Recovery、设计渲染、逐页预览或审美 QA，也不改变本地文件/Hash/授权门禁。
+
+实施目标：按纯回答、实际工具执行、文档生成/修改组合真实完成事实；响应完成而工具/Observation/文件或交付未闭合时不能把父 Run 标为完成。未知提交/写入贯穿父子状态，保留已登记作品，禁止自动重发副作用。跨实体写入采用明确的本地 WAL/CAS/幂等投影机制，不能把多文件顺序写入称为原子提交；投影失败可重结算且不重新调用 Provider/工具。
+
+实际修改：新增所有权/完成纯合同、不可变 Parent/Response/Task 绑定和专用结算/确认 CAS；完成 WAL 保存事实版本及有限本地投影。未知结果贯穿有效父状态与新请求门禁，普通 late callback 不清除冻结。已知本地投影失败可经显式核对仅重做本地幂等写入；真正未知外部提交、证据变动或旧冻结记录继续冻结。Host 核对 token 绑定项目、响应、Run、WAL 和 Task 版本，确认后仅关闭旧任务、不重放并永久保留未知原因；旧来源编辑和旧 draft submit 无法绕过门禁。保留成功/迟到 Work，读回与交付收据不足不完成；明确文档要求只得到文字也不能冒充交付。补齐回复完成与 session.close 次序，以及重开时已知子任务的本地收尾，不增加第二个 Provider Loop。
+
+最终验证：Node/UI 387/387、Vitest 283 文件 2784/2784，共 3171 项通过，零失败、零跳过。全量首次双 worker 有 1 项既有真实 Office 渲染超过 10 秒等待；独立复验 7/7（该渲染约 8.9 秒），随后单 worker 全量全部通过，原日志保留，不改生产时限、测试等待或 QA 门禁。最终 typecheck、全仓 lint、生产 build、平台/恢复/阶段 9 基线/计划审计和 `git diff --check` 通过；构建保留既有大 chunk 提示。UI 最终摘要同步修正后，直接回归 71/71，通过真实 Electron 生产与 StrictMode 各 24 项检查，包含核对/确认关闭的真实 React DOM 操作；Renderer 异常、生命周期告警和 HTTP(S) 外发均为 0。验证不使用真实服务商凭证或付费请求。
+
+证据：`outputs/r0289-vitest-complete.log`、`r0289-node-tests.log`、`r0289-typecheck-complete.log`、`r0289-lint-complete.log`、`r0289-build-complete.log` 与对应 audit 日志；初次失败及 Office 独立复验为 `r0289-vitest-gate.log`、`r0289-office-recheck.log`。真实 UI 报告为 `outputs/chat-production-progress/report-r0289.json`、`report-r0289-strict-mode.json`，截图 `r0289-reconciliation.png`。详情见 [工程验收记录](docs/current/r02-r08-r09-execution-settlement-validation.md)。
+
+范围收口：R-02/R-08/R-09 按当前 Conversation Agent 与受控文档主链路范围验收完成；独立 Office bridge 也保留迟到 Work，但未将无 AgentRun 的旧独立工作流强制迁移为新 Loop。未知远端结果不自动查账或无证据补偿；损坏/仅剩旧备份的执行元数据不能授权新动作。持久父 Run checkpoint、统一事件流、完整 Recovery/租约及同 Run 等待恢复仍属于其他编号；预览、审美 QA、模板/Design IR 没有在本轮实施。macOS 实机与完整 AppLayout/真实 preload/OS 输入端到端交互维持既有未覆盖边界。本轮无已知范围内阻断，建议重启本地开发应用验收核对、关闭和文件留存。改动保留在功能分支，未提交、推送、合并或部署。
+
+### 维护记录：R-07 统一执行预算、超时与取消（2026-10-03；本地验收完成）
+
+负责人在撤回未授权的逐页预览实现后，明确要求“先完成 R-07”，随后要求继续。当前仍为阶段 9 基线收口后的维护；权威范围为该最新决策、本计划、`AGENTS.md`、缺口登记的 R-07 与修补方案 A/B。允许修改现有 Application 预算、文档 Runtime/session/tool bridge、唯一 Provider Loop、NewAPI/DeepSeek adapter、启动取消 IPC/preload/会话停止、Office 受控进程及直接测试和工程记录。保留既有会话展示和页数规划目标改动；逐页预览、新视觉 QA、Design IR 改造和 R-01～R-06/R-08/R-09 不在本轮实施范围。
+
+实施内容：新增 Host 持有的固定绝对 deadline、可信调用次数/调度单位和取消信号；首次模型、准备、工具往返、设计、语义修订、有限修正与渲染继承同一父预算，组合生成/修改分支共享额度。DocumentTaskRuntime 保存不可变父 deadline，重开不重新计时；未知写入冻结，不重新生成，已登记 Work 与必要结算保留。保留 timeout、cancelled、tool_call_limit、budget_exceeded、failure_limit、no_progress、unknown_result 及父/子计时范围和脱敏数值事实；普通对话摘要显示业务原因。启动准备可按项目与 clientCommandId 取消，已取得响应编号后继续通过既有执行取消；迟到请求/规划结果不得启动后续步骤。普通无工具聊天沿用原流式超时策略。
+
+验证结果：最终 Node/UI 387/387、Vitest 279 文件 2700/2700，共 3087 项通过，0 失败、0 跳过。typecheck、全仓 lint、生产 build、平台审计、恢复审计、阶段 9 基线核验、计划合规和 `git diff --check` 通过；构建保留既有大 chunk 提示。真实 Electron 生产与 StrictMode 组件验收各 23 项检查通过，Renderer 异常、StrictMode 警告及 HTTP(S) 外发为 0。最终日志为 `outputs/r07-vitest-complete.log`、`r07-node-complete.log`、`r07-typecheck-complete.log`、`r07-lint-complete.log`、`r07-build-complete.log` 与相应 audit 日志；Electron 证据为 `outputs/chat-production-progress/report.json`、`report-strict-mode.json`。预算、Provider、可信工具记账、文件提交/未知结果、持久截止时间、历史 UI 与 Windows 进程树回归均在最终全量中。
+
+真实合成 Runtime 的首响应头等待取消回归通过：信号到达实际请求，迟到工具流不被消费、没有工具或后续 HTTP，同会话下一次新命令可用；已发送远端请求保留结果未知与禁止自动重试的审计事实。另补应用关闭时尚未取得 handle 的启动取消、未响应取消的会话 factory 关闭，以及等待已完成 response 的真实 handle/终态 finalizer 屏障。未增加测试的 2 秒等待或生产时限。首轮旧取消合同断言、Office QA 等待超时、Agent-native 终态等待超时及新增轨迹事件预期失败的原始日志保留；旧断言/轨迹已修正，当前门禁全部通过。
+
+验收边界与下一步：R-07 按现有生产执行链及修补方案 A/B 的范围收口，详见 [工程验收记录](docs/current/r07-execution-budget-validation.md)。没有启动新预览或视觉 QA，也没有关闭统一持久父 Run、跨实体 CAS/失败重结算、事件流和 Recovery 等其他编号。Provider 全部为合成 Transport/隔离存储，真实付费调用和企业资料外发为 0；Electron 验收覆盖真实 ChatPage/DocumentProgress，不覆盖完整 AppLayout、真实 preload 的端到端交互或 OS 原生输入。macOS 实机维持延期，不声明 Unix 特殊后代进程清理已完成实测。本轮无已知范围内阻断；建议重新启动本地开发应用，验收停止、超时说明和已有文件保留。改动保留在当前功能分支，未提交、推送、合并或部署。
+
+
+### 维护记录：架构缺口修补方案复核（2026-10-02；文档完成）
+
+按负责人“看看缺口记录应该怎么修补”的要求，对 `docs/current/design-ir-and-runtime-gap-register.md`、顶部维护事实和当前源码完成静态复核。新增 [分批修补方案](docs/current/design-ir-and-runtime-remediation-roadmap.md)，并在原登记新增工程补充，保留 2026-09-30 基线与 D3 已验收支持范围。当前 D-01～D-06、R-01～R-09 仍未满足完整关闭条件；会话与页数目标优化仅是局部维护成果。
+
+修补建议为小 PR 顺序：A 停止原因/计时可观测性 → B 现有任务父子预算/取消 → C 跨实体归属/终态 → D 持久父 Run/唯一循环钩子/checkpoint/outbox → E/F 统一恢复与同 Run 等待恢复；Design 线按 G 权威内容 IR → H 生产 Layout 合同 → I 保持 IR 的修正 → J 明确设计执行策略 → K 逐类能力及对应 QA 推进，策略合同可提前设计。每批定义 Owner、依赖和故障/恢复/真实文件验收；不新增第二套 Provider 工具循环，不以增大时限或删 QA 代替治理。
+
+本轮允许范围仅本计划和两份工程文档，未修改业务代码，保留既有未提交源码。已纠正原登记可能引起误读的当前能力边界：旧 Layout IR 仍被使用，表格/图表已部分支持，修正已有审计但缺候选版本一致性，QA 已有非文本越界而非完整 Visual QA。文档验收为 `git diff --check`、相对链接及源码函数定位检查；不复用此前 2957 项测试声称本方案已实现。本次文档无阻断项；A～K 均为后续建议，尚未实施，建议先处理 A/B/C；不重开历史阶段、阶段 10 或真实收费调用。
+
+### 维护记录：页数规划目标与超时依据（2026-10-02；本地验收完成）
+
+负责人本轮明确同意将普通会话中的“10 页”设为规划目标；明确“必须/恰好”、范围和上限仍保留相应约束。允许范围限页数语义解析、受控生成 Binding/服务/Runner、安全进度事实、规划提示、直接回归和本记录；保留既有未提交的会话修复和展示优化。不改 Provider 的连接、空闲、总时限、循环预算或权限/费用/发布门禁，不进行真实付费调用。
+
+已接入 `target/exact/max/range` 与 `total/content` 页数要求；由 Application 从固定用户需求解析并校验，原生工具只提供数值规划建议，不能自行升级为强制要求。Runner 读取真实 PPT 页数，目标偏差记录提示且继续内容/渲染/Hash/发布/作品登记，明确约束不满足仍拒绝；缓存文件也重新校验。新增安全实际/目标页数评估，经执行适配器传入 ToolResult 与进度事实。历史要求的明确取消/放宽可覆盖旧约束，普通“可以”保留既有要求；资料/引文中的页数及清除语句不改变当前用户要求。该规则不新增统一“±N 页”或固定偏差百分比。
+
+验证结果：Node/UI 387/387、Vitest 276 文件 2570/2570（`--maxWorkers=4 --minWorkers=1`，保留原测试时限），合计 2957 项通过。typecheck、全仓 lint、生产 build、平台审计与 `git diff --check` 通过。页数解析 69 项、真实文件 Runner 58 项、原生生产调度 7 项覆盖普通目标/精确/范围/上限/正文口径、缓存文件重新校验、内容与渲染失败仍阻断。新增 Agent-native 本地闭环以“10 页”目标生成实际页数不同的 PPT，仅执行一次生成；正确经过真实写入、结构/Hash/登记、结果脱敏与真实文件读回，工具与最终回复均成功，偏差和实际页数未丢失。外部 Provider 与 Office 视觉渲染器为离线 fixture/mock，不宣称真实收费服务商或真实 Office 人工验收。离线真实 Electron 会话展示验收 23 项通过，Renderer 异常及 HTTP(S) 外发为 0。日志：`outputs/page-goal-node-tests.log`、`outputs/page-goal-vitest-tests.log`、`outputs/page-goal-build.log`、`outputs/page-goal-electron-ui.log`。
+
+本次真实日志诊断：最近两次生成工具分别约 92.302 秒、90.987 秒，均先返回 `page_count_mismatch`；从第一工具开始至第二工具结束累计 208.473 秒。当前 Provider 工具循环累计上限默认 120 秒，单次 generate_pptx 上限 180 秒，文档任务 horizon 360 秒；控制器在工具返回后再次检查累计时间，再将异常归一为 `newapi.tool_loop_limit`。因此源码与时间戳强烈支持“页数失败引起再次生成，随后累计循环超时”，持久化未保留原始 timeout 子类型，不能把通用错误码单独当作轮数耗尽证据。循环计时不随流 token/工具进度重置；网络连接、空闲读取和单流总时限是另外的独立边界。本轮仅说明依据，未改任何时间阈值。
+
+未完成项与下一步：页数规划目标调整无本轮阻断项；当前仍存在 120 秒父循环短于 180 秒单工具的计时层级不协调，以及循环错误码合并导致子类型不可观测。建议后续单独治理父子预算、取消与 timeout/failure_limit/budget_exceeded 的脱敏诊断，保持可取消和总预算有界。此前全量测试的 2 秒 AgentRun 终态等待与生产超时是独立问题，未在本轮扩大修复。源码保留于当前功能分支，未提交、推送、合并；运行中的旧主进程需重启后加载后端新规则。macOS 实机未执行。
+
+### 维护记录：会话内容展示优化（2026-10-02；本地验收完成）
+
+负责人本轮要求将会话内容调整为接近 Codex 的阅读体验。当前仍为阶段 9 基线收口后的维护优化，以本次负责人要求、当前源码和测试为依据；范围限会话展示、直接测试/离线 Electron harness 与本记录。保留当前功能分支上的发送与项目切换修复，不扩展业务或修改 Provider/Runtime/授权门禁。
+
+已实施：执行记录改为默认折叠的原生 `details`，摘要展示真实执行状态，失败、停止和记录不完整提示保持可见；正文移至折叠区之外并去除灰色卡片与重复标题；当前本地生成/停止状态和持久化文档终态优先于旧事件。消息列增加可收缩网格约束，统一正文标题/段落间距，保留用户气泡换行；助手复制按钮在正文下方可见，长表格与代码只在各自区域横向滚动，兼容现有明暗主题及减少动画偏好。
+
+验证结果：会话行为与进度/安全正文定向测试及 UI 合同 95/95，typecheck、全仓 lint、生产 build、平台审计和 `git diff --check` 通过。Node/UI 387/387、Vitest 275 文件 2471/2471，共 2858 项通过。首次默认并发全量执行中，`production-document-generation-loop.test.ts` 的 Agent-native 持久化终态在原有 2 秒等待内仍为 `executing_tool`，导致 1 项失败；单文件复跑 6/6 通过，随后使用 `--maxWorkers=4 --minWorkers=1`、不改测试时限的 Vitest 全量复跑全部通过。本轮没有修改该 Runtime 路径，保留原始失败与复跑日志：`outputs/chat-codex-style-tests.log`、`outputs/chat-codex-style-generation-loop-recheck.log`、`outputs/chat-codex-style-tests-bounded.log`。
+
+真实 Electron 组件验收通过生产和开发 StrictMode 完整模式（各 23 项检查），以及两种模式的流式稳定性检查（各 25 次更新）。覆盖点击/Enter/Space 展开收起、更新保留折叠选择、正文独立可见、失败/停止/记录不完整、历史重开、明暗主题、1280/760/540px 会话宿主、长文本/表格/代码局部滚动。正文/折叠 DOM、滚动、输入框位置保持稳定；Renderer 异常、StrictMode 生命周期警告和 HTTP(S) 外发均为 0。证据位于 `outputs/chat-production-progress/` 的 `report.json`、`report-strict-mode.json`、`stream-stability.json`、`stream-stability-strict-mode.json`；代表截图为 `codex-preview.png`。
+
+验收边界与下一步：本轮使用合成 IPC、隔离 userData 并阻断 HTTP(S)，真实付费 Provider 调用为 0。验收覆盖真实 Electron 中的 ChatPage/DocumentProgress，不覆盖完整 AppLayout、生产 preload 或 OS 原生输入；760/540px 为低于完整应用 800px 最小窗口的受约束组件测试。macOS 实机未执行；此前维护记录中的跨项目真实 DOM 往返待项未在本轮扩大关闭。本轮展示优化无阻断项，建议使用现有会话体验正文阅读与记录展开；改动保留在当前功能分支，未提交、推送或合并。
+
+### 维护方案：会话 UI 回归分层排查与修复（2026-10-02）
+
+当前仍为阶段 9 基线收口后的维护工作，不重开历史阶段、不扩展会话业务能力。近期重点审查 `457b1d3` 项目/会话工作台合并、`7d68b0a` 侧栏与按会话草稿迁移，以及 `8e77ccf` Agent Native Runs 集成；其中 `7d68b0a` 对 `ChatPage.tsx` 有约 923 行变更，是优先审查范围，不预设其为所有日志异常的共同根因。
+
+#### 当前证据与判断
+
+- 本机 `renderer-trace.log` 是跨多个日期和 Vite HMR 版本累积的开发日志，没有逐条时间戳，诊断对象还被输出成 `[object Object]`。总计有 1,146 次 React `Maximum update depth exceeded`、49 次 `input is not defined`，以及旧版本 `historyOpen`、`chatHistory`、`projectConversations` 和 `storage.listProjectConversations` 错误。当前源码已不存在其中多个旧标识/调用，不能将这些总数视为一次当前版本运行或据此批量修补。
+- `input is not defined` 已在当前 `feature/chat-send-input-runtime-fix` 工作树中修复：普通 Agent 发送改读 `inputValueRef.current`，Enter 与发送按钮回归测试覆盖该路径；定向测试 33/33、typecheck、改动文件 lint、build 通过。该修复仍是本地未提交改动，不等于已集成或已发布。
+- 上述热更新后日志尾部出现 `sendMessage:start`、`startResponse-ok` 和 `terminalEvent`，说明至少一条当前发送/事件订阅链已运行；同一时段网络日志另有一次 `chat_stream` 503 `model_not_found`。该 Provider 模型映射/配置错误与 Renderer 发送路径分开调查，不用付费真实请求作为首轮 UI 验收。
+- 现有 `chat-composer-behavior.test.ts` 使用手工 Hook Runner，UI 合同测试主要匹配源码/CSS 字符串；它们不能验证真实 React DOM、`StrictMode` effect 重放、实际焦点/滚动或更新深度。最近 `agent-native-behavior-validation.json` 的日期和 knownLimitations 早于上述 UI 集成，不作为当前 UI 门禁结果。
+
+#### 修复顺序与允许范围
+
+1. **R0 固定可复现基线。** Windows x64 上以单一 Git SHA 和单一 Renderer/preload 构建冷启动 Electron；保留现有日志，不清空文件，记录启动时文件偏移/时间，只分析本轮新增行。使用合成 Provider/隔离项目，不读取凭证、不联网、不产生费用。先走新建会话、打开已有会话、发送/收到终态和同项目会话切换，确定最大更新深度及旧 API 错误是否在冷启动后出现。
+2. **R1 补真实 UI 回归。** 沿用现有测试工具，优先扩展会话 Electron 冒烟或等价真实 React DOM harness，并启用与 `src/main.tsx` 一致的 `StrictMode`。覆盖 Enter/按钮各发送一次、工作流与 Agent 分流、IME Enter 与 Shift+Enter、发送失败保留草稿、成功/取消终态、同项目 A→B→A 草稿/附件隔离、项目 A→B→A 返回、项目打开成功/失败/延迟、运行中切换保护、离开 Chat 后返回的会话/模型/草稿预期；真实挂载检查 console 与受控输入状态。
+3. **R2 只修复冷启动仍可复现的问题。** 更新深度警告须通过 effect/state 变化证据定位后再修改，不以屏蔽日志、随意加 ref 门禁或移除 `StrictMode` 处理。若 Renderer/preload 方法不匹配，只按已确认的 DTO/IPC 合同修复，并补启动级合同测试；不得为旧 HMR 组合加无依据兼容 API。若 `model_not_found` 可在不发网络请求的映射/合同检查中复现，单独修复候选到 Provider 模型映射并用 mock/fixture 验证。
+4. **R3 完成可见验收。** 在 Windows x64 生产构建/真实 preload 的隔离 Electron 中复跑会话流程，覆盖桌面与窄窗；确认当前会话和模型选择正确、输入/附件不串会话、失败不丢草稿、不重复发送，侧栏与历史弹层可操作，消息滚动不会抢用户位置。干净运行的 React 更新深度、render 阶段跨组件更新、未捕获异常和受控输入警告必须为 0。
+
+本方案允许修改 `ChatPage.tsx`、`App.tsx`、`AppLayout.tsx`、会话 UI 样式、对应 preload/storage IPC（仅限 R0/R1 证明合同确有不一致时）、直接测试/harness/Electron 验收脚本及本计划记录。Provider/Agent Runtime 架构、其他业务页面和阶段 10 不在范围；macOS 仍为延期目标。
+
+本轮实施结果：已用两个可控延迟回归先复现旧实现的过期项目加载覆盖和快速跨项目重复打开，再加入 `load()` 代次保护与跨项目打开 in-flight/busy 门禁；普通 Agent 发送的未定义输入也已修复。会话行为测试 35/35、typecheck、全仓 lint、生产 build、平台审计和 `git diff --check` 通过。现有完整 `pnpm test` 在 2,465 项中 2,464 项通过，唯一失败为 `presentation-design-production.test.ts` 默认 10 秒超时；该文件单独以 30 秒超时复跑 7/7 通过，判断为既有时限波动，不是会话改动回归。
+
+真实 Electron ChatPage/DocumentProgress 隔离验收已通过生产模式和 `--strict-mode` 开发 React 模式：完整会话/文档流、取消、重开和滚动稳定性通过；StrictMode 新增 `consoleMessages` 检查，更新深度、跨组件更新、未捕获异常、`ReferenceError`、`TypeError` 和受控输入警告均为 0，HTTP(S) 外发为 0。当前仍未在真实 React DOM harness 中覆盖项目 A→B→A 草稿/附件往返及两个不同项目打开请求的反序完成；现有手工 Hook Runner 回归已覆盖状态门禁，下一步应补真实 DOM 场景后再关闭全部 UI 回归范围。该维护分支仍未提交、推送或合并。
+
 ### 维护记录：Design IR 与 Agent Runtime 缺口登记（2026-09-30）
 
 已基于当前 develop@9e90f6f 完成 [Design IR 与 Agent Runtime 缺口登记](docs/current/design-ir-and-runtime-gap-register.md)。本记录不修改业务代码，也不推翻 D3 当前支持范围的真实 kimi-k3 验收结论；它明确区分“当前支持范围已闭环”和“目标架构仍有缺口”。Design IR 缺口包括内容事实源分裂、非强制 Design IR、Layout IR 多套表示、复杂内容覆盖不足、修正循环丢失 Design IR 和 Visual QA 不完整。Runtime 缺口包括 ConversationAgentRun 仍是响应投影、与 DocumentTaskRuntime 状态机未统一、聊天 Agent Loop 未完整持久化、等待/恢复协议、统一 Recovery、事件流、总预算/取消、完成条件和未知结果对账未闭环。

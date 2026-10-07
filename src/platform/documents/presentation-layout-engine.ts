@@ -5,7 +5,8 @@ import {
   type PresentationLayoutDensity,
   type PresentationLayoutRegion,
   type PresentationPageConstraint,
-  type PresentationPageFeatures
+  type PresentationPageFeatures,
+  type ResolvedPresentationContentOrganization
 } from '../../domain/entities/presentation-layout-constraints';
 
 export type PresentationLayoutComposition = 'single-focus' | 'comparison' | 'evidence-led' | 'sequence' | 'structured';
@@ -26,6 +27,7 @@ export interface PresentationLayoutGeometry {
 }
 
 export interface PresentationLayoutPlacement {
+  readonly groupId?: string;
   readonly sourceRef: string;
   readonly role: PresentationElementConstraint['role'];
   readonly hierarchy: PresentationElementConstraint['hierarchy'];
@@ -46,6 +48,7 @@ export interface PresentationLayoutPageResult {
   readonly primaryRegion: PresentationLayoutRegion;
   readonly placements: readonly PresentationLayoutPlacement[];
   readonly geometrySignature: string;
+  readonly contentOrganization?: ResolvedPresentationContentOrganization;
 }
 
 export interface PresentationLayoutDiagnostic {
@@ -74,10 +77,18 @@ interface LayoutGroup {
 }
 
 interface MutablePlacement {
+  readonly groupId?: string;
   readonly element: PresentationElementConstraint;
   readonly region: PresentationLayoutRegion;
   readonly geometry: PresentationLayoutGeometry;
   readonly fontSize: number;
+}
+
+interface OrganizedLayoutCell {
+  readonly element: PresentationElementConstraint;
+  readonly geometry: PresentationLayoutGeometry;
+  readonly region: PresentationLayoutRegion;
+  readonly groupId?: string;
 }
 
 const MIN_GEOMETRY = 0.005;
@@ -191,7 +202,8 @@ function solvePage(
   const area = pageArea(page, canvas, pageNumberElement !== undefined);
   if (!validGeometry(area)) return { diagnostics: [{ code: 'invalid_region', pageNumber: page.pageNumber }] };
 
-  const composition = selectComposition(features, contentPage);
+  const organization = contentPage.contentOrganization;
+  const composition = organization ? organizationComposition(organization.layout) : selectComposition(features, contentPage);
   const focusRef = contentPage.designIntent.emphasis.target;
   const groups = buildGroups(features, contentPage, composition, focusRef);
   const axis = selectAxis(contentPage, composition, area);
@@ -200,11 +212,12 @@ function solvePage(
   const groupBoxes = allocateGroupBoxes(orderedGroups, area, axis, gap, contentPage);
   const placements: MutablePlacement[] = [];
 
-  orderedGroups.forEach((group, groupIndex) => {
+  const cells: readonly OrganizedLayoutCell[] | undefined = organization ? buildOrganizedCells(contentPage, area, gap) : orderedGroups.flatMap((group, groupIndex) => {
     const box = groupBoxes[groupIndex];
-    if (!box) return;
-    const cells = layoutGroup(group.items, box, gap, contentPage, composition);
-    for (const cell of cells) {
+    return box ? layoutGroup(group.items, box, gap, contentPage, composition).map(cell => ({ ...cell, region: regionFor(cell.element, group.kind, page) })) : [];
+  });
+  if (cells === undefined) return { diagnostics: [{ code: 'unsatisfied_constraint', pageNumber: page.pageNumber }] };
+  for (const cell of cells) {
       if (!validGeometry(cell.geometry) || !inside(cell.geometry, area)) {
         diagnostics.push({ code: 'layout_overflow', pageNumber: page.pageNumber, sourceRef: cell.element.sourceRef });
         continue;
@@ -214,9 +227,9 @@ function solvePage(
         diagnostics.push({ code: 'font_below_minimum', pageNumber: page.pageNumber, sourceRef: cell.element.sourceRef });
         continue;
       }
-      placements.push({ element: cell.element, region: regionFor(cell.element, group.kind, page), geometry: cell.geometry, fontSize });
+      placements.push({ element: cell.element, region: cell.region, geometry: cell.geometry, fontSize,
+        ...(cell.groupId ? { groupId: cell.groupId } : {}) });
     }
-  });
 
   if (pageNumberElement) {
     const footer: PresentationLayoutGeometry = {
@@ -250,7 +263,8 @@ function solvePage(
     geometry: roundGeometry(item.geometry),
     fontSize: round(item.fontSize, 1),
     alignment: item.element.alignment,
-    zIndex
+    zIndex,
+    ...(item.groupId ? { groupId: item.groupId } : {})
   }));
   const primary = output.find(item => item.hierarchy === 'primary') ?? output[0];
   const selectedLayout = composition === 'sequence' ? 'flow-track' : composition === 'structured' ? 'adaptive-grid' : 'weighted-regions';
@@ -264,10 +278,134 @@ function solvePage(
       whitespace: page.designIntent.whitespace,
       primaryRegion: primary?.region ?? 'center',
       placements: output,
-      geometrySignature: geometrySignature(output)
+      geometrySignature: geometrySignature(output),
+      ...(organization ? { contentOrganization: organization } : {})
     },
     diagnostics
   };
+}
+
+function organizationComposition(layout: ResolvedPresentationContentOrganization['layout']): PresentationLayoutComposition {
+  return layout === 'metrics' || layout === 'grouped' ? 'structured' : layout === 'sequence' ? 'sequence'
+    : layout === 'evidence' ? 'evidence-led' : 'comparison';
+}
+
+/** Group slots are semantic objects, independent of typography hierarchy or focal weighting. */
+function buildOrganizedCells(page: PresentationPageConstraint, area: PresentationLayoutGeometry, gap: number): readonly OrganizedLayoutCell[] | undefined {
+  const organization = page.contentOrganization!;
+  type Group = ResolvedPresentationContentOrganization['groups'][number];
+  const elements = new Map(page.elements.map(element => [element.sourceRef, element]));
+  const parent = new Map(organization.relationships.filter(relation => relation.kind === 'supports').map(relation => [relation.fromGroupId, relation.toGroupId]));
+  const owner = (group: Group): string | undefined => {
+    let current = group.groupId;
+    for (let step = 0; step <= organization.groups.length; step += 1) {
+      const next = parent.get(current);
+      if (!next) return current;
+      current = next;
+    }
+    return undefined;
+  };
+  const ownerIds = new Map(organization.groups.map(group => [group.groupId, owner(group)]));
+  if ([...ownerIds.values()].some(value => value === undefined)) return undefined;
+  const roots = organization.groups.filter(group => !parent.has(group.groupId) && group.role !== 'header');
+  const cluster = (root: Group): Group[] => [root, ...organization.groups.filter(group => group !== root && ownerIds.get(group.groupId) === root.groupId)];
+  const items = (groups: readonly Group[]) => groups.flatMap(group => group.sourceRefs.map(ref => ({ groupId: group.groupId, element: elements.get(ref)! })));
+  if (organization.groups.some(group => group.sourceRefs.some(ref => !elements.has(ref)))) return undefined;
+  const measureHeight = (element: PresentationElementConstraint, width: number): number => {
+    const font = Math.max(element.minimumFontSize, Math.floor(element.preferredFontSize));
+    if (element.role === 'chart') return Math.max(element.minHeight, 1.55);
+    if (element.role === 'table' && element.tableCellWidthsEm && element.tableColumns) {
+      return Math.max(element.minHeight, estimateTableHeight(element.tableCellWidthsEm, element.tableColumns, width, Math.min(font, 16)));
+    }
+    const lines = Math.max(1, Math.ceil(element.estimatedTextWidthEm * font / 72 / Math.max(0.1, width - 0.12)));
+    return Math.max(element.minHeight, lines * font / 72 * 1.28 + 0.061);
+  };
+  const compactTracks = (rows: readonly (readonly PresentationElementConstraint[])[], width: number, height: number): number[] => {
+    const minimums = rows.map(row => Math.max(...row.map(element => element.minHeight)));
+    const preferred = rows.map(row => Math.max(...row.map(element => measureHeight(element, width))));
+    const available = height - gap * Math.max(0, rows.length - 1);
+    const minTotal = minimums.reduce((sum, value) => sum + value, 0), prefTotal = preferred.reduce((sum, value) => sum + value, 0);
+    if (prefTotal <= available) return preferred;
+    const factor = Math.max(0, Math.min(1, (available - minTotal) / Math.max(0.001, prefTotal - minTotal)));
+    return minimums.map((minimum, index) => minimum + (preferred[index] - minimum) * factor);
+  };
+  const stack = (groups: readonly Group[], box: PresentationLayoutGeometry, region: PresentationLayoutRegion,
+    sharedTracks?: readonly number[]): OrganizedLayoutCell[] => {
+    const members = items(groups);
+    const heights = sharedTracks ?? compactTracks(members.map(member => [member.element]), box.width, box.height);
+    const positions = offsets(heights, box.y, gap);
+    return members.map((member, index) => {
+      const cell = { x: box.x, y: positions[index], width: box.width, height: heights[index] };
+      const geometry = fitCellGeometry({ ...member.element, preferredRegion: page.pageRole === 'hero' || page.pageRole === 'closing' ? 'center' : 'top' }, cell,
+        { ...page, designIntent: { ...page.designIntent, composition: { ...page.designIntent.composition,
+          focalArea: page.pageRole === 'hero' || page.pageRole === 'closing' ? 'center' : 'top' } } });
+      return { ...member, geometry, region };
+    });
+  };
+  // A cover or closing headline remains centered; "header" here is its source
+  // classification, not a mandatory business-page top bar.
+  if (page.pageRole === 'hero' || page.pageRole === 'closing') return stack(organization.groups, area, 'center');
+  const headers = organization.groups.filter(group => group.role === 'header');
+  const mainRole = organization.layout === 'comparison' ? 'comparison-side' : organization.layout === 'metrics' ? 'metric'
+    : organization.layout === 'sequence' ? 'step' : organization.layout === 'evidence' ? 'evidence' : undefined;
+  // "Evidence supports claim" is directed evidence -> claim. The claim owns
+  // the cohesive region, whose semantic type comes from all its members.
+  let main = roots.filter(group => mainRole ? cluster(group).some(member => member.role === mainRole) : group.role !== 'supporting');
+  const notes = roots.filter(group => !main.includes(group)).flatMap(cluster);
+  if (!main.length || (organization.layout === 'comparison' && main.length < 2)) return undefined;
+  const sequenceEdges = organization.relationships.filter(relation => relation.kind === 'sequence').map(relation => ({
+    from: ownerIds.get(relation.fromGroupId), to: ownerIds.get(relation.toGroupId) }));
+  if (sequenceEdges.some(relation => !main.some(group => group.groupId === relation.from) || !main.some(group => group.groupId === relation.to))) return undefined;
+  if (organization.layout === 'sequence') {
+    const pending = new Set(main.map(group => group.groupId));
+    const ordered: Group[] = [];
+    while (pending.size) {
+      const next = main.find(group => pending.has(group.groupId) && !sequenceEdges.some(relation =>
+        relation.from !== relation.to && relation.to === group.groupId && relation.from !== undefined && pending.has(relation.from)));
+      if (!next) return undefined;
+      ordered.push(next); pending.delete(next.groupId);
+    }
+    main = ordered;
+  }
+  const stackHeight = (groups: readonly Group[]) => items(groups).reduce((sum, member) => {
+    const element = member.element;
+    const lines = Math.max(1, Math.ceil(element.estimatedTextWidthEm * element.preferredFontSize / 72 / Math.max(0.1, area.width - 0.12)));
+    return sum + Math.max(element.minHeight, Math.min(element.maxHeight, lines * element.preferredFontSize / 72 * 1.28 + 0.06));
+  }, 0) + Math.max(0, items(groups).length - 1) * gap;
+  const headerHeight = headers.length ? Math.min(area.height * 0.25, stackHeight(headers)) : 0;
+  const noteHeight = notes.length ? Math.min(area.height * 0.42, stackHeight(notes)) : 0;
+  const body: PresentationLayoutGeometry = { x: area.x, y: area.y + headerHeight + (headers.length ? gap : 0), width: area.width,
+    height: area.height - headerHeight - noteHeight - (headers.length ? gap : 0) - (notes.length ? gap : 0) };
+  if (!validGeometry(body)) return undefined;
+  const cells = headers.length ? stack(headers, { ...area, height: headerHeight }, 'top') : [];
+  const vertical = (organization.layout === 'comparison' || organization.layout === 'sequence') && page.designIntent.composition.flow === 'top-to-bottom';
+  const columns = vertical ? 1 : organization.layout === 'comparison' ? main.length
+    : organization.layout === 'sequence' ? Math.min(main.length, Math.max(1, Math.floor((body.width + gap) /
+      (Math.max(...main.map(group => Math.max(...items(cluster(group)).map(member => member.element.minWidth)))) + gap))))
+      : organization.layout === 'evidence' ? Math.min(2, main.length) : main.length <= 3 ? main.length : Math.min(3, Math.ceil(Math.sqrt(main.length)));
+  const rows = Math.ceil(main.length / columns);
+  const width = (body.width - gap * (columns - 1)) / columns;
+  const height = (body.height - gap * (rows - 1)) / rows;
+  if (width <= 0 || height <= 0) return undefined;
+  const sharedByRow = new Map<number, readonly number[]>();
+  if (columns > 1 && (organization.layout === 'comparison' || organization.layout === 'metrics')) {
+    for (let row = 0; row < rows; row += 1) {
+      const members = main.slice(row * columns, (row + 1) * columns).map(group => items(cluster(group)));
+      const count = Math.max(...members.map(group => group.length));
+      const tracks = Array.from({ length: count }, (_, index) => members.flatMap(group => group[index] ? [group[index].element] : []));
+      sharedByRow.set(row, compactTracks(tracks, width, height));
+    }
+  }
+  main.forEach((group, index) => {
+    const row = Math.floor(index / columns);
+    const column = index % columns;
+    const box = { x: body.x + column * (width + gap), y: body.y + row * (height + gap), width, height };
+    const region = vertical ? row === 0 ? 'top' : 'bottom' : columns > 1 ? column === 0 ? 'left' : column === columns - 1 ? 'right' : 'center' : 'center';
+    cells.push(...stack(cluster(group), box, region, sharedByRow.get(row)));
+  });
+  if (notes.length) cells.push(...stack(notes, { x: area.x, y: area.y + area.height - noteHeight, width: area.width, height: noteHeight }, 'bottom'));
+  if (cells.length !== page.elements.length || new Set(cells.map(cell => cell.element.sourceRef)).size !== cells.length) return undefined;
+  return cells;
 }
 
 function selectComposition(features: PresentationPageFeatures, page: PresentationPageConstraint): PresentationLayoutComposition {

@@ -8,10 +8,12 @@ import {
   type PresentationLayoutRegion,
   type PresentationLayoutThemeTokens,
   type PresentationPageContentUnitFeature,
-  type PresentationPageFeatures
+  type PresentationPageFeatures,
+  type ResolvedPresentationContentOrganization
 } from '../../domain/entities/presentation-layout-constraints';
 import {
   parsePresentationDesignIR,
+  parsePresentationContentOrganization,
   type PresentationDesignGlobal,
   type PresentationDesignIRPage
 } from '../../domain/entities/presentation-design-contract';
@@ -44,6 +46,7 @@ export function extractPresentationPageFeatures(
 
   const units = isCover ? coverUnits(outline) : isClosing ? closingUnits(outline) : sectionUnits(section!, sectionIndex);
   const assigned = units.map(unit => applyDesignAssignments(unit, page));
+  const contentOrganization = resolveContentOrganization(page, assigned);
   const contentAssigned = assigned.filter(unit => unit.kind !== 'generated');
   const features = assigned.map(({ aliases: _aliases, ...feature }) => feature);
   const primaryUnit = [...assigned]
@@ -80,7 +83,8 @@ export function extractPresentationPageFeatures(
     comparisonCandidate,
     ...(primaryUnit ? { dominantPrimaryContent: primaryUnit.sourceRef } : {}),
     contentDensity: estimateContentDensity(textLength, contentAssigned.length, tableCount, contentAssigned),
-    units: Object.freeze(features)
+    units: Object.freeze(features),
+    ...(contentOrganization ? { contentOrganization } : {})
   });
 }
 
@@ -210,8 +214,8 @@ function applyDesignAssignments(unit: InternalContentUnit, page: PresentationDes
     if (index >= 0) { hierarchy = level; priority = Math.max(1, basePriority - Math.min(index, 20)); break; }
   }
   const roleNames: readonly [PresentationLayoutElementRole, readonly string[]][] = [
-    ['title', page.contentRoles.title], ['body', page.contentRoles.body], ['metric', page.contentRoles.metric],
-    ['evidence', page.contentRoles.evidence], ['chart', page.contentRoles.chart]
+    ['title', page.contentRoles.title], ['metric', page.contentRoles.metric],
+    ['evidence', page.contentRoles.evidence], ['chart', page.contentRoles.chart], ['body', page.contentRoles.body]
   ];
   const assignedRole = unit.kind === 'table' ? 'table'
     : unit.kind === 'chart' ? 'chart'
@@ -259,8 +263,103 @@ function derivePageConstraint(
     preferredGap,
     maximumElementCount: Math.max(1, Math.min(128, elements.length + (page.density === 'dense' ? 4 : 1))),
     elements: Object.freeze(elements),
-    relationships: Object.freeze(relationships)
+    relationships: Object.freeze(relationships),
+    ...(features.contentOrganization ? { contentOrganization: features.contentOrganization } : {})
   });
+}
+
+function resolveContentOrganization(page: PresentationDesignIRPage, units: readonly InternalContentUnit[]): ResolvedPresentationContentOrganization | undefined {
+  const content = units.filter(unit => unit.kind !== 'generated');
+  const headers = content.filter(unit => unit.kind === 'heading' || unit.kind === 'title');
+  if (page.organization === undefined) return inferContentOrganization(page, content, headers);
+  const requested = parsePresentationContentOrganization(page.organization);
+  const covered = new Set<string>();
+  const groups = requested.groups.map(group => {
+    const sourceRefs: string[] = [];
+    for (const ref of group.contentRefs) {
+      const matches = content.filter(unit => unit.sourceRef === ref || unit.aliases.includes(ref));
+      if (matches.length === 0) throw new TypeError('content_organization_source_unresolved');
+      for (const unit of matches) {
+        if (covered.has(unit.sourceRef)) throw new TypeError('content_organization_source_duplicate');
+        if (headers.includes(unit) && group.role !== 'header') throw new TypeError('content_organization_header_mismatch');
+        covered.add(unit.sourceRef);
+        sourceRefs.push(unit.sourceRef);
+      }
+    }
+    return { groupId: group.groupId, role: group.role, sourceRefs };
+  });
+  if (content.some(unit => !headers.includes(unit) && !covered.has(unit.sourceRef))) throw new TypeError('content_organization_source_missing');
+  const missingHeaders = headers.filter(unit => !covered.has(unit.sourceRef));
+  if (missingHeaders.length) {
+    let headerId = 'host-header';
+    for (let suffix = 1; groups.some(group => group.groupId === headerId); suffix += 1) headerId = `host-header-${suffix}`;
+    groups.unshift({ groupId: headerId, role: 'header', sourceRefs: missingHeaders.map(unit => unit.sourceRef) });
+  }
+  if (groups.length > 16) throw new TypeError('content_organization_group_limit');
+  const headerIds = new Set(groups.filter(group => group.role === 'header').map(group => group.groupId));
+  if (requested.relationships.some(relation => headerIds.has(relation.fromGroupId) || headerIds.has(relation.toGroupId))) {
+    throw new TypeError('content_organization_header_relationship');
+  }
+  const supported = new Set<string>();
+  for (const relation of requested.relationships.filter(relation => relation.kind === 'supports')) {
+    if (supported.has(relation.fromGroupId)) throw new TypeError('content_organization_support_ambiguous');
+    supported.add(relation.fromGroupId);
+  }
+  return freezeOrganization({ schemaVersion: 1, source: 'explicit', layout: requested.layout, groups, relationships: requested.relationships });
+}
+
+/** Infer only page-local business objects with clear boundaries; leave ambiguous v2 pages on their prior solver path. */
+function inferContentOrganization(page: PresentationDesignIRPage, content: readonly InternalContentUnit[], headers: readonly InternalContentUnit[]): ResolvedPresentationContentOrganization | undefined {
+  const business = content.filter(unit => !headers.includes(unit));
+  const blocks = business.filter(unit => /\.blocks\[\d+\]/u.test(unit.sourceRef));
+  if (!blocks.length) return undefined;
+  const header = headers.length ? [{ groupId: 'host-header', role: 'header' as const, sourceRefs: headers.map(unit => unit.sourceRef) }] : [];
+  const notes = (used: ReadonlySet<string>) => {
+    const refs = business.filter(unit => !used.has(unit.sourceRef)).map(unit => unit.sourceRef);
+    return refs.length ? [{ groupId: 'host-notes', role: 'supporting' as const, sourceRefs: refs }] : [];
+  };
+  let layout: ResolvedPresentationContentOrganization['layout'];
+  let main: ResolvedPresentationContentOrganization['groups'];
+  let relationships: ResolvedPresentationContentOrganization['relationships'] = [];
+  if (page.pageRole === 'comparison') {
+    const byBlock = new Map<string, string[]>();
+    for (const unit of blocks) {
+      const ref = /^(outline\.sections\[\d+\]\.blocks\[\d+\])/u.exec(unit.sourceRef)?.[1];
+      if (!ref) return undefined;
+      byBlock.set(ref, [...(byBlock.get(ref) ?? []), unit.sourceRef]);
+    }
+    const sides = byBlock.size === 2 ? [...byBlock.values()] : blocks.length === 2 ? blocks.map(unit => [unit.sourceRef]) : undefined;
+    if (!sides) return undefined;
+    layout = 'comparison';
+    main = sides.map((sourceRefs, index) => ({ groupId: `host-side-${index + 1}`, role: 'comparison-side', sourceRefs }));
+    relationships = [{ kind: 'compare', fromGroupId: main[0].groupId, toGroupId: main[1].groupId }];
+  } else if (page.pageRole === 'metric' && !['comparison', 'split', 'timeline', 'evidence-led'].includes(page.composition.principle)) {
+    const metrics = blocks.filter(unit => unit.role === 'metric');
+    const values = metrics.length ? metrics : blocks.every(unit => unit.kind === 'item') ? blocks : [];
+    if (!values.length || values.length > 14) return undefined;
+    layout = 'metrics';
+    main = values.map((unit, index) => ({ groupId: `host-metric-${index + 1}`, role: 'metric', sourceRefs: [unit.sourceRef] }));
+  } else if (page.pageRole === 'process') {
+    if (blocks.length > 14 || blocks.some(unit => unit.kind === 'table' || unit.kind === 'chart')) return undefined;
+    layout = 'sequence';
+    main = blocks.map((unit, index) => ({ groupId: `host-step-${index + 1}`, role: 'step', sourceRefs: [unit.sourceRef] }));
+    relationships = main.slice(1).map((group, index) => ({ kind: 'sequence', fromGroupId: main[index].groupId, toGroupId: group.groupId }));
+  } else if (page.pageRole === 'evidence') {
+    // Mixed metric/story pages need the author to say which evidence supports which claim.
+    if (blocks.some(unit => unit.role === 'metric') || !blocks.some(unit => unit.kind === 'table' || unit.kind === 'chart' || unit.kind === 'quote')) return undefined;
+    layout = 'evidence';
+    main = [{ groupId: 'host-evidence', role: 'evidence', sourceRefs: blocks.map(unit => unit.sourceRef) }];
+  } else return undefined;
+  const used = new Set(main.flatMap(group => group.sourceRefs));
+  const groups = [...header, ...main, ...notes(used)];
+  if (groups.length > 16) return undefined;
+  return freezeOrganization({ schemaVersion: 1, source: 'inferred', layout, groups, relationships });
+}
+
+function freezeOrganization(value: ResolvedPresentationContentOrganization): ResolvedPresentationContentOrganization {
+  return Object.freeze({ ...value,
+    groups: Object.freeze(value.groups.map(group => Object.freeze({ ...group, sourceRefs: Object.freeze([...group.sourceRefs]) }))),
+    relationships: Object.freeze(value.relationships.map(relation => Object.freeze({ ...relation }))) });
 }
 
 function resolveElementReference(reference: string, elements: readonly PresentationElementConstraint[]): string {

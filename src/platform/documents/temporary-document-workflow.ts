@@ -24,6 +24,9 @@ import {
   type PresentationTemplateId
 } from './presentation-template';
 import { unlink } from 'node:fs/promises';
+import { buildDocumentContentSnapshot, type DocumentContentSnapshotV1 } from '../../domain/entities/document-content-snapshot';
+import { adaptLegacyPresentationLayout, type LegacyPresentationLayoutAdaptation } from './presentation-layout-ir-adapter';
+import type { ProductionPresentationLayoutIR } from '../../domain/entities/presentation-layout-ir';
 
 export type DocumentDiagnosticSeverity = 'error' | 'warning';
 
@@ -78,6 +81,10 @@ export interface TemporaryDocumentWorkflowInput {
 }
 
 export interface TemporaryDocumentWorkflowResult {
+  readonly canonicalContent?: DocumentContentSnapshotV1;
+  /** Explicit old scene-box representation, not proof of the whole rendered artifact. */
+  readonly legacySceneLayoutIR?: ProductionPresentationLayoutIR;
+  readonly layoutCompatibility?: LegacyPresentationLayoutAdaptation;
   readonly status: 'ready' | 'rejected' | 'cancelled' | 'failed';
   readonly outline: DocumentOutline;
   readonly structure: DocumentStructureSnapshot;
@@ -94,6 +101,26 @@ export interface TemporaryDocumentWorkflowResult {
 }
 
 export async function prepareTemporaryDocumentVersion(
+  input: TemporaryDocumentWorkflowInput
+): Promise<TemporaryDocumentWorkflowResult> {
+  const result = await prepareLegacyTemporaryDocumentVersion(input);
+  try {
+  const canonicalContent = buildDocumentContentSnapshot({ outline: result.outline });
+  const layoutCompatibility = result.layoutIR && result.presentationPlan ? adaptLegacyPresentationLayout({
+    layout: result.layoutIR, plan: result.presentationPlan, content: canonicalContent,
+    tokens: resolvePresentationTemplate(input.presentationTemplate ?? 'work_report').tokens
+  }) : undefined;
+  return { ...result, canonicalContent,
+    ...(layoutCompatibility ? { layoutCompatibility } : {}),
+    ...(layoutCompatibility?.status === 'adapted' ? { legacySceneLayoutIR: layoutCompatibility.layout } : {}) };
+  } catch {
+    if (result.status !== 'ready') return result;
+    return { ...result, status: 'failed', diagnostics: [...result.diagnostics, { code: 'render_failed', severity: 'error',
+      scope: 'content_layout_contract', message: 'Content/layout compatibility validation failed' }] };
+  }
+}
+
+async function prepareLegacyTemporaryDocumentVersion(
   input: TemporaryDocumentWorkflowInput
 ): Promise<TemporaryDocumentWorkflowResult> {
   if (input.signal?.aborted) return cancelled(input.outline);

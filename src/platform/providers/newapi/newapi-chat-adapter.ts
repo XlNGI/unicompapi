@@ -51,19 +51,26 @@ import {
   parseControlledProviderTools,
   parseControlledToolCallDeltas,
   runControlledProviderToolRounds,
+  persistProviderExecutionBoundary,
+  providerExecutionHash,
+  ProviderExecutionJournalError,
   toControlledProviderAssistantToolCalls,
   type ControlledProviderToolDefinition,
   type ControlledProviderToolBridge,
   type ControlledProviderToolCallDelta,
   type ControlledProviderToolCall,
-  type ControlledProviderAssistantToolCall
+  type ControlledProviderAssistantToolCall,
+  type ControlledProviderToolRoundResponse,
+  type ProviderExecutionLifecyclePort
 } from '../provider-tool-calling';
 import {
   NewApiRuntimeError,
   type NewApiEventStreamSession,
   type NewApiSharedRuntime
 } from './newapi-runtime';
-import { emitProductionEvent } from '../../conversation-production-trace';
+import { emitProductionDiagnostic } from '../../conversation-production-trace';
+import { ExecutionBudgetError, type HostExecutionBudget } from '../../../application/execution-budget';
+import { createDocumentGenerationFinalizer, documentGenerationFinalization, type DocumentFinalizationToolBridge } from '../provider-document-finalization';
 
 export interface NewApiCredentialResolverPort {
   useCredential<T>(
@@ -191,6 +198,7 @@ export interface NewApiChatOperationHandle {
 
 interface ActiveOperation {
   readonly abort: () => void;
+  readonly externalController: AbortController;
   readonly nativeSearch?: NativeSearchRequest;
   readonly observeSearch?: (evidence: NativeSearchEvidence) => Promise<void>;
   readonly providerOperationId: string;
@@ -204,6 +212,11 @@ interface ActiveOperation {
   readonly toolBridge?: ControlledProviderToolBridge;
   readonly maxToolRounds?: number;
   readonly signal: AbortSignal;
+  readonly executionBudget?: HostExecutionBudget;
+  readonly executionLifecycle?: ProviderExecutionLifecyclePort;
+  readonly recordModelResult: (response: ControlledProviderToolRoundResponse & { readonly contentLength: number }) => Promise<void>;
+  readonly recordModelFailure: (error: unknown) => Promise<void>;
+  readonly recordModelSummary: (summary: { readonly resultHash: string; readonly contentLength: number; readonly finishReason: string; readonly toolCallCount: number }) => Promise<void>;
   cancelReason?: 'user' | 'application_shutdown';
   cancelRequest?: Promise<unknown>;
   completion?: Promise<NewApiChatTerminalResult>;
@@ -303,6 +316,8 @@ export class NewApiChatAdapter {
     readonly toolBridge?: ControlledProviderToolBridge;
     readonly prepareTools?: (signal: AbortSignal) => Promise<readonly ControlledProviderToolDefinition[] | undefined>;
     readonly maxToolRounds?: number;
+    readonly executionBudget?: HostExecutionBudget;
+    readonly executionLifecycle?: ProviderExecutionLifecyclePort;
     readonly nativeSearchGuard?: (request: NativeSearchRequest, route: ReturnType<typeof validateRoute>) => Promise<void>;
     readonly observeSearch?: (grantId: string, evidence: NativeSearchEvidence) => Promise<void>;
     readonly searchRequestStarted?: (grantId: string) => Promise<void>;
@@ -312,10 +327,10 @@ export class NewApiChatAdapter {
     }
     const route = validateRoute(input.routeSnapshot);
     const request = parseDispatchRequest(input.request);
-    const [connection, parameterSchema] = await Promise.all([
+    const [connection, parameterSchema] = await runWithExecutionBudget(input.executionBudget, 'prepare', input.signal, () => Promise.all([
       this.connections.get(route.connectionId),
       this.parameterSchemas.get(route.parameterSchemaId, route.parameterSchemaRevision)
-    ]);
+    ]));
     if (!connection || connection.id !== route.connectionId) {
       throw new NewApiChatAdapterError(
         'newapi.connection_unavailable',
@@ -353,62 +368,100 @@ export class NewApiChatAdapter {
       );
     }
     const externalController = new AbortController();
-    const removeExternalAbort = linkAbort(input.signal, externalController);
+    const removeInputAbort = linkAbort(input.signal, externalController);
+    const removeBudgetAbort = linkAbort(input.executionBudget?.signal, externalController);
+    const stopBudget = () => input.executionBudget?.cancel('cancelled');
+    externalController.signal.addEventListener('abort', stopBudget, { once: true });
+    const removeExternalAbort = () => {
+      removeInputAbort(); removeBudgetAbort();
+      externalController.signal.removeEventListener('abort', stopBudget);
+    };
     let session: NewApiEventStreamSession | undefined;
     let availableToolNames = new Set<string>();
+    let modelRound = -1;
+    let modelDispatchStarted = false;
+    let modelResultCommitted = false;
+    const recordModelFailure = async (error: unknown) => {
+      if (modelRound < 0 || modelResultCommitted) return;
+      const safeCode = safeCodeForError(error, input.executionBudget);
+      const code = error instanceof ProviderExecutionJournalError ? 'journal_failed' :
+        /cancelled/iu.test(safeCode) ? 'cancelled' : /timeout/iu.test(safeCode) ? 'timeout' :
+          /invalid_response/iu.test(safeCode) ? 'invalid_response' : /transport|connection/iu.test(safeCode) ? 'transport' : 'failed';
+      const rejected = error instanceof NewApiRuntimeError && ['authentication_failed', 'permission_denied', 'insufficient_balance',
+        'model_not_found', 'operation_not_found', 'invalid_parameters', 'rate_limited', 'upstream_rejected', 'redirect_not_allowed'].includes(error.code);
+      await persistProviderExecutionBoundary(input.executionLifecycle && (() => input.executionLifecycle!.modelFailed({
+        round: modelRound, unknown: modelDispatchStarted && !rejected, code
+      })), undefined, externalController.signal);
+    };
     const openSession = async (messages: readonly NewApiChatMessageV1[]) => {
+      const round = ++modelRound;
+      modelDispatchStarted = false;
+      modelResultCommitted = false;
       const continuation = messages.some(message => message.role === 'tool');
-      const stage = async (name: string, status: 'started' | 'completed', startedAt: number) => {
-        void emitProductionEvent({ code: 'model_request', status, operationId: `continuation_${name}`, facts: { purpose: 'content', count: Math.max(0, Date.now() - startedAt) } });
-      };
-      const historyStartedAt = Date.now();
-      if (continuation) await stage('history_build', 'started', historyStartedAt);
+      const preparationStartedAt = Date.now();
       let tools: readonly ControlledProviderToolDefinition[] | undefined;
       try {
         tools = parseControlledProviderTools(input.prepareTools
-          ? await prepareToolsWithTimeout(input.prepareTools, externalController.signal, continuation ? 15_000 : 60_000)
+          ? await prepareToolsWithTimeout(input.prepareTools, externalController.signal, continuation ? 15_000 : 60_000, input.executionBudget)
           : request.tools);
       } catch (error) {
+        if (error instanceof ExecutionBudgetError || input.executionBudget?.stopReason) throw error;
         throw new NewApiChatAdapterError(`newapi.continuation_prepare_failed.${safeContinuationCause(error)}`, safeContinuationMessage(error));
       }
-      if (continuation) await stage('history_build', 'completed', historyStartedAt);
+      const finalization = documentGenerationFinalization(input.toolBridge);
+      if (finalization?.phase === 'final') tools = undefined;
+      const dispatchMessages: readonly NewApiChatMessageV1[] = finalization?.phase === 'final' ? [{
+        role: 'system', content: 'The Host has finished the permitted document tools. Give one final explanation without calling any tool. ' +
+          'Describe only these Host delivery facts and the verified tool observations: ' + JSON.stringify(finalization)
+      }, ...messages] : messages;
       if (externalController.signal.aborted) throw new NewApiRuntimeError('cancelled', 'not_retryable');
       availableToolNames = new Set(tools?.map(tool => tool.function.name) ?? []);
       const serializedTools = JSON.stringify(tools);
       const beforeRequestStarted = async () => {
-        const startAt = Date.now();
-        if (continuation) await stage('before_request', 'started', startAt);
         await guardedStart();
-        if (continuation) await stage('messages_map', 'started', startAt);
         if (input.prepareTools) {
-          const currentTools = parseControlledProviderTools(await input.prepareTools(externalController.signal));
+          let currentTools = parseControlledProviderTools(await prepareToolsWithTimeout(
+            input.prepareTools, externalController.signal, continuation ? 15_000 : 60_000, input.executionBudget));
+          if (documentGenerationFinalization(input.toolBridge)?.phase === 'final') currentTools = undefined;
           if (JSON.stringify(currentTools) !== serializedTools) throw invalidRequest('Document tools changed before submission');
         }
-        if (continuation) await stage('messages_map', 'completed', startAt);
         if (externalController.signal.aborted) throw new NewApiRuntimeError('cancelled', 'not_retryable');
-        if (continuation) await stage('before_request', 'completed', startAt);
+        await persistProviderExecutionBoundary(input.executionLifecycle && (() => input.executionLifecycle!.modelStarted({ round })), input.executionBudget, externalController.signal);
+        input.executionBudget?.assertCanProceed('model');
+        if (externalController.signal.aborted) throw new NewApiRuntimeError('cancelled', 'not_retryable');
+        modelDispatchStarted = true;
+        // Supplemental preparation probes share one summary; the awaited durable
+        // model boundaries and both live authorization checks remain unchanged.
+        if (continuation) void emitProductionDiagnostic({ code: 'model_request', status: 'completed',
+          operationId: 'continuation_request_prepare', facts: { purpose: 'content',
+            count: Math.max(0, Date.now() - preparationStartedAt) } });
       };
-      const bodyStartedAt = Date.now();
-      if (continuation) await stage('request_body_build', 'started', bodyStartedAt);
-      if (continuation) await stage('request_serialize', 'started', bodyStartedAt);
-      const body = serializeRequest(route, { ...request, messages, tools }, parameterSchema);
-      if (continuation) await stage('request_serialize', 'completed', bodyStartedAt);
-      if (continuation) await stage('request_body_build', 'completed', bodyStartedAt);
-      if (continuation) void stage('credential_lookup', 'started', Date.now());
-      const credentialSession = await this.credentials.useCredential(
+      const body = serializeRequest(route, { ...request, messages: dispatchMessages, tools }, parameterSchema,
+        finalization?.phase === 'final');
+      await persistProviderExecutionBoundary(input.executionLifecycle && (() => input.executionLifecycle!.modelPrepared({
+        round, requestHash: providerExecutionHash(body), messageCount: dispatchMessages.length, toolCount: request.nativeSearch ? 1 : tools?.length ?? 0
+      })), input.executionBudget, externalController.signal);
+      input.executionBudget?.assertCanProceed('model');
+      if (externalController.signal.aborted) throw new NewApiRuntimeError('cancelled', 'not_retryable');
+      const credentialSession = await runWithExecutionBudget(input.executionBudget, 'model', externalController.signal, () => this.credentials.useCredential(
         { connectionId: route.connectionId, credentialVersionId: route.credentialVersionId },
-        (credential) => this.runtime.openChatStream({
-          connection,
-          credentials: credential,
-          body,
-          signal: externalController.signal,
-          beforeRequestStarted
-        })
-      );
-      if (continuation) void stage('credential_lookup', 'completed', Date.now());
+        async (credential) => {
+          input.executionBudget?.assertCanProceed('model');
+          if (externalController.signal.aborted) throw new NewApiRuntimeError('cancelled', 'not_retryable');
+          const opened = await this.runtime.openChatStream({ connection, credentials: credential, body,
+            signal: externalController.signal, beforeRequestStarted });
+          if (externalController.signal.aborted || input.executionBudget?.stopReason) {
+            opened.close();
+            input.executionBudget?.assertCanProceed('model');
+            throw new NewApiRuntimeError('cancelled', 'not_retryable');
+          }
+          return opened;
+        }
+      ));
       return credentialSession;
     };
-    const toolBridge: ControlledProviderToolBridge | undefined = input.toolBridge ? {
+    const toolBridge: DocumentFinalizationToolBridge | undefined = input.toolBridge ? {
+      finalizationState: () => documentGenerationFinalization(input.toolBridge),
       execute: (call) => availableToolNames.has(call.call.name)
         ? input.toolBridge!.execute(call)
         : Promise.resolve({ schemaVersion: 1, status: 'failed',
@@ -416,15 +469,17 @@ export class NewApiChatAdapter {
     } : undefined;
     try {
       session = await openSession(request.messages);
-      await this.lifecycle.start(request.responseExecutionId);
+      await runWithExecutionBudget(input.executionBudget, 'prepare', externalController.signal, () => this.lifecycle.start(request.responseExecutionId));
       if (request.nativeSearch && !externalController.signal.aborted) {
         await input.searchRequestStarted?.(request.nativeSearch.grantId);
       }
     } catch (error) {
+      await recordModelFailure(error).catch(() => undefined);
       removeExternalAbort();
+      externalController.abort();
       session?.close();
       await this.lifecycle
-        .fail(request.responseExecutionId, safeCodeForError(error))
+        .fail(request.responseExecutionId, safeCodeForError(error, input.executionBudget))
         .catch(() => undefined);
       throw error;
     }
@@ -435,8 +490,13 @@ export class NewApiChatAdapter {
         'NewApi did not create a stream session'
       );
     }
+    const recordModelSummary = async (summary: { readonly resultHash: string; readonly contentLength: number; readonly finishReason: string; readonly toolCallCount: number }) => {
+      await persistProviderExecutionBoundary(input.executionLifecycle && (() => input.executionLifecycle!.modelResult({ round: modelRound, ...summary })), input.executionBudget, externalController.signal);
+      modelResultCommitted = true;
+    };
     const operation: ActiveOperation = {
       abort: () => externalController.abort(),
+      externalController,
       providerOperationId,
       responseExecutionId: request.responseExecutionId,
       invocationAttemptId: request.invocationAttemptId,
@@ -450,6 +510,14 @@ export class NewApiChatAdapter {
       ...(toolBridge !== undefined ? { toolBridge } : {}),
       ...(input.prepareTools ? {} : { maxToolRounds: Math.min(Math.max(input.maxToolRounds ?? 2, 1), 4) }),
       signal: externalController.signal,
+      ...(input.executionBudget ? { executionBudget: input.executionBudget } : {}),
+      ...(input.executionLifecycle ? { executionLifecycle: input.executionLifecycle } : {}),
+      recordModelResult: response => recordModelSummary({
+        resultHash: providerExecutionHash({ content: response.content ?? '', toolCalls: response.toolCalls ?? [], finishReason: response.finishReason }),
+        contentLength: response.contentLength, finishReason: response.finishReason, toolCallCount: response.toolCalls?.length ?? 0
+      }),
+      recordModelSummary,
+      recordModelFailure,
       removeExternalAbort
     };
     this.active.set(providerOperationId, operation);
@@ -467,6 +535,7 @@ export class NewApiChatAdapter {
       operation.cancelReason = 'user';
       operation.cancelRequest = this.lifecycle.requestCancel(operation.responseExecutionId);
       void operation.cancelRequest.catch(() => undefined);
+      operation.executionBudget?.cancel('cancelled');
       operation.abort();
       operation.session.cancel();
     }
@@ -496,23 +565,25 @@ export class NewApiChatAdapter {
   ): Promise<NewApiChatTerminalResult> {
     let usagePersisted = false;
     try {
-      const native = operation.nativeSearch ? await runNativeSearch({
-        request: operation.nativeSearch, session: operation.session, messages: operation.messages,
+      const native = operation.nativeSearch ? await runWithExecutionBudget(operation.executionBudget, 'model', operation.signal, () => runNativeSearch({
+        request: operation.nativeSearch!, session: operation.session, messages: operation.messages,
         model: expectedModel, signal: operation.signal,
         open: async messages => { operation.session = await operation.openSession(messages); return operation.session; },
-        observe: operation.observeSearch!
-      }) : undefined;
+        observe: operation.observeSearch!, observeModelResult: operation.recordModelSummary
+      })) : undefined;
       if (native) await this.lifecycle.appendContent(operation.responseExecutionId, native.content);
-      let stream = native ?? await consumeNewApiStream(
+      let stream = native ?? await runWithExecutionBudget(operation.executionBudget, 'model', operation.signal, () => consumeNewApiStream(
         operation.session.stream,
         expectedModel,
         async (contentDelta) => {
+          assertActiveOperation(operation);
           await this.lifecycle.appendContent(
             operation.responseExecutionId,
             contentDelta
           );
         },
         async (reasoningDelta) => {
+          assertActiveOperation(operation);
           if (operation.productFeature === 'text_reasoning') {
             await this.lifecycle.appendReasoning(
               operation.responseExecutionId,
@@ -520,12 +591,17 @@ export class NewApiChatAdapter {
             );
           }
         }
-      );
+      ));
+      if (!native) await operation.recordModelResult(stream);
+      const documentFinalizer = createDocumentGenerationFinalizer(operation.toolBridge);
+      stream = await documentFinalizer.normalize(stream, 0);
       stream = await runControlledProviderToolRounds({
         initialResponse: stream,
         messages: operation.messages,
         bridge: operation.toolBridge,
         signal: operation.signal,
+        ...(operation.executionBudget ? { executionBudget: operation.executionBudget } : {}),
+        ...(operation.executionLifecycle ? { executionLifecycle: operation.executionLifecycle } : {}),
         shouldContinue: response => response.finishReason === 'tool_calls',
         ...(operation.maxToolRounds !== undefined ? { maxRounds: operation.maxToolRounds } : {}),
         appendAssistant: (response, messages) => messages.push({
@@ -538,22 +614,33 @@ export class NewApiChatAdapter {
         appendTool: (call, result, messages) => messages.push({
           role: 'tool', content: JSON.stringify(result), toolCallId: call.id, name: call.name
         }),
-        requestNext: async messages => {
-          operation.session.close();
-          operation.session = await operation.openSession(messages);
-          return consumeNewApiStream(operation.session.stream, expectedModel,
-            async contentDelta => { await this.lifecycle.appendContent(operation.responseExecutionId, contentDelta); },
-            async reasoningDelta => {
-              if (operation.productFeature === 'text_reasoning') {
-                await this.lifecycle.appendReasoning(operation.responseExecutionId, reasoningDelta);
-              }
-            });
+        requestNext: async (messages, signal?: AbortSignal) => {
+          const removeAbort = linkAbort(signal, operation.externalController);
+          try {
+            operation.session.close();
+            operation.session = await operation.openSession(messages);
+            const nextResponse = await runWithExecutionBudget(operation.executionBudget, 'model', operation.signal, () => consumeNewApiStream(operation.session.stream, expectedModel,
+              async contentDelta => { assertActiveOperation(operation); await this.lifecycle.appendContent(operation.responseExecutionId, contentDelta); },
+              async reasoningDelta => {
+                assertActiveOperation(operation);
+                if (operation.productFeature === 'text_reasoning') {
+                  await this.lifecycle.appendReasoning(operation.responseExecutionId, reasoningDelta);
+                }
+              }));
+            await operation.recordModelResult(nextResponse);
+            return documentFinalizer.normalize(nextResponse, messages.filter(message => message.role === 'assistant' && message.toolCalls?.length).length);
+          } finally { removeAbort(); }
         },
         toLoopError: code => new NewApiChatAdapterError(
-          code === 'no_progress' ? 'newapi.tool_loop_no_progress' : 'newapi.tool_loop_limit',
-          code === 'no_progress' ? 'Tool calling made no progress' : 'Tool calling loop limit exceeded'
+          `newapi.tool_loop_${code}`, code
         )
       });
+      operation.executionBudget?.assertCanProceed('execution');
+      const hostExplanation = documentFinalizer.finalExplanation();
+      if (hostExplanation) {
+        await this.lifecycle.appendContent(operation.responseExecutionId, hostExplanation);
+        stream = { ...stream, contentLength: stream.contentLength + hostExplanation.length };
+      }
       const observation = createUsageObservation({
         observationId: this.ids.nextProviderUsageObservationId(),
         invocationAttemptId: operation.invocationAttemptId,
@@ -614,7 +701,8 @@ export class NewApiChatAdapter {
         usageAvailability: stream.usage ? 'reported' : 'not_reported'
       };
     } catch (error) {
-      if (operation.cancelReason === 'user') {
+      await operation.recordModelFailure(error).catch(() => undefined);
+      if (operation.cancelReason === 'user' && (!operation.executionBudget?.stopReason || operation.executionBudget.stopReason === 'cancelled')) {
         await operation.cancelRequest?.catch(() => undefined);
         if (!usagePersisted) {
           await this.persistUsageStatus(operation, 'not_reported').catch(() => undefined);
@@ -630,7 +718,7 @@ export class NewApiChatAdapter {
           providerOperationId: operation.providerOperationId
         };
       }
-      if (operation.cancelReason === 'application_shutdown') {
+      if (operation.cancelReason === 'application_shutdown' && (!operation.executionBudget?.stopReason || operation.executionBudget.stopReason === 'cancelled')) {
         if (!usagePersisted) {
           await this.persistUsageStatus(operation, 'unknown_outcome').catch(() => undefined);
         }
@@ -653,7 +741,7 @@ export class NewApiChatAdapter {
       if (!usagePersisted) {
         await this.persistFailureUsage(operation, error).catch(() => undefined);
       }
-      const safeCode = safeCodeForError(error);
+      const safeCode = safeCodeForError(error, operation.executionBudget);
       await this.lifecycle.fail(operation.responseExecutionId, safeCode);
       await this.terminalObserver.failed?.({
         providerOperationId: operation.providerOperationId,
@@ -715,17 +803,46 @@ function safeContinuationMessage(error: unknown): string {
 async function prepareToolsWithTimeout(
   prepare: (signal: AbortSignal) => Promise<readonly ControlledProviderToolDefinition[] | undefined>,
   signal: AbortSignal,
-  timeoutMs: number
+  timeoutMs: number,
+  executionBudget?: HostExecutionBudget
 ): Promise<readonly ControlledProviderToolDefinition[] | undefined> {
+  if (executionBudget) return executionBudget.run('prepare', prepare, timeoutMs);
+  const controller = new AbortController();
+  const removeAbort = linkAbort(signal, controller);
   let timer: ReturnType<typeof setTimeout> | undefined;
-  const timeout = new Promise<never>((_, reject) => {
-    timer = setTimeout(() => reject(new NewApiChatAdapterError('newapi.continuation_prepare_timeout', 'prepareTools timeout')), timeoutMs);
+  let rejectStop!: (error: ExecutionBudgetError) => void;
+  const stopped = new Promise<never>((_, reject) => {
+    rejectStop = reject;
+    timer = setTimeout(() => {
+      const error = new ExecutionBudgetError('timeout', 'prepare');
+      controller.abort(error);
+      reject(error);
+    }, timeoutMs);
   });
+  const cancel = () => rejectStop(new ExecutionBudgetError('cancelled'));
+  signal.addEventListener('abort', cancel, { once: true });
   try {
-    return await Promise.race([prepare(signal), timeout]);
+    if (signal.aborted) throw new ExecutionBudgetError('cancelled');
+    return await Promise.race([prepare(controller.signal), stopped]);
   } finally {
     if (timer) clearTimeout(timer);
+    removeAbort(); signal.removeEventListener('abort', cancel);
   }
+}
+
+async function runWithExecutionBudget<T>(budget: HostExecutionBudget | undefined, stage: 'prepare' | 'model',
+  signal: AbortSignal | undefined, operation: (signal: AbortSignal) => Promise<T>): Promise<T> {
+  if (!budget) return operation(signal ?? new AbortController().signal);
+  const abort = () => budget.cancel('cancelled');
+  signal?.addEventListener('abort', abort, { once: true });
+  if (signal?.aborted) abort();
+  try { return await budget.run(stage, operation); }
+  finally { signal?.removeEventListener('abort', abort); }
+}
+
+function assertActiveOperation(operation: ActiveOperation): void {
+  operation.executionBudget?.assertCanProceed('model');
+  if (operation.signal.aborted) throw new NewApiRuntimeError('cancelled', 'not_retryable');
 }
 
 export function mapNewApiUsage(value: unknown): readonly UsageFactV1[] {
@@ -918,7 +1035,8 @@ async function appendLocalDelta(
 ): Promise<void> {
   try {
     await append(delta);
-  } catch {
+  } catch (error) {
+    if (error instanceof ExecutionBudgetError) throw error;
     throw new NewApiChatAdapterError(
       'newapi.local_response_write_failed',
       'The local response could not be saved'
@@ -1139,7 +1257,8 @@ function parseDispatchRequest(value: unknown): NewApiChatDispatchRequestV1 {
 function serializeRequest(
   route: ReturnType<typeof validateRoute>,
   request: NewApiChatDispatchRequestV1,
-  schema: ParameterSchemaV2
+  schema: ParameterSchemaV2,
+  hostToolFreeFinalization = false
 ): Uint8Array {
   const parameters = validateParameterValues(schema, 'full', request.parameterValues);
   // UniCompAPI / OpenAI-compatible gateways accept temperature and top_p together.
@@ -1246,6 +1365,7 @@ function serializeRequest(
   if (typeof parameters.user === 'string' && parameters.user.trim()) {
     body.user = parameters.user.trim();
   }
+  if (hostToolFreeFinalization) { delete body.tools; body.tool_choice = 'none'; }
   const encoded = new TextEncoder().encode(JSON.stringify(body));
   if (encoded.byteLength > (request.image ? 14 : 2) * 1024 * 1024) {
     throw invalidRequest('NewApi request exceeded the local size limit');
@@ -1316,7 +1436,13 @@ function finishReasonSafeCode(reason: Exclude<NewApiFinishReason, 'stop'>): stri
   return `newapi.finish.${reason}`;
 }
 
-function safeCodeForError(error: unknown): string {
+function safeCodeForError(error: unknown, budget?: HostExecutionBudget): string {
+  if (error instanceof ProviderExecutionJournalError) return 'newapi.execution_journal_failed';
+  if (budget?.stopReason && (budget.stopReason !== 'cancelled' || !(error instanceof ExecutionBudgetError))) {
+    error = new ExecutionBudgetError(budget.stopReason);
+  }
+  if (error instanceof ExecutionBudgetError) return error.code === 'timeout'
+    ? `newapi.${error.scope}_timeout` : `newapi.tool_loop_${error.code}`;
   if (error instanceof NewApiChatAdapterError) return error.safeCode;
   if (error && typeof error === 'object' && 'safeCode' in error && typeof error.safeCode === 'string') return error.safeCode;
   return runtimeSafeCode(error);

@@ -911,6 +911,12 @@ const chatContexts: ChatContextApi = {
     ipcRenderer.invoke(chatContextIpcChannels.startResponse, request),
   startAgentResponse: (request) =>
     ipcRenderer.invoke(chatContextIpcChannels.startAgentResponse, request),
+  cancelAgentSession: request => ipcRenderer.invoke(chatContextIpcChannels.cancelAgentSession, request),
+  cancelResponseStart: (request) =>
+    ipcRenderer.invoke(chatContextIpcChannels.cancelResponseStart, request),
+  inspectReconciliation: request => ipcRenderer.invoke(chatContextIpcChannels.inspectReconciliation, request),
+  reconcileReconciliation: request => ipcRenderer.invoke(chatContextIpcChannels.reconcileReconciliation, request),
+  acknowledgeReconciliation: request => ipcRenderer.invoke(chatContextIpcChannels.acknowledgeReconciliation, request),
   startWorkflow: (request) =>
     ipcRenderer.invoke(chatContextIpcChannels.startWorkflow, request),
   answerWorkflow: (request) =>

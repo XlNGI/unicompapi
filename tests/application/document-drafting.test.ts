@@ -64,7 +64,7 @@ describe('document drafting helpers', () => {
   it('turns an exact five-page PPT revision into three body sections', () => {
     const input = composeDocumentRevisionInput(
       '{"kind":"ppt","title":"关于龙的PPT","sections":[]}',
-      '内容太少了加到5页',
+      '内容太少了，必须恰好5页',
       'ppt'
     );
 
@@ -73,6 +73,19 @@ describe('document drafting helpers', () => {
     expect(input).toContain('sections 必须恰好包含 3 个正文分节');
     expect(input).toContain('1 页封面和 1 页结束页');
     expect(input).not.toContain('这是一次局部修改');
+  });
+
+  it('keeps an ordinary page number as a planning goal without an exact section gate', () => {
+    const input = composeDocumentRevisionInput(undefined, '做一份10页PPT', 'ppt');
+    expect(input).toContain('以约 10 页总页数为规划目标');
+    expect(input).toContain('允许根据内容和排版调整实际页数');
+    expect(input).not.toContain('总页数硬性约束');
+    expect(input).not.toContain('sections 必须恰好');
+  });
+
+  it.each(['最多10页PPT', '8至12页PPT'])('preserves the explicit bound in the planning prompt: %s', request => {
+    const input = composeDocumentRevisionInput(undefined, request, 'ppt');
+    expect(input).toContain(request.startsWith('最多') ? '不超过 10 页' : '8 至 12 页范围内');
   });
 
   it('extracts section headings from assistant markdown', () => {

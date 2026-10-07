@@ -1,10 +1,10 @@
 import { createHash } from 'node:crypto';
 import path from 'node:path';
 import {
-  parseDocumentIR, toDocumentTaskRuntimeId,
+  parseDocumentIR, presentationPlanningTotalPages, toDocumentTaskRuntimeId, toWorkId,
   type Conversation, type ConversationId, type ConversationResponseDraftV1,
   type DocumentIR, type FileReferenceId, type MessageId, type ProjectConversationRepository,
-  type ProjectId, type WorkId
+  type ProjectId, type WorkId, type Work
 } from '../../domain';
 import {
   createCanonicalToolRegistry, type CanonicalToolArguments, type DocumentToolResult,
@@ -12,10 +12,14 @@ import {
 } from '../../domain/entities/canonical-tool-contract';
 import { createReadDocumentStructureBinding } from '../../application/read-document-structure-tool';
 import { createGeneratePptxBinding, type GeneratePptxToolDependencies } from '../../application/generate-pptx-tool';
+import { parsePresentationPageRequirement } from '../../application/presentation-page-count';
 import { DocumentTaskRuntimeService } from '../../application/document-task-runtime-service';
+import { HostExecutionBudget, ExecutionBudgetError, type ExecutionBudgetPolicy } from '../../application/execution-budget';
+import type { DocumentTaskRuntime } from '../../domain/entities/document-task-runtime';
 import { JsonDocumentTaskRuntimeRepository } from '../repositories/json-document-task-runtime-repository';
 import { JsonFileReferenceRepository, JsonWorkRepository } from '../repositories/json-repositories';
 import { DocumentIdentityIndexStore } from './document-identity-index-store';
+import { DocumentIdentityUnavailableError, hasControlledDocumentVersionEvidence } from './document-controlled-version-evidence';
 import { buildPresentationIdentityManifest, type PresentationIdentityManifest } from './presentation-identity-manifest';
 import { createUpdateElementBinding } from '../../application/update-element-tool';
 import { createAddElementBinding } from '../../application/add-element-tool';
@@ -27,12 +31,25 @@ import { createProductionDocumentMutationHost } from './production-document-muta
 import type { DocumentRenderAdapter } from './temporary-document-workflow';
 import { NodeProjectStorage } from '../storage';
 import { createDocumentToolCallingBridge } from '../providers/document-tool-bridge';
-import { emitProductionEvent } from '../conversation-production-trace';
-import type { ControlledProviderToolBridge, ControlledProviderToolDefinition } from '../providers/provider-tool-calling';
+import { emitProductionDiagnostic, emitProductionEvent, getProductionTraceScope, withProductionTrace } from '../conversation-production-trace';
+import type { ControlledProviderToolDefinition } from '../providers/provider-tool-calling';
+import type { DocumentFinalizationToolBridge } from '../providers/provider-document-finalization';
 import { ConversationDocumentPageError } from './conversation-document-page-context';
 import { RegisteredPresentationReader } from './registered-presentation-reader';
 import type { PptxPhysicalPage } from './pptx-page-reader';
 import type { PresentationArtDirectionRequest } from '../../application/presentation-art-direction';
+
+function linkBudget(budget: HostExecutionBudget, controller: AbortController): () => void {
+  const abort = () => controller.abort(budget.signal.reason);
+  budget.signal.addEventListener('abort', abort, { once: true });
+  if (budget.signal.aborted) abort();
+  return () => budget.signal.removeEventListener('abort', abort);
+}
+
+function assertStartupSignal(signal?: AbortSignal): void {
+  if (!signal?.aborted) return;
+  throw signal.reason instanceof ExecutionBudgetError ? signal.reason : new ExecutionBudgetError('cancelled', 'prepare');
+}
 
 /** Host-only pin. No document body or filesystem locator is part of this value. */
 export interface ConversationDocumentReadToolSelection {
@@ -86,8 +103,9 @@ export interface ConversationAgentToolSelection {
 export type ConversationDocumentToolSelection = ConversationDocumentReadToolSelection | ConversationDocumentGenerationToolSelection | ConversationDocumentMutationToolSelection | ConversationAgentToolSelection;
 
 export interface ConversationDocumentToolSession {
+  readonly executionBudget?: HostExecutionBudget;
   prepareTools(signal: AbortSignal): Promise<readonly ControlledProviderToolDefinition[] | undefined>;
-  readonly bridge: ControlledProviderToolBridge;
+  readonly bridge: DocumentFinalizationToolBridge;
   cancel?(): Promise<void>;
   close(): Promise<void>;
 }
@@ -95,11 +113,30 @@ export interface ConversationDocumentToolSession {
 export interface ConversationDocumentToolSessionPort {
   select(input: { readonly conversation: Conversation; readonly currentUserMessageId: MessageId;
     readonly query: string }): Promise<ConversationDocumentReadToolSelection | undefined>;
-  prepare(input: { readonly conversation: Conversation; readonly draft: ConversationResponseDraftV1 }): Promise<ConversationDocumentToolSelection | undefined>;
-  pinDraft(input: { readonly draft: ConversationResponseDraftV1; readonly selection: ConversationDocumentToolSelection }): Promise<void>;
-  registerExecution(input: { readonly selection: ConversationDocumentToolSelection; readonly responseExecutionId: string }): Promise<void>;
-  forExecution(input: { readonly responseExecutionId: string }): Promise<ConversationDocumentToolSession | undefined>;
+  prepare(input: { readonly conversation: Conversation; readonly draft: ConversationResponseDraftV1; readonly signal?: AbortSignal }): Promise<ConversationDocumentToolSelection | undefined>;
+  pinDraft(input: { readonly draft: ConversationResponseDraftV1; readonly selection: ConversationDocumentToolSelection; readonly signal?: AbortSignal }): Promise<void>;
+  registerExecution(input: { readonly selection: ConversationDocumentToolSelection; readonly responseExecutionId: string; readonly signal?: AbortSignal }): Promise<void>;
+  forExecution(input: { readonly responseExecutionId: string; readonly signal?: AbortSignal }): Promise<ConversationDocumentToolSession | undefined>;
+  collectResponseFacts(responseExecutionId: string): Promise<ConversationResponseDocumentFacts>;
   dispose(): Promise<void>;
+}
+
+/** Host-owned projection of durable task, artifact, and delivery records. */
+export interface ConversationResponseDocumentFacts {
+  readonly documentTasks: readonly {
+    readonly runtime: DocumentTaskRuntime;
+      readonly active: boolean;
+      readonly required: boolean;
+    readonly registeredWork?: Pick<Work, 'id' | 'projectId' | 'sourceExecutionId'> & {
+      readonly sourceTaskRuntimeId: DocumentTaskRuntime['id'];
+    };
+    readonly readBackConfirmed: boolean;
+    readonly deliveryConfirmed: boolean;
+  }[];
+  readonly pendingToolCallCount: number;
+  readonly unpersistedObservationCount: number;
+  readonly unknownResult: boolean;
+  readonly toolFailed: boolean;
 }
 
 /** Each execution owns its binding, budget and checkpoint. The model never selects a document. */
@@ -110,8 +147,11 @@ export class ConversationDocumentToolSessionService implements ConversationDocum
   private readonly reader: RegisteredPresentationReader;
   private readonly identityStore: DocumentIdentityIndexStore;
   private readonly issued = new WeakSet<ConversationDocumentToolSelection>();
+  private readonly startupSignals = new WeakMap<ConversationDocumentToolSelection, AbortSignal>();
   private readonly sessions = new Map<string, ConversationDocumentToolSession>();
   private readonly pending = new Set<string>();
+  private readonly pendingBudgets = new Set<HostExecutionBudget>();
+  private readonly pendingContextControllers = new Set<AbortController>();
   private readonly draftPins = new Map<string, { readonly selection: ConversationDocumentToolSelection; readonly fingerprint: string }>();
   private disposed = false;
 
@@ -119,7 +159,11 @@ export class ConversationDocumentToolSessionService implements ConversationDocum
     readonly rootDirectory: string;
     readonly projectId: ProjectId;
   readonly conversations: ProjectConversationRepository;
-  readonly getCurrentProjectId?: () => ProjectId | undefined;
+    readonly getCurrentProjectId?: () => ProjectId | undefined;
+    /** Host-owned session policy; never populated from Provider or tool arguments. */
+    readonly getInheritedExecutionContext?: (responseExecutionId: string) => Promise<{
+      readonly policy: ExecutionBudgetPolicy; readonly signal?: AbortSignal;
+    } | undefined>;
     readonly generatePptx?: GeneratePptxToolDependencies;
     readonly artDirectionPlanner?: (request: PresentationArtDirectionRequest & { readonly responseExecutionId: string }) => Promise<unknown>;
     readonly mutation?: { readonly renderPreview: DocumentRenderAdapter;
@@ -189,6 +233,8 @@ export class ConversationDocumentToolSessionService implements ConversationDocum
     const existingIdentity = await this.identityStore.getForWork(work.id);
     if (this.options.mutation && (isMutationRequest(input.query) || existingIdentity)) {
       const current = await this.reader.read(work.id);
+      if (!existingIdentity && await hasControlledDocumentVersionEvidence({ storage: this.storage,
+        rootDirectory: this.options.rootDirectory, projectId: this.options.projectId, work })) throw new DocumentIdentityUnavailableError();
       const identity = await this.identityStore.ensureForWork({ workId: work.id, build: () => buildPresentationIdentityManifest({ buffer: current.buffer,
         documentLineageId: `lineage-${hash(`${this.options.projectId}:${work.id}`)}`, workId: work.id, fileId: file.id, sourceExecutionId: work.sourceExecutionId, revision: 1 }) });
       if (identity.artifactChecksumSha256 !== file.checksumSha256 || identity.fileId !== file.id || identity.sourceExecutionId !== work.sourceExecutionId) throw unavailable();
@@ -208,6 +254,7 @@ export class ConversationDocumentToolSessionService implements ConversationDocum
   }
 
   async prepare(input: Parameters<ConversationDocumentToolSessionPort['prepare']>[0]): Promise<ConversationDocumentToolSelection | undefined> {
+    assertStartupSignal(input.signal);
     const { conversation, draft } = input;
     const message = conversation.messages.find(item => item.id === draft.userMessageId);
     if (!message || message.role !== 'user' || message.state !== 'completed' ||
@@ -216,7 +263,7 @@ export class ConversationDocumentToolSessionService implements ConversationDocum
     const pin = this.draftPins.get(draft.id);
     if (pin) {
       if (pin.fingerprint !== draftFingerprint(draft) || !this.issued.has(pin.selection) || !await this.matches(pin.selection)) throw unavailable();
-      return pin.selection;
+      return this.rememberStartupSignal(pin.selection, input.signal);
     }
     if (draft.imageQuery !== undefined) return undefined;
     if (draft.agentNative) {
@@ -253,7 +300,7 @@ export class ConversationDocumentToolSessionService implements ConversationDocum
         ...(mutation ? { mutation } : {}),
       });
       this.issued.add(selection);
-      return selection;
+      return this.rememberStartupSignal(selection, input.signal);
     }
     // Internal drafting prompts must remain on the existing Outline generation path.
     const ordinary = (message.displayContent === undefined || message.displayContent === message.content ||
@@ -274,12 +321,15 @@ export class ConversationDocumentToolSessionService implements ConversationDocum
         bindingHash: hash(JSON.stringify([conversation.id, message.id, message.revision, approved]))
       });
       this.issued.add(selection);
-      return selection;
+      return this.rememberStartupSignal(selection, input.signal);
     }
-    return this.select({ conversation, currentUserMessageId: message.id, query });
+    const selection = await this.select({ conversation, currentUserMessageId: message.id, query });
+    assertStartupSignal(input.signal);
+    return selection ? this.rememberStartupSignal(selection, input.signal) : undefined;
   }
 
   async pinDraft(input: Parameters<ConversationDocumentToolSessionPort['pinDraft']>[0]): Promise<void> {
+    this.rememberStartupSignal(input.selection, input.signal);
     const existing = this.draftPins.get(input.draft.id);
     if (this.disposed || (!existing && this.draftPins.size >= 256) || !this.issued.has(input.selection) ||
         input.draft.projectId !== this.options.projectId || input.draft.conversationId !== input.selection.conversationId ||
@@ -287,6 +337,7 @@ export class ConversationDocumentToolSessionService implements ConversationDocum
         input.draft.userMessageRevision !== input.selection.userMessageRevision ||
         !await this.matches(input.selection) || this.disposed) throw unavailable();
     const latest = this.draftPins.get(input.draft.id);
+    assertStartupSignal(this.startupSignals.get(input.selection));
     if ((!latest && this.draftPins.size >= 256) || (latest && (latest.selection.bindingHash !== input.selection.bindingHash ||
         latest.fingerprint !== draftFingerprint(input.draft)))) throw unavailable();
     this.draftPins.set(input.draft.id, { selection: input.selection, fingerprint: draftFingerprint(input.draft) });
@@ -296,25 +347,121 @@ export class ConversationDocumentToolSessionService implements ConversationDocum
     if (this.disposed || this.sessions.has(input.responseExecutionId) || this.pending.has(input.responseExecutionId) ||
         this.sessions.size + this.pending.size >= 256) throw unavailable();
     this.pending.add(input.responseExecutionId);
+    const kind = 'kind' in input.selection ? input.selection.kind : 'read';
+    const combined = kind === 'agent' && Boolean((input.selection as ConversationAgentToolSelection).mutation);
+    const profile = kind === 'mutation' || combined ? { maxToolCalls: 12, budgetUnits: 32, timeoutMs: 540_000 }
+      : kind === 'generation' || kind === 'agent' ? { maxToolCalls: 8, budgetUnits: 24, timeoutMs: 360_000 }
+        : { maxToolCalls: 8, budgetUnits: 8, timeoutMs: 180_000 };
+    const startedAt = Date.now();
+    const pinnedSignal = this.startupSignals.get(input.selection);
+    const startupSignal = input.signal && pinnedSignal ? AbortSignal.any([input.signal, pinnedSignal]) : input.signal ?? pinnedSignal;
+    let budget: HostExecutionBudget | undefined;
+    let adopted = false;
     try {
-      const session = await this.createSession(input);
-      if (this.disposed) { await session.close(); throw unavailable(); }
+      const inherited = await this.inheritedExecutionContext(input.responseExecutionId, startupSignal);
+      const policy = inherited?.policy ?? { startedAt, deadlineAt: startedAt + profile.timeoutMs,
+        maxToolCalls: profile.maxToolCalls, budgetUnits: profile.budgetUnits };
+      if (policy.maxToolCalls > profile.maxToolCalls || policy.budgetUnits > profile.budgetUnits ||
+          policy.startedAt > startedAt || policy.deadlineAt - policy.startedAt > profile.timeoutMs) {
+        throw new TypeError('invalid_inherited_execution_budget');
+      }
+      const signals = [startupSignal, inherited?.signal].filter((signal): signal is AbortSignal => Boolean(signal));
+      const parentSignal = signals.length > 1 ? AbortSignal.any(signals) : signals[0];
+      assertStartupSignal(parentSignal);
+      if (this.disposed) throw new ExecutionBudgetError('cancelled', 'prepare');
+      const ownedBudget = this.newExecutionBudget(policy, parentSignal);
+      budget = ownedBudget;
+      this.pendingBudgets.add(ownedBudget);
+      const create = (signal: AbortSignal) => {
+        const pending = this.createSession({ ...input, signal, executionBudget: ownedBudget });
+        void pending.then(session => {
+          if (ownedBudget.signal.aborted || this.disposed) {
+            void session.cancel?.().catch(() => undefined);
+            void session.close().catch(() => undefined);
+          }
+        }, () => undefined);
+        return pending;
+      };
+      const child = await ownedBudget.run('prepare', create);
+      if (this.disposed || ownedBudget.signal.aborted) { await child.close(); throw unavailable(); }
+      const session: ConversationDocumentToolSession = { ...child, close: async () => {
+        if (this.sessions.get(input.responseExecutionId) === session) this.sessions.delete(input.responseExecutionId);
+        const settlement = child.close();
+        ownedBudget.dispose();
+        await settlement;
+      } };
       this.sessions.set(input.responseExecutionId, session);
-    } finally { this.pending.delete(input.responseExecutionId); }
+      adopted = true;
+    } finally {
+      this.pending.delete(input.responseExecutionId);
+      if (budget) { this.pendingBudgets.delete(budget); if (!adopted) budget.dispose(); }
+    }
   }
 
   async forExecution(input: Parameters<ConversationDocumentToolSessionPort['forExecution']>[0]): Promise<ConversationDocumentToolSession | undefined> {
-    return this.sessions.get(input.responseExecutionId);
+    const session = this.sessions.get(input.responseExecutionId);
+    if (!session || !input.signal) return session;
+    const cancel = () => { void session.cancel?.().catch(() => undefined); };
+    input.signal.addEventListener('abort', cancel, { once: true });
+    if (input.signal.aborted) cancel();
+    return { ...session, close: async () => {
+      input.signal?.removeEventListener('abort', cancel);
+      await session.close();
+    } };
   }
 
   async dispose(): Promise<void> {
     this.disposed = true;
+    for (const controller of this.pendingContextControllers) controller.abort(new ExecutionBudgetError('cancelled', 'prepare'));
+    for (const budget of this.pendingBudgets) budget.cancel('cancelled');
     this.draftPins.clear();
     await Promise.all([...this.sessions.values()].map(session => session.close()));
   }
 
+  async collectResponseFacts(responseExecutionId: string): Promise<ConversationResponseDocumentFacts> {
+    if (!/^[A-Za-z0-9_.:-]{1,256}$/u.test(responseExecutionId)) throw unavailable();
+    const runtimes = (await new JsonDocumentTaskRuntimeRepository(this.storage, this.options.projectId).list())
+      .filter(runtime => runtime.executionId === responseExecutionId);
+    const documentTasks = await Promise.all(runtimes.map(async runtime => {
+      const writeReceipt = [...runtime.observations].reverse().find(item => item.ok && typeof item.data?.registeredWorkId === 'string');
+      const readReceipt = [...runtime.observations].reverse().find(item => item.ok && item.toolId === 'read_document_structure');
+      const registeredId = runtime.workRef?.kind === 'registered' ? runtime.workRef.ref : writeReceipt?.data?.registeredWorkId;
+      const readId = runtime.operation === 'analyze' ? readReceipt?.data?.readWorkId : registeredId;
+      const active = runtime.toolCalls.length > 0 || registeredId !== undefined;
+      const work = typeof registeredId === 'string' ? await this.works.get(toWorkId(registeredId)) : undefined;
+      const file = work ? await this.files.get(work.fileId) : undefined;
+      const registeredWork = work && work.projectId === runtime.projectId && (!file || file.projectId === runtime.projectId &&
+        file.sourceExecutionId === work.sourceExecutionId)
+        ? { id: work.id, projectId: work.projectId, sourceExecutionId: work.sourceExecutionId, sourceTaskRuntimeId: runtime.id }
+        : undefined;
+      let readBackConfirmed = false;
+      if (typeof readId === 'string') {
+        try { readBackConfirmed = (await this.reader.read(toWorkId(readId))).pages.length > 0; }
+        catch { /* A retained Work is not proof that its current file can be read. */ }
+      }
+      const conversation = await this.options.conversations.get(runtime.conversationId);
+      const sourceIndex = conversation?.messages.findIndex(message => message.id === runtime.sourceMessageId) ?? -1;
+      const request = sourceIndex >= 0 ? conversation!.messages[sourceIndex].displayContent ?? conversation!.messages[sourceIndex].content : '';
+      const required = runtime.operation === 'analyze' || runtime.operation === 'edit' && isMutationRequest(request) ||
+        runtime.operation === 'create' && Boolean(conversation &&
+          (isPptGenerationIntent(request) || isPptGenerationConfirmation(conversation, runtime.sourceMessageId)) &&
+          isPptGenerationApproved(conversation, runtime.sourceMessageId, request));
+      const deliveryConfirmed = Boolean(registeredWork && sourceIndex >= 0 && conversation?.messages.slice(sourceIndex + 1)
+        .some(message => message.role === 'assistant' && message.state === 'completed' && message.documentResult?.workId === registeredWork.id));
+      return { runtime, active, required, ...(registeredWork ? { registeredWork } : {}), readBackConfirmed, deliveryConfirmed };
+    }));
+    return {
+      documentTasks,
+      pendingToolCallCount: runtimes.reduce((count, runtime) => count + runtime.toolCalls.filter(call => call.status === 'started').length, 0),
+      unpersistedObservationCount: runtimes.reduce((count, runtime) => count + runtime.toolCalls.filter(call =>
+        !runtime.observations.some(item => item.step === call.step && item.toolId === call.toolId)).length, 0),
+      unknownResult: runtimes.some(runtime => runtime.status === 'needs_reconciliation' || runtime.toolCalls.some(call => call.status === 'unknown')),
+      toolFailed: runtimes.some(runtime => runtime.status === 'failed' || runtime.toolCalls.at(-1)?.status === 'failed')
+    };
+  }
+
   async createSession(input: { readonly selection: ConversationDocumentToolSelection; readonly responseExecutionId: string;
-    readonly signal?: AbortSignal }): Promise<ConversationDocumentToolSession> {
+    readonly signal?: AbortSignal; readonly executionBudget?: HostExecutionBudget }): Promise<ConversationDocumentToolSession> {
     const { selection } = input;
     if (!this.active() || !this.issued.has(selection) || !/^[A-Za-z0-9_.:-]{1,256}$/u.test(input.responseExecutionId)) throw unavailable();
     if ('kind' in selection && selection.kind === 'generation') {
@@ -334,7 +481,7 @@ export class ConversationDocumentToolSessionService implements ConversationDocum
     input.signal?.addEventListener('abort', cancel, { once: true });
     if (input.signal?.aborted) cancel();
     const timeoutMs = Math.min(contract.execution.timeoutMs * 3, 900_000);
-    const deadlineAt = Date.now() + timeoutMs;
+    let deadlineAt = Date.now() + timeoutMs;
     let eligible = false;
     let ir: DocumentIR | undefined;
     let pages: readonly PptxPhysicalPage[] = [];
@@ -350,7 +497,12 @@ export class ConversationDocumentToolSessionService implements ConversationDocum
       executionId: input.responseExecutionId, documentKind: 'ppt', operation: 'analyze',
       // This checkpoint has no newly published Work. The host pin and call hash
       // bind the existing work without repurposing publication-only workRef.
-      budget: { maxSteps: 8, budgetUnits: contract.execution.budgetUnits * 8, timeoutMs } });
+      budget: { maxSteps: input.executionBudget?.policy.maxToolCalls ?? 8,
+        budgetUnits: input.executionBudget?.policy.budgetUnits ?? contract.execution.budgetUnits * 8, timeoutMs,
+        ...(input.executionBudget ? { deadlineAt: input.executionBudget.policy.deadlineAt } : {}) } });
+    const executionBudget = this.executionBudget(runtime, input.signal, input.executionBudget);
+    deadlineAt = executionBudget.policy.deadlineAt;
+    const unlinkBudget = linkBudget(executionBudget, controller);
     const getExecutionContext = (): ToolExecutionContext => ({
       currentDocumentId: selection.workId, currentDocumentIR: eligible ? ir : undefined,
       revision: selection.revision, operation: 'analyze', capabilities: [contract.toolId],
@@ -402,7 +554,7 @@ export class ConversationDocumentToolSessionService implements ConversationDocum
             ? Object.assign(new Error('cancelled'), { name: 'AbortError' }) : unavailable());
         };
         for (const parent of [signal, controller.signal]) {
-          const cancelPreparation = () => stop('cancelled');
+          const cancelPreparation = () => stop(parent.reason instanceof ExecutionBudgetError && parent.reason.code === 'timeout' ? 'timeout' : 'cancelled');
           parent.addEventListener('abort', cancelPreparation, { once: true });
           removers.push(() => parent.removeEventListener('abort', cancelPreparation));
           if (parent.aborted) cancelPreparation();
@@ -424,7 +576,7 @@ export class ConversationDocumentToolSessionService implements ConversationDocum
       return { pageNumber: page.pageNumber, totalPages: pages.length, hidden: page.hidden,
         heading: safeText(page.heading), text };
     } });
-    const bridge = createDocumentToolCallingBridge({ registry, budgetUnits: runtime.budget.budgetUnits,
+    const bridge = createDocumentToolCallingBridge({ registry, executionBudget, budgetUnits: runtime.budget.budgetUnits,
       maxCalls: runtime.budget.maxSteps, timeoutMs: contract.execution.timeoutMs, getExecutionContext,
       runtime: { service: {
         beginToolCall: async (...args) => {
@@ -451,8 +603,9 @@ export class ConversationDocumentToolSessionService implements ConversationDocum
         }
       }] });
     const session: ConversationDocumentToolSession = {
+      executionBudget,
       prepareTools: async signal => {
-        if (!await prepareWithinDeadline(signal)) {
+        if (!await executionBudget.run('prepare', child => prepareWithinDeadline(AbortSignal.any([signal, child])), contract.execution.timeoutMs)) {
           // Subsequent requests already carry tool messages. Removing tools
           // alone cannot revoke that data: stop the request before its HTTP
           // transport can resend a previously authorized observation.
@@ -475,27 +628,31 @@ export class ConversationDocumentToolSessionService implements ConversationDocum
         if (result.status === 'success' && result.observation !== undefined) observationDelivered = true;
         return result;
       } },
+      cancel: async () => { invalidate(); executionBudget.cancel('cancelled'); controller.abort(); },
       close: async () => {
         if (closed) return;
         closed = true;
         invalidate();
         controller.abort();
+        unlinkBudget(); if (!input.executionBudget) executionBudget.dispose();
         input.signal?.removeEventListener('abort', cancel);
         if (this.sessions.get(input.responseExecutionId) === session) this.sessions.delete(input.responseExecutionId);
         for (const [draftId, pin] of this.draftPins) {
           if (pin.selection === selection) this.draftPins.delete(draftId);
         }
+        if (bridge.hasUnknownResult()) await service.markNeedsReconciliation(runtime);
         const stored = await service.require(runtime);
         if (['planning', 'running', 'paused', 'waiting_input'].includes(stored.status)) {
-          // This is a read session, not a newly published Work. Do not manufacture completion.
-          await service.setStatus(runtime, 'paused');
+          if (stored.toolCalls.at(-1)?.status === 'completed') await service.completeRead(runtime);
+          else await service.setStatus(runtime, stored.toolCalls.at(-1)?.status === 'failed' ? 'failed' : 'paused');
         }
       }
     };
     return session;
   }
 
-  private async createMutationSession(input: { readonly selection: ConversationDocumentMutationToolSelection; readonly responseExecutionId: string; readonly signal?: AbortSignal }): Promise<ConversationDocumentToolSession> {
+  private async createMutationSession(input: { readonly selection: ConversationDocumentMutationToolSelection; readonly responseExecutionId: string; readonly signal?: AbortSignal;
+    readonly executionBudget?: HostExecutionBudget }): Promise<ConversationDocumentToolSession> {
     if (!this.options.mutation || !await this.matchesMutation(input.selection)) throw unavailable();
     const selection = input.selection;
     const registry = createCanonicalToolRegistry();
@@ -508,7 +665,7 @@ export class ConversationDocumentToolSessionService implements ConversationDocum
     const cancel = () => controller.abort();
     input.signal?.addEventListener('abort', cancel, { once: true });
     if (input.signal?.aborted) cancel();
-    const deadlineAt = Date.now() + 540_000;
+    let deadlineAt = Date.now() + 540_000;
     let closed = false;
     let current: DocumentMutationHead | undefined;
     let eligible = false;
@@ -524,9 +681,12 @@ export class ConversationDocumentToolSessionService implements ConversationDocum
       (!this.options.mutation?.canWrite || await this.options.mutation.canWrite(selection));
     const host = createProductionDocumentMutationHost({
       rootDirectory: this.options.rootDirectory, projectId: this.options.projectId, selection,
-      renderPreview: this.options.mutation.renderPreview,
+      renderPreview: (temporary, request) => executionBudget.run('render', signal => this.options.mutation!.renderPreview(temporary,
+        { ...request, signal: AbortSignal.any([request.signal, signal]) }), updateContract.execution.timeoutMs),
       refreshSession: async candidate => {
         committedWorkId = candidate.pin.headWorkId;
+        // A late commit only adds an artifact fact; it cannot restore execution.
+        if (closed) await service.recordRegisteredWork(runtime, committedWorkId);
         if (!await authorized()) throw new Error('authorization_denied');
         const fresh = await host.readHead();
         if (!validSession() || fresh.pin.headWorkId !== candidate.pin.headWorkId) throw new Error('committed_pending_refresh');
@@ -549,7 +709,12 @@ export class ConversationDocumentToolSessionService implements ConversationDocum
       { validateBindings: async () => this.matchesMutation(selection) });
     const runtime = await service.create({ id: runtimeId, projectId: this.options.projectId, conversationId: selection.conversationId,
       sourceMessageId: selection.currentUserMessageId, executionId: input.responseExecutionId, documentKind: 'ppt', operation: 'edit',
-      budget: { maxSteps: 12, budgetUnits: 32, timeoutMs: 540_000 } });
+      budget: { maxSteps: input.executionBudget?.policy.maxToolCalls ?? 12,
+        budgetUnits: input.executionBudget?.policy.budgetUnits ?? 32, timeoutMs: 540_000,
+        ...(input.executionBudget ? { deadlineAt: input.executionBudget.policy.deadlineAt } : {}) } });
+    const executionBudget = this.executionBudget(runtime, input.signal, input.executionBudget);
+    deadlineAt = Math.min(executionBudget.policy.deadlineAt, Date.parse(runtime.createdAt) + runtime.budget.timeoutMs);
+    const unlinkBudget = linkBudget(executionBudget, controller);
     const refresh = async (signal: AbortSignal) => {
       const startedEpoch = ++epoch;
       eligible = false; writable = false;
@@ -626,7 +791,8 @@ export class ConversationDocumentToolSessionService implements ConversationDocum
       }
       return undefined;
     };
-    const bridge = createDocumentToolCallingBridge({ registry, budgetUnits: 32, maxCalls: 12, timeoutMs: updateContract.execution.timeoutMs,
+    const bridge = createDocumentToolCallingBridge({ registry, executionBudget, budgetUnits: runtime.budget.budgetUnits,
+      maxCalls: runtime.budget.maxSteps, timeoutMs: updateContract.execution.timeoutMs,
       getExecutionContext: context, runtime: { service: {
         beginToolCall: async (...args) => { const result = await service.beginToolCall(...args); checkpoint = { revision: result.runtime.revision, step: result.runtime.checkpoint.step }; return result; },
         recordObservation: async (...args) => { const result = await service.recordObservation(...args); checkpoint = { revision: result.revision, step: result.checkpoint.step }; return result; }
@@ -728,9 +894,10 @@ export class ConversationDocumentToolSessionService implements ConversationDocum
           } }
       ] });
     const session: ConversationDocumentToolSession = {
+      executionBudget,
       prepareTools: async signal => {
         try {
-          if (!await refresh(signal)) {
+          if (!await executionBudget.run('prepare', child => refresh(AbortSignal.any([signal, child])), 30_000)) {
             if (observationDelivered) throw unavailable();
             return undefined;
           }
@@ -738,10 +905,11 @@ export class ConversationDocumentToolSessionService implements ConversationDocum
         return bridge.tools.length ? bridge.tools : undefined;
       },
       bridge: { execute: request => bridge.bridge.execute(request) },
-      cancel: async () => { epoch += 1; eligible = false; writable = false; controller.abort(); },
+      cancel: async () => { epoch += 1; eligible = false; writable = false; executionBudget.cancel('cancelled'); controller.abort(); },
       close: async () => {
         if (closed) return;
         closed = true; epoch += 1; eligible = false; writable = false; controller.abort();
+        unlinkBudget(); if (!input.executionBudget) executionBudget.dispose();
         input.signal?.removeEventListener('abort', cancel);
         this.sessions.delete(input.responseExecutionId);
         // Provider cancellation ends the loop immediately. A separate host fact
@@ -752,18 +920,14 @@ export class ConversationDocumentToolSessionService implements ConversationDocum
           await emitProductionEvent({ code: 'tool_result', status: 'completed', operationId: 'mutation_committed_fact',
             facts: { tool: 'patch', purpose: 'tool', count: 1 } });
         }
-        const stored = await service.require(runtime);
-        if (['planning', 'running', 'paused'].includes(stored.status)) {
-          if (committedWorkId) await service.complete(runtime, committedWorkId);
-          else await service.setStatus(runtime, 'paused');
-        }
+        await this.settleClosedTask(service, runtime, committedWorkId, executionBudget.stopReason === 'cancelled', bridge.hasUnknownResult());
       }
     };
     return session;
   }
 
   private async createGenerationSession(input: { readonly selection: ConversationDocumentGenerationToolSelection; readonly responseExecutionId: string;
-    readonly signal?: AbortSignal }): Promise<ConversationDocumentToolSession> {
+    readonly signal?: AbortSignal; readonly combined?: boolean; readonly executionBudget?: HostExecutionBudget }): Promise<ConversationDocumentToolSession> {
     if (!this.options.generatePptx) throw unavailable();
     const selection = input.selection;
     const registry = createCanonicalToolRegistry();
@@ -773,13 +937,15 @@ export class ConversationDocumentToolSessionService implements ConversationDocum
     const cancel = () => controller.abort();
     input.signal?.addEventListener('abort', cancel, { once: true });
     if (input.signal?.aborted) cancel();
-    const timeoutMs = Math.min(generateContract.execution.timeoutMs * 2, 900_000);
-    const deadlineAt = Date.now() + timeoutMs;
+    const timeoutMs = input.combined ? 540_000 : Math.min(generateContract.execution.timeoutMs * 2, 900_000);
+    let deadlineAt = Date.now() + timeoutMs;
     let closed = false;
     let cancelRequested = false;
     let generatedWorkId: WorkId | undefined;
     let generationEligible = selection.authorizationStatus === 'approved';
     let observationDelivered = false;
+    let readBackAttempted = false;
+    let readBackUnavailable = false;
     let refreshEpoch = 0;
     let generatedPin: ReturnType<typeof generatedDocumentPin> | undefined;
     let currentDocument: { readonly ir: DocumentIR; readonly pages: readonly PptxPhysicalPage[];
@@ -793,7 +959,12 @@ export class ConversationDocumentToolSessionService implements ConversationDocum
     const runtime = await service.create({ id: runtimeId, projectId: this.options.projectId,
       conversationId: selection.conversationId, sourceMessageId: selection.currentUserMessageId,
       executionId: input.responseExecutionId, documentKind: 'ppt', operation: 'create',
-      budget: { maxSteps: 8, budgetUnits: 24, timeoutMs } });
+      budget: { maxSteps: input.executionBudget?.policy.maxToolCalls ?? (input.combined ? 12 : 8),
+        budgetUnits: input.executionBudget?.policy.budgetUnits ?? (input.combined ? 32 : 24), timeoutMs,
+        ...(input.executionBudget ? { deadlineAt: input.executionBudget.policy.deadlineAt } : {}) } });
+    const executionBudget = this.executionBudget(runtime, input.signal, input.executionBudget);
+    deadlineAt = executionBudget.policy.deadlineAt;
+    const unlinkBudget = linkBudget(executionBudget, controller);
     const invalidate = () => {
       refreshEpoch += 1;
       generationEligible = false;
@@ -825,11 +996,10 @@ export class ConversationDocumentToolSessionService implements ConversationDocum
         // revocation, but a cancelled or stale read can never restore tools.
         generatedPin = nextPin;
         currentDocument = { ir, pages: current.pages, pin: nextPin };
-        void emitProductionEvent({ code: 'tool_authorization', status: 'completed', operationId: 'runtime_context_refreshed', facts: { tool: 'read_sources', purpose: 'tool' } });
         return true;
       } catch (error) {
         const reason = error && typeof error === 'object' && 'safeReason' in error && typeof error.safeReason === 'string' ? error.safeReason : 'unknown';
-        void emitProductionEvent({ code: 'tool_authorization', status: 'failed', operationId: `runtime_context_refresh_failed_${reason}`, facts: { tool: 'read_sources', purpose: 'tool' } });
+        void emitProductionDiagnostic({ code: 'tool_authorization', status: 'failed', operationId: `runtime_context_refresh_failed_${reason}`, facts: { tool: 'read_sources', purpose: 'tool' } });
         return false;
       }
     };
@@ -850,7 +1020,7 @@ export class ConversationDocumentToolSessionService implements ConversationDocum
             ? Object.assign(new Error('cancelled'), { name: 'AbortError' }) : unavailable());
         };
         for (const parent of [signal, controller.signal]) {
-          const cancelPreparation = () => stop('cancelled');
+          const cancelPreparation = () => stop(parent.reason instanceof ExecutionBudgetError && parent.reason.code === 'timeout' ? 'timeout' : 'cancelled');
           parent.addEventListener('abort', cancelPreparation, { once: true });
           removers.push(() => parent.removeEventListener('abort', cancelPreparation));
           if (parent.aborted) cancelPreparation();
@@ -869,7 +1039,8 @@ export class ConversationDocumentToolSessionService implements ConversationDocum
       currentDocumentIR: currentDocument?.ir,
       revision: generatedPin?.revision ?? selection.userMessageRevision,
       operation: 'create', capabilities: [generateContract.toolId, readContract.toolId],
-      projectContext: { projectId: this.options.projectId, ...(generatedPin ? { workId: generatedPin.workId } : {}) },
+      projectContext: { projectId: this.options.projectId, responseExecutionId: input.responseExecutionId,
+        ...(generatedPin ? { workId: generatedPin.workId } : {}) },
       authorization: {
         canRead: Boolean((currentDocument || (!generatedWorkId && generationEligible)) && !closed && !controller.signal.aborted && this.active()),
         canWrite: !generatedWorkId && generationEligible && !closed && !controller.signal.aborted && this.active(),
@@ -897,16 +1068,22 @@ export class ConversationDocumentToolSessionService implements ConversationDocum
       if (message.documentResult) break;
       if (message.role === 'user') brief.unshift(message.displayContent ?? message.content);
     }
+    const pageRequirement = parsePresentationPageRequirement(brief.join('\n'));
     const generateBinding = createGeneratePptxBinding({ ...this.options.generatePptx,
+      executionBudget,
+      pageRequirement,
       ...(this.options.artDirectionPlanner ? { artDirection: {
         userRequirement: brief.join('\n'),
         request: async (request: PresentationArtDirectionRequest) => {
+          executionBudget.assertCanProceed('design');
           if (request.signal.aborted || !await this.matchesGeneration(selection)) throw unavailable();
+          executionBudget.assertCanProceed('design');
+          if (request.signal.aborted) throw unavailable();
           return this.options.artDirectionPlanner!({ ...request, responseExecutionId: input.responseExecutionId });
         }
       } } : {})
     }, { registry });
-    const bridge = createDocumentToolCallingBridge({ registry, budgetUnits: runtime.budget.budgetUnits,
+    const bridge = createDocumentToolCallingBridge({ registry, executionBudget, budgetUnits: runtime.budget.budgetUnits,
       maxCalls: runtime.budget.maxSteps, timeoutMs: generateContract.execution.timeoutMs, getExecutionContext,
       runtime: { service: {
         beginToolCall: async (...args) => { const result = await service.beginToolCall(...args); checkpoint = { revision: result.runtime.revision, step: result.runtime.checkpoint.step }; return result; },
@@ -915,12 +1092,14 @@ export class ConversationDocumentToolSessionService implements ConversationDocum
         { contract: generateBinding.contract,
           authorize: async (args, context) => selection.authorizationStatus === 'approved' && !generatedWorkId &&
             await this.matchesGeneration(selection) && await generateBinding.authorize(args, context),
+          ...(generateBinding.preflight ? { preflight: generateBinding.preflight } : {}),
           execute: async (args, context) => {
             const result = await generateBinding.execute(args, context);
             if (result.status === 'success') {
               const ref = result.artifactRefs?.find(item => item.kind === 'work')?.ref;
               if (ref) {
                 generatedWorkId = ref as WorkId;
+                await service.recordRegisteredWork(runtime, generatedWorkId);
                 invalidate();
                 await emitProductionEvent({ code: 'tool_result', status: 'completed', operationId: 'artifact_registered', facts: { tool: 'write_document', purpose: 'tool' } });
                 // File verification happens in the next bounded prepare step.
@@ -946,9 +1125,10 @@ export class ConversationDocumentToolSessionService implements ConversationDocum
           } }
       ] });
     const session: ConversationDocumentToolSession = {
+      executionBudget,
       prepareTools: async signal => {
-        void emitProductionEvent({ code: 'tool_authorization', status: 'started', operationId: 'prepare_tools_enter', facts: { tool: 'read_sources', purpose: 'tool' } });
         if (!await prepareWithinDeadline(signal)) {
+          if (!input.combined && generatedWorkId && !signal.aborted && !controller.signal.aborted && !closed) readBackUnavailable = true;
           if (observationDelivered) {
             const cancelled = signal.aborted || controller.signal.aborted || closed;
             controller.abort();
@@ -957,54 +1137,68 @@ export class ConversationDocumentToolSessionService implements ConversationDocum
           }
           return undefined;
         }
-        void emitProductionEvent({ code: 'tool_authorization', status: 'started', operationId: 'available_tool_set_finalize', facts: { tool: 'read_sources', purpose: 'tool' } });
+        // Even a tool-free final answer must revalidate the current file and
+        // its authorization before the model can receive prior read contents.
+        if (!input.combined && generatedWorkId && readBackAttempted) return undefined;
         let availableTools: readonly ControlledProviderToolDefinition[];
         try {
           availableTools = bridge.tools;
         } catch (error) {
           const reason = error instanceof Error && /^[A-Za-z][A-Za-z0-9_.-]{0,63}$/.test(error.name) ? error.name : 'unknown';
-          void emitProductionEvent({ code: 'tool_authorization', status: 'failed', operationId: `available_tool_set_finalize_failed_${reason}`, facts: { tool: 'read_sources', purpose: 'tool' } });
+          void emitProductionDiagnostic({ code: 'tool_authorization', status: 'failed', operationId: `available_tools_prepare_failed_${reason}`, facts: { tool: 'read_sources', purpose: 'tool' } });
           throw error;
         }
-        void emitProductionEvent({ code: 'tool_authorization', status: availableTools.some(tool => tool.function.name === readContract.toolId) ? 'completed' : 'failed', operationId: 'available_tools_refreshed', facts: { tool: 'read_sources', purpose: 'tool', count: availableTools.length } });
-        void emitProductionEvent({ code: 'tool_authorization', status: 'completed', operationId: 'available_tool_set_finalize', facts: { tool: 'read_sources', purpose: 'tool', count: availableTools.length } });
-        void emitProductionEvent({ code: 'tool_authorization', status: 'completed', operationId: 'prepare_tools_exit', facts: { tool: 'read_sources', purpose: 'tool', count: availableTools.length } });
+        void emitProductionDiagnostic({ code: 'tool_authorization', status: 'completed', operationId: 'available_tools_prepared',
+          facts: { tool: generatedWorkId ? 'read_sources' : 'write_document', purpose: 'tool', count: availableTools.length } });
         return availableTools.length ? availableTools : undefined;
       },
-      bridge: { execute: async request => {
+      bridge: { ...(!input.combined ? { finalizationState: () => generatedWorkId && !closed && !controller.signal.aborted && !executionBudget.stopReason && !bridge.hasUnknownResult() ? {
+        phase: readBackAttempted || readBackUnavailable ? 'final' as const : 'readback' as const,
+        readBackConfirmed: observationDelivered,
+        ...(observationDelivered && currentDocument ? { actualTotalPages: currentDocument.pages.length } : {}),
+        ...(pageRequirement ? { planningTotalPages: presentationPlanningTotalPages(pageRequirement) } : {})
+      } : undefined } : {}), execute: async request => {
         const result = await bridge.bridge.execute(request);
-        if (request.call.name === readContract.toolId && result.status === 'success' && result.observation !== undefined) observationDelivered = true;
+        if (generatedWorkId && request.call.name === readContract.toolId && request.call.arguments.scope === 'document' &&
+            result.status !== 'unknown' && !request.signal.aborted && !controller.signal.aborted) {
+          readBackAttempted = true;
+          if (result.status === 'success' && result.observation !== undefined) observationDelivered = true;
+        }
         return result;
       } },
-      cancel: async () => { cancelRequested = true; invalidate(); controller.abort(); },
+      cancel: async () => { cancelRequested = true; invalidate(); executionBudget.cancel('cancelled'); controller.abort(); },
       close: async () => {
         if (closed) return;
         closed = true; invalidate(); controller.abort(); input.signal?.removeEventListener('abort', cancel);
+        unlinkBudget(); if (!input.combined && !input.executionBudget) executionBudget.dispose();
         if (this.sessions.get(input.responseExecutionId) === session) this.sessions.delete(input.responseExecutionId);
-        const stored = await service.require(runtime);
-        if (generatedWorkId && ['planning', 'running', 'paused'].includes(stored.status)) await service.complete(runtime, generatedWorkId);
-        else if (cancelRequested && ['planning', 'running', 'paused'].includes(stored.status)) await service.setStatus(runtime, 'cancelled');
-        else if (['planning', 'running', 'paused'].includes(stored.status)) await service.setStatus(runtime, 'paused');
+        await this.settleClosedTask(service, runtime, generatedWorkId, cancelRequested, bridge.hasUnknownResult());
       }
     };
+    const prepareTools = session.prepareTools;
+    session.prepareTools = signal => executionBudget.run('prepare', child => prepareTools(AbortSignal.any([signal, child])), readContract.execution.timeoutMs);
     return session;
   }
 
   private async createAgentSession(input: { readonly selection: ConversationAgentToolSelection; readonly responseExecutionId: string;
-    readonly signal?: AbortSignal }): Promise<ConversationDocumentToolSession> {
-    const generation = await this.createGenerationSession({ selection: input.selection.generation, responseExecutionId: input.responseExecutionId, signal: input.signal });
+    readonly signal?: AbortSignal; readonly executionBudget?: HostExecutionBudget }): Promise<ConversationDocumentToolSession> {
+    const generation = await this.createGenerationSession({ selection: input.selection.generation, responseExecutionId: input.responseExecutionId, signal: input.signal,
+      combined: Boolean(input.selection.mutation), executionBudget: input.executionBudget });
     let mutation: ConversationDocumentToolSession | undefined;
     try {
       mutation = input.selection.mutation
-        ? await this.createMutationSession({ selection: input.selection.mutation, responseExecutionId: input.responseExecutionId, signal: input.signal })
+        ? await this.createMutationSession({ selection: input.selection.mutation, responseExecutionId: input.responseExecutionId, signal: input.signal,
+            executionBudget: generation.executionBudget })
         : undefined;
     } catch (error) {
       await generation.close().catch(() => undefined);
+      if (!input.executionBudget) generation.executionBudget?.dispose();
       throw error;
     }
     const mutationTools = new Set<string>();
     let generationPublished = false;
-    return {
+    const session: ConversationDocumentToolSession = {
+      executionBudget: generation.executionBudget,
       prepareTools: async signal => {
         const generationDefinitions = await generation.prepareTools(signal) ?? [];
         const mutationDefinitions = mutation ? await mutation.prepareTools(signal) ?? [] : [];
@@ -1013,6 +1207,7 @@ export class ConversationDocumentToolSessionService implements ConversationDocum
         return definitions.length ? definitions : undefined;
       },
       bridge: {
+        ...(!mutation ? { finalizationState: () => generation.bridge.finalizationState?.() } : {}),
         execute: async request => {
           if (request.call.name === 'generate_pptx') {
             const result = await generation.bridge.execute(request);
@@ -1031,9 +1226,86 @@ export class ConversationDocumentToolSessionService implements ConversationDocum
         await Promise.all([generation.cancel?.(), mutation?.cancel?.()]);
       },
       close: async () => {
-        await Promise.all([generation.close(), mutation?.close()]);
+        if (this.sessions.get(input.responseExecutionId) === session) this.sessions.delete(input.responseExecutionId);
+        const settlement = Promise.all([generation.close(), mutation?.close()]);
+        if (!input.executionBudget) generation.executionBudget?.dispose();
+        await settlement;
       }
     };
+    return session;
+  }
+
+  private executionBudget(runtime: DocumentTaskRuntime, signal?: AbortSignal, supplied?: HostExecutionBudget): HostExecutionBudget {
+    if (supplied) return supplied;
+    const startedAt = Date.parse(runtime.createdAt);
+    return this.newExecutionBudget({ startedAt, deadlineAt: runtime.budget.deadlineAt ?? startedAt + runtime.budget.timeoutMs,
+      maxToolCalls: runtime.budget.maxSteps, budgetUnits: runtime.budget.budgetUnits }, signal);
+  }
+
+  private async inheritedExecutionContext(responseExecutionId: string, startupSignal?: AbortSignal) {
+    const load = this.options.getInheritedExecutionContext;
+    if (!load) return undefined;
+    const controller = new AbortController();
+    this.pendingContextControllers.add(controller);
+    const signal = startupSignal ? AbortSignal.any([startupSignal, controller.signal]) : controller.signal;
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    let cancel!: () => void;
+    const interrupted = new Promise<never>((_resolve, reject) => {
+      cancel = () => {
+        try { assertStartupSignal(signal); }
+        catch (error) { reject(error); }
+      };
+      signal.addEventListener('abort', cancel, { once: true });
+      timer = setTimeout(() => controller.abort(new ExecutionBudgetError('timeout', 'prepare')), 30_000);
+    });
+    try {
+      assertStartupSignal(signal);
+      if (this.disposed) throw new ExecutionBudgetError('cancelled', 'prepare');
+      const pending = Promise.resolve().then(() => { assertStartupSignal(signal); return load(responseExecutionId); });
+      void pending.catch(() => undefined);
+      const inherited = await Promise.race([pending, interrupted]);
+      assertStartupSignal(signal);
+      return inherited;
+    } finally {
+      if (timer) clearTimeout(timer);
+      signal.removeEventListener('abort', cancel);
+      this.pendingContextControllers.delete(controller);
+    }
+  }
+
+  private async settleClosedTask(service: DocumentTaskRuntimeService, runtime: DocumentTaskRuntime,
+    workId: string | undefined, cancelled: boolean, unknown: boolean): Promise<void> {
+    if (unknown) await service.markNeedsReconciliation(runtime);
+    let stored = await service.require(runtime);
+    if (workId && ['running', 'paused', 'needs_reconciliation'].includes(stored.status)) {
+      stored = await service.recordRegisteredWork(runtime, workId);
+    }
+    if (!['planning', 'running', 'paused'].includes(stored.status)) return;
+    if (stored.toolCalls.some(call => ['started', 'unknown'].includes(call.status))) {
+      await service.setStatus(runtime, 'paused');
+    } else if (stored.toolCalls.at(-1)?.status === 'failed') {
+      await service.setStatus(runtime, 'failed');
+    } else if (stored.workRef?.kind === 'registered') {
+      await service.complete(runtime, stored.workRef.ref);
+    } else await service.setStatus(runtime, cancelled ? 'cancelled' : 'paused');
+  }
+
+  private rememberStartupSignal(selection: ConversationDocumentToolSelection, signal?: AbortSignal): ConversationDocumentToolSelection {
+    const prior = this.startupSignals.get(selection);
+    const combined = prior && signal ? AbortSignal.any([prior, signal]) : prior ?? signal;
+    assertStartupSignal(combined);
+    if (combined) this.startupSignals.set(selection, combined);
+    return selection;
+  }
+
+  private newExecutionBudget(policy: ExecutionBudgetPolicy, signal?: AbortSignal): HostExecutionBudget {
+    const traceScope = getProductionTraceScope();
+    return new HostExecutionBudget(policy, { signal,
+      onDiagnostic: diagnostic => {
+        const report = () => emitProductionDiagnostic({ code: 'model_response',
+          status: diagnostic.stopReason === 'cancelled' ? 'cancelled' : 'failed', operationId: 'execution_budget', facts: diagnostic });
+        return traceScope ? withProductionTrace(traceScope, report) : report();
+      } });
   }
 
   private active(): boolean {
@@ -1122,7 +1394,8 @@ export function buildDocumentGenerationToolInstruction(selection: ConversationDo
     selection.authorizationStatus === 'approved'
       ? 'The user explicitly approved this generation request. Use reasonable defaults for omitted optional values, then call generate_pptx when the request is sufficiently specified.'
       : 'The user has not approved generation yet. Ask naturally: “现在开始生成吗？” Do not call generate_pptx until the user explicitly agrees.',
-    'The tool accepts only title, content, theme, presentationTemplate and requestedTotalPages. The host owns output and publication.'
+    'The tool accepts only title, content, theme, presentationTemplate and requestedTotalPages. The host owns output and publication.',
+    'An ordinary page number is a planning target, not an exact acceptance condition. Plan the total including cover and closing; only explicit exact/range/maximum user requirements are hard constraints owned by the host. Preserve complete content and legibility. After success report the actual pageCount and explain any page_count_deviation; do not regenerate solely to eliminate a target deviation.'
   ].join('\n');
 }
 
