@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { renderToStaticMarkup } from 'react-dom/server';
-import { DocumentProgress } from '../../src/pages/chat/DocumentProgress';
+import { DocumentProgress, productionActivityLabel } from '../../src/pages/chat/DocumentProgress';
 import { mergeProductionEvents, projectProductionMessages } from '../../src/pages/chat/productionTimeline';
 import type { ConversationDto, MessageDto } from '../../src/shared/chat-context-ipc';
 import type { ProductionTraceEventDto } from '../../src/shared/conversation-production-ipc';
@@ -20,6 +20,10 @@ function conversation(messages: readonly MessageDto[]): ConversationDto {
 }
 
 describe('production timeline projection', () => {
+  it('labels the latest production activity without opening the full trace', () => {
+    expect(productionActivityLabel(event(1, { code: 'request_received', status: 'completed' }))).toBe('接收任务 · 已完成');
+  });
+
   it('merges a racing history read and live events once in durable sequence order', () => {
     const live = [event(3), event(1)];
     const result = mergeProductionEvents(live, [event(2), event(3)]);

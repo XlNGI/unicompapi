@@ -82,3 +82,10 @@ test('video editor shell has responsive scoped layout without a second state sto
   assert.match(stylesSource, /@media \(max-width: 1180px\)/);
   assert.doesNotMatch(editorSource, /useReducer|createStore|timelineStart/);
 });
+
+test('video editor reloads the open project when the title bar switches projects', () => {
+  assert.match(editorSource, /PROJECT_SESSION_CHANGED_EVENT/);
+  assert.match(editorSource, /let requestId = 0;/);
+  assert.match(editorSource, /window\.addEventListener\(PROJECT_SESSION_CHANGED_EVENT, load\)/);
+  assert.match(editorSource, /if \(!active\) return;/);
+});

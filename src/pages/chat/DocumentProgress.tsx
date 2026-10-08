@@ -21,6 +21,8 @@ export interface DocumentProgressProps {
   readonly bodyStreaming?: boolean;
   /** When developer mode is enabled, structured facts like docId, nodeId, duration and tool calls can be inspected */
   readonly developerMode?: boolean;
+  /** Chat activity already shows the latest status, so the expanded trace does not repeat it. */
+  readonly hideSummary?: boolean;
 }
 
 const stages: Record<ConversationTaskProgressSnapshot['stage'], string> = {
@@ -86,6 +88,11 @@ function eventTitle(event: ProductionTraceEventDto): string {
   if (event.code === 'plan_validation' && event.facts?.purpose === 'source_summary') return '校验资料摘要格式';
   return eventTitles[event.code];
 }
+
+export function productionActivityLabel(event: ProductionTraceEventDto): string {
+  return `${eventTitle(event)} · ${statusLabels[event.status]}`;
+}
+
 function eventDirection(event: ProductionTraceEventDto): string {
   if (event.code === 'model_request') return '本地 → 模型';
   if (event.code === 'model_response' || event.code === 'plan_decision') return '模型 → 本地';
@@ -111,7 +118,7 @@ function eventDetails(event: ProductionTraceEventDto): string[] {
   return details;
 }
 
-export function DocumentProgress({ detail, taskProgress = [], preferDetail = false, events = [], request, requestBySource, incomplete, terminalDetail, bodyContent, bodyStreaming = false, developerMode = false }: DocumentProgressProps) {
+export function DocumentProgress({ detail, taskProgress = [], preferDetail = false, events = [], request, requestBySource, incomplete, terminalDetail, bodyContent, bodyStreaming = false, developerMode = false, hideSummary = false }: DocumentProgressProps) {
   const latest = taskProgress.reduce<ConversationTaskProgressSnapshot | undefined>(
     (previous, event) => !previous || event.sequence > previous.sequence ? event : previous,
     undefined
@@ -134,10 +141,12 @@ export function DocumentProgress({ detail, taskProgress = [], preferDetail = fal
   ) : null;
   return (
     <section className="uc-chat-document-progress" aria-label="生产进度" data-developer-mode={developerMode ? 'true' : 'false'}>
-      <p className="uc-chat-document-progress__summary" role="status" aria-live="polite">
-        <span className="uc-chat-document-progress__label">生产进度</span>
-        <span>{summary}</span>
-      </p>
+      {hideSummary ? null : (
+        <p className="uc-chat-document-progress__summary" role="status" aria-live="polite">
+          <span className="uc-chat-document-progress__label">生产进度</span>
+          <span>{summary}</span>
+        </p>
+      )}
       {incomplete ? <p className="uc-chat-production-trace__issue" role="status">生产记录不完整，以下仅展示已保存的执行事实。</p> : null}
       {displayEvents.length > 0 ? (
         <ol className="uc-chat-production-trace" aria-label="完整生产链路">

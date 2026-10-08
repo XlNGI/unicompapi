@@ -51,6 +51,7 @@ vi.mock('react', async (original) => {
 });
 
 import { VideoEditingPage } from '../../src/pages/creation/video/VideoEditingPage';
+import { PROJECT_SESSION_CHANGED_EVENT } from '../../src/ui/project-session-events';
 
 type Element = ReactElement<Record<string, unknown>>;
 function find(node: ReactNode, predicate: (element: Element) => boolean): Element | undefined {
@@ -80,6 +81,7 @@ describe('video editor visibility effect behavior', () => {
   const listDrafts = vi.fn();
   const listWorks = vi.fn();
   const listTasks = vi.fn();
+  let windowEvents: EventTarget;
 
   async function settle(active: boolean, rounds = 8) {
     for (let turn = 0; turn < rounds; turn += 1) {
@@ -103,8 +105,11 @@ describe('video editor visibility effect behavior', () => {
     listDrafts.mockResolvedValue({ ok: true, value: [draft] });
     listWorks.mockResolvedValue({ ok: true, value: { items: [] } });
     listTasks.mockResolvedValue({ ok: true, value: { items: [] } });
+    windowEvents = new EventTarget();
     vi.stubGlobal('window', {
       setTimeout, clearTimeout, setInterval, clearInterval,
+      addEventListener: windowEvents.addEventListener.bind(windowEvents),
+      removeEventListener: windowEvents.removeEventListener.bind(windowEvents),
       unicomp: {
         storage: { getProjectSession, listWorks, listTasks },
         videoEditors: { list: listDrafts }
@@ -178,5 +183,21 @@ describe('video editor visibility effect behavior', () => {
     expect(picker().props.value).toBe(draft.draftId);
     expect(saveStatus()).toContain('已自动保存');
     expect(find(tree, (element) => element.props.children === '读取基础编辑工作区失败，请重试。')).toBeUndefined();
+  });
+
+  it('refreshes the active project on a session event and removes the listener while hidden', async () => {
+    await settle(true);
+    const nextSession = { ...session, projectId: 'next-project' };
+    const nextDraft = { ...draft, projectId: nextSession.projectId, draftId: 'next-draft' };
+    getProjectSession.mockResolvedValue({ ok: true, value: nextSession });
+    listDrafts.mockResolvedValue({ ok: true, value: [nextDraft] });
+    windowEvents.dispatchEvent(new Event(PROJECT_SESSION_CHANGED_EVENT));
+    await settle(true);
+    expect(getProjectSession).toHaveBeenCalledTimes(2);
+    expect(picker().props.value).toBe(nextDraft.draftId);
+    await settle(false);
+    windowEvents.dispatchEvent(new Event(PROJECT_SESSION_CHANGED_EVENT));
+    await settle(false);
+    expect(getProjectSession).toHaveBeenCalledTimes(2);
   });
 });

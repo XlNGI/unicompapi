@@ -51,6 +51,7 @@ import type {
   VideoEditorUpdateDto
 } from '../../../shared/video-editor-ipc';
 import '../../../styles/pages.css';
+import { PROJECT_SESSION_CHANGED_EVENT } from '../../../ui/project-session-events';
 import {
   videoEditorThumbnailStripFrameCount as contactSheetFrameCount,
   videoEditorThumbnailStripFrameWidth as contactSheetFrameWidthPx,
@@ -457,64 +458,72 @@ export function VideoEditingPage({
   useEffect(() => {
     if (!active) return;
     let cancelled = false;
+    let requestId = 0;
 
     async function load() {
-      if (!storage || !videoEditors) {
-        setLoading(false);
-        setMessage('本地编辑功能不可用，请在桌面应用中打开。');
-        return;
-      }
+      const request = ++requestId;
+      const expired = () => cancelled || request !== requestId;
+      try {
+        if (!storage || !videoEditors) {
+          if (expired()) return;
+          setLoading(false);
+          setMessage('本地编辑功能不可用，请在桌面应用中打开。');
+          return;
+        }
 
-      const sessionResult = await storage.getProjectSession();
-      if (cancelled) return;
-      if (!sessionResult.ok) {
-        setLoading(false);
-        setMessage('读取当前项目失败，请返回“项目”页面重试。');
-        return;
-      }
-      setSession(sessionResult.value);
-      if (!sessionResult.value) {
-        acceptDraft(undefined);
-        setLoading(false);
-        return;
-      }
+        const sessionResult = await storage.getProjectSession();
+        if (expired()) return;
+        if (!sessionResult.ok) {
+          setLoading(false);
+          setMessage('读取当前项目失败，请返回“项目”页面重试。');
+          return;
+        }
+        setSession(sessionResult.value);
+        if (!sessionResult.value) {
+          acceptDraft(undefined);
+          setLoading(false);
+          return;
+        }
 
-      const [listResult, worksResult] = await Promise.all([
-        videoEditors.list(),
-        storage.listWorks()
-      ]);
-      if (cancelled) return;
-      setLoading(false);
-      if (!listResult.ok) {
-        setMessage(errorMessage(listResult.error.code, '读取编辑草稿失败，请重试。'));
-        return;
+        const [listResult, worksResult] = await Promise.all([
+          videoEditors.list(),
+          storage.listWorks()
+        ]);
+        if (expired()) return;
+        setLoading(false);
+        if (!listResult.ok) {
+          setMessage(errorMessage(listResult.error.code, '读取编辑草稿失败，请重试。'));
+          return;
+        }
+        if (worksResult.ok) {
+          const projectWorks = worksResult.value.items.filter(
+            (work) => work.projectId === sessionResult.value?.projectId
+          );
+          const works = projectWorks.filter((work) => work.mediaKind === 'video');
+          setVideoWorks(works);
+          setImageWorks(projectWorks.filter((work) => work.mediaKind === 'image'));
+          setSelectedWorkId(works[0]?.workId ?? '');
+        }
+        const sorted = sortDrafts(listResult.value);
+        setDrafts(sorted);
+        const preferred = preferredDraftId
+          ? sorted.find((draft) => draft.draftId === preferredDraftId)
+          : undefined;
+        const next = preferred ?? sorted.find((item) => item.draftId === currentDraft?.draftId) ?? sorted[0];
+        if (!expired() && (next?.draftId !== currentDraft?.draftId || next?.revision !== currentDraft?.revision)) acceptDraft(next);
+      } catch {
+        if (!expired()) {
+          setLoading(false);
+          setMessage('读取基础编辑工作区失败，请重试。');
+        }
       }
-      if (worksResult.ok) {
-        const projectWorks = worksResult.value.items.filter(
-          (work) => work.projectId === sessionResult.value?.projectId
-        );
-        const works = projectWorks.filter((work) => work.mediaKind === 'video');
-        setVideoWorks(works);
-        setImageWorks(projectWorks.filter((work) => work.mediaKind === 'image'));
-        setSelectedWorkId(works[0]?.workId ?? '');
-      }
-      const sorted = sortDrafts(listResult.value);
-      setDrafts(sorted);
-      const preferred = preferredDraftId
-        ? sorted.find((draft) => draft.draftId === preferredDraftId)
-        : undefined;
-      const next = preferred ?? sorted.find((item) => item.draftId === currentDraft?.draftId) ?? sorted[0];
-      if (next?.draftId !== currentDraft?.draftId || next?.revision !== currentDraft?.revision) acceptDraft(next);
     }
 
-    void load().catch(() => {
-      if (!cancelled) {
-        setLoading(false);
-        setMessage('读取基础编辑工作区失败，请重试。');
-      }
-    });
+    void load();
+    window.addEventListener(PROJECT_SESSION_CHANGED_EVENT, load);
     return () => {
       cancelled = true;
+      window.removeEventListener(PROJECT_SESSION_CHANGED_EVENT, load);
     };
   }, [active, preferredDraftId, storage, videoEditors]);
 

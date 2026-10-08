@@ -1,5 +1,5 @@
-import { Children, cloneElement, isValidElement, useEffect, useMemo, useRef, useState } from 'react';
-import type { ClipboardEvent, FormEvent, ReactNode } from 'react';
+import { Children, cloneElement, isValidElement, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import type { ClipboardEvent, FormEvent, ReactNode, WheelEvent } from 'react';
 import {
   LuArchive,
   LuArchiveRestore,
@@ -30,7 +30,9 @@ import { Card } from '../../components/Card';
 import { EmptyState } from '../../components/EmptyState';
 import { StreamingMarkdown } from './StreamingMarkdown';
 import { ChatAttachment } from './ChatAttachment';
-import { DocumentProgress } from './DocumentProgress';
+import { DocumentProgress, productionActivityLabel } from './DocumentProgress';
+import { liveReplyCue, reasoningExpanded } from './chatTurnView';
+import { shouldCommitResponseFrame } from './liveResponseStream';
 import { mergeProductionEvents, projectProductionMessages, type PendingProductionInput } from './productionTimeline';
 import type { ProductionTraceEventDto } from '../../shared/conversation-production-ipc';
 import { projectTaskProgress } from '../../shared/conversation-task-progress';
@@ -697,6 +699,23 @@ function ChatDraftField({
   );
 }
 
+
+function writeClipboardText(text: string): void {
+  const area = document.createElement('textarea');
+  area.value = text;
+  area.setAttribute('aria-hidden', 'true');
+  area.style.position = 'fixed';
+  area.style.top = '0';
+  area.style.left = '-9999px';
+  document.body.appendChild(area);
+  area.focus();
+  area.select();
+  area.setSelectionRange(0, area.value.length);
+  const copied = document.execCommand('copy');
+  area.remove();
+  if (!copied) throw new Error('copy failed');
+}
+
 export function ChatPage({
   initialConversationId,
   onConversationChange,
@@ -742,6 +761,14 @@ export function ChatPage({
   const [modelSelection, setModelSelection] = useState<ChatModelSelection | undefined>(initialModelSelection);
   const [responseExecution, setResponseExecution] = useState<ConversationResponseExecutionDto>();
   const [responseStarting, setResponseStarting] = useState(false);
+  const [pendingEcho, setPendingEcho] = useState<{
+    readonly echoId: string;
+    readonly content: string;
+    readonly createdAt: string;
+    readonly conversationId?: string;
+  }>();
+  const [openThoughtIds, setOpenThoughtIds] = useState<ReadonlySet<string>>(() => new Set());
+  const [openProductionIds, setOpenProductionIds] = useState<ReadonlySet<string>>(() => new Set());
   const [activeWorkflow, setActiveWorkflow] = useState<ConversationWorkflowDto>();
   const [webResearchSession, setWebResearchSession] = useState<WebResearchSessionDto>();
   const [cancelRequested, setCancelRequested] = useState(false);
@@ -775,11 +802,26 @@ export function ChatPage({
   const [candidateReloadVersion, setCandidateReloadVersion] = useState(0);
   const attachmentInputRef = useRef<HTMLInputElement>(null);
   const messagesRef = useRef<HTMLDivElement>(null);
-  const followScrollFrameRef = useRef<number>();
+  const pinningScrollRef = useRef(false);
+  const releasedByUserRef = useRef(false);
+  const showScrollButtonRef = useRef(false);
+  const pinMessagesToBottomRef = useRef(() => {});
   const dragDepthRef = useRef(0);
   const cancelRequestedRef = useRef(false);
   const cancelAfterStartRef = useRef(false);
   const inputValueRef = useRef('');
+  const productionQueueRef = useRef<ProductionTraceEventDto[]>([]);
+  const productionTimerRef = useRef<ReturnType<typeof setTimeout>>();
+  function queueLiveProductionEvents(events: readonly ProductionTraceEventDto[]) {
+    productionQueueRef.current.push(...events);
+    if (productionTimerRef.current !== undefined) return;
+    productionTimerRef.current = setTimeout(() => {
+      productionTimerRef.current = undefined;
+      const batch = productionQueueRef.current;
+      productionQueueRef.current = [];
+      if (batch.length > 0) setProductionEvents((current) => mergeProductionEvents(current, batch));
+    }, 300);
+  }
   const selectedIdRef = useRef(selectedId);
   selectedIdRef.current = selectedId;
   const draftsRef = useRef(new Map<string, ComposerDraft>());
@@ -818,8 +860,33 @@ export function ChatPage({
     readonly safeCode?: string;
   }>();
   const followOutputRef = useRef(true);
+  pinMessagesToBottomRef.current = () => {
+    if (!followOutputRef.current || releasedByUserRef.current) return;
+    const messages = messagesRef.current;
+    if (!messages) return;
+    const distance = messages.scrollHeight - messages.scrollTop - messages.clientHeight;
+    if (distance <= 1) return;
+    pinningScrollRef.current = true;
+    messages.scrollTop = messages.scrollHeight;
+    window.requestAnimationFrame(() => {
+      pinningScrollRef.current = false;
+    });
+  };
   const responseExecutionSnapshotRef = useRef(responseExecution);
-  responseExecutionSnapshotRef.current = responseExecution;
+  const liveTextNodeRef = useRef<HTMLDivElement>(null);
+  const liveReasoningNodeRef = useRef<HTMLParagraphElement>(null);
+  const liveThoughtRef = useRef<HTMLDivElement>(null);
+  const liveStatusRef = useRef<HTMLParagraphElement>(null);
+  const incomingExecution = responseExecution;
+  const rememberedExecution = responseExecutionSnapshotRef.current;
+  if (
+    !incomingExecution ||
+    !rememberedExecution ||
+    incomingExecution.responseExecutionId !== rememberedExecution.responseExecutionId ||
+    incomingExecution.streamSequence >= rememberedExecution.streamSequence
+  ) {
+    responseExecutionSnapshotRef.current = incomingExecution;
+  }
 
   const selected = useMemo(
     () => conversations.find((conversation) => conversation.conversationId === selectedId),
@@ -848,7 +915,39 @@ export function ChatPage({
     event.conversationId === (selected?.conversationId ?? pendingProduction?.conversationId));
   const productionProjection = projectProductionMessages(selected, visibleProductionEvents, pendingProduction);
   const displayMessages = useMemo(() => {
-    return productionProjection.messages.map((message) => {
+    const echoVisible = pendingEcho && (
+      pendingEcho.conversationId
+        ? pendingEcho.conversationId === selected?.conversationId
+        : !selected
+    );
+    const echoed = echoVisible && pendingEcho
+      ? [
+          ...productionProjection.messages,
+          {
+            messageId: `pending-user-${pendingEcho.echoId}`,
+            conversationId: pendingEcho.conversationId ?? 'pending',
+            revision: 0,
+            role: 'user' as const,
+            state: 'completed' as const,
+            content: pendingEcho.content,
+            attachments: [],
+            createdAt: pendingEcho.createdAt,
+            updatedAt: pendingEcho.createdAt
+          },
+          {
+            messageId: `pending-assistant-${pendingEcho.echoId}`,
+            conversationId: pendingEcho.conversationId ?? 'pending',
+            revision: 0,
+            role: 'assistant' as const,
+            state: 'pending' as const,
+            content: '',
+            attachments: [],
+            createdAt: pendingEcho.createdAt,
+            updatedAt: pendingEcho.createdAt
+          }
+        ]
+      : productionProjection.messages;
+    return echoed.map((message) => {
       if (!responseExecution || message.messageId !== responseExecution.assistantMessageId) {
         return message;
       }
@@ -860,8 +959,7 @@ export function ChatPage({
         content: responseExecution.content || message.content
       };
     });
-  }, [productionProjection.messages, responseExecution]);
-  const lastDisplayMessage = displayMessages[displayMessages.length - 1];
+  }, [pendingEcho, productionProjection.messages, responseExecution, selected]);
   const duplicateIncludedContexts = useMemo(() => {
     const included = registeredContexts.filter((context) =>
       includedContextIds.includes(context.contextId)
@@ -1059,37 +1157,24 @@ export function ChatPage({
     return () => { active = false; clearTimeout(timer); };
   }, [chat, documentGenerationActive, selectedId]);
 
+  useLayoutEffect(() => {
+    pinMessagesToBottomRef.current();
+  }, [
+    responseExecution?.content,
+    responseExecution?.reasoningContent,
+    responseExecution?.state,
+    selected?.conversationId,
+    productionEvents.length
+  ]);
+
   useEffect(() => {
     const content = messagesRef.current?.firstElementChild;
     if (!content || typeof ResizeObserver === 'undefined') return;
-    const scheduleFollowScroll = () => {
-      if (!followOutputRef.current || followScrollFrameRef.current !== undefined) return;
-      followScrollFrameRef.current = window.requestAnimationFrame(() => {
-        followScrollFrameRef.current = undefined;
-        const messages = messagesRef.current;
-        if (messages && followOutputRef.current) {
-          messages.scrollTo({ top: messages.scrollHeight, behavior: 'auto' });
-        }
-      });
-    };
     const observer = new ResizeObserver(() => {
-      scheduleFollowScroll();
+      pinMessagesToBottomRef.current();
     });
     observer.observe(content);
-    return () => {
-      observer.disconnect();
-      if (followScrollFrameRef.current !== undefined) {
-        window.cancelAnimationFrame(followScrollFrameRef.current);
-        followScrollFrameRef.current = undefined;
-      }
-    };
-  }, []);
-
-  useEffect(() => () => {
-    if (followScrollFrameRef.current !== undefined) {
-      window.cancelAnimationFrame(followScrollFrameRef.current);
-      followScrollFrameRef.current = undefined;
-    }
+    return () => observer.disconnect();
   }, []);
 
   useEffect(() => {
@@ -1101,7 +1186,7 @@ export function ChatPage({
     let active = true;
     const receive = (event: ProductionTraceEventDto) => {
       if (active && event.projectId === session.projectId && event.conversationId === selectedId) {
-        setProductionEvents((current) => mergeProductionEvents(current, [event]));
+        queueLiveProductionEvents([event]);
       }
     };
     const issue = () => {
@@ -1129,6 +1214,7 @@ export function ChatPage({
   useEffect(() => () => {
     for (const unsubscribe of productionCommandSubscriptions.current.values()) unsubscribe();
     productionCommandSubscriptions.current.clear();
+    if (productionTimerRef.current !== undefined) clearTimeout(productionTimerRef.current);
   }, []);
 
   useEffect(() => {
@@ -1192,8 +1278,13 @@ export function ChatPage({
       setEditingMessageId(undefined);
       clearResponseDraftState();
     }
+    releasedByUserRef.current = false;
     followOutputRef.current = true;
-    setShowScrollToBottom(false);
+    if (showScrollButtonRef.current) {
+      showScrollButtonRef.current = false;
+      setShowScrollToBottom(false);
+    }
+    pinMessagesToBottomRef.current();
   }, [selected?.conversationId]);
 
   useEffect(() => {
@@ -1279,27 +1370,49 @@ export function ChatPage({
         count: events.length,
         sequences: events.map((event) => event.sequence)
       });
-      setResponseExecution((current) => {
-        if (!current || current.responseExecutionId !== executionId) return current;
-        return events.reduce<ConversationResponseExecutionDto>((next, event) => {
-          const state = event.type === 'stream_completed' ? 'completed'
-            : event.type === 'stream_cancelled' ? 'cancelled'
-              : event.type === 'stream_failed' ? 'failed'
-                : event.type === 'stream_interrupted' ? 'interrupted'
-                  : event.type === 'stream_started' || event.type === 'stream_resumed'
-                    ? 'streaming'
-                    : next.state;
-          return {
-            ...next,
-            state,
-            streamSequence: event.sequence,
-            taskProgress: projectTaskProgress(next.taskProgress, event),
-            reasoningContent: `${next.reasoningContent}${event.reasoningDelta ?? ''}`,
-            content: `${next.content}${event.contentDelta ?? ''}`,
-            updatedAt: event.occurredAt
-          };
-        }, current);
-      });
+      const current = responseExecutionSnapshotRef.current;
+      if (!current || current.responseExecutionId !== executionId) return;
+      const reduced = events.reduce<ConversationResponseExecutionDto>((next, event) => {
+        const state = event.type === 'stream_completed' ? 'completed'
+          : event.type === 'stream_cancelled' ? 'cancelled'
+            : event.type === 'stream_failed' ? 'failed'
+              : event.type === 'stream_interrupted' ? 'interrupted'
+                : event.type === 'stream_started' || event.type === 'stream_resumed'
+                  ? 'streaming'
+                  : next.state;
+        return {
+          ...next,
+          state,
+          streamSequence: event.sequence,
+          taskProgress: projectTaskProgress(next.taskProgress, event),
+          reasoningContent: `${next.reasoningContent}${event.reasoningDelta ?? ''}`,
+          content: `${next.content}${event.contentDelta ?? ''}`,
+          updatedAt: event.occurredAt
+        };
+      }, current);
+      responseExecutionSnapshotRef.current = reduced;
+      const textNode = liveTextNodeRef.current;
+      if (!shouldCommitResponseFrame(current, reduced) && textNode) {
+        textNode.textContent = reduced.content;
+        if (liveReasoningNodeRef.current) liveReasoningNodeRef.current.textContent = reduced.reasoningContent;
+        const thought = liveThoughtRef.current;
+        if (thought) {
+          const reasoning = reduced.reasoningContent.trim();
+          const answer = reduced.content.trim();
+          thought.style.display = reasoning.length === 0 ? 'none' : '';
+          const body = thought.querySelector('.uc-chat-turn__thought-body');
+          if (body instanceof HTMLElement) body.style.display = reasoning.length === 0 || answer.length > 0 ? 'none' : '';
+        }
+        const status = liveStatusRef.current;
+        if (status) {
+          const label = reduced.content.trim() || reduced.reasoningContent.trim() ? '' : '正在组织回答';
+          status.style.display = label.length === 0 ? 'none' : '';
+          status.textContent = label;
+        }
+        pinMessagesToBottomRef.current();
+        return;
+      }
+      setResponseExecution(reduced);
     };
 
     const handleTerminalEvent = (event: ConversationResponseStreamEventDto) => {
@@ -1408,29 +1521,6 @@ export function ChatPage({
     setAttachments(draft.attachments);
     draftFieldRef.current.setText(draft.text);
   }, [activeDraftKey]);
-
-  useEffect(() => {
-    const messages = messagesRef.current;
-    if (!messages || !followOutputRef.current) return;
-    // Coalesce stream updates into one immediate scroll per frame. Smooth
-    // scrolling here makes every token update emit intermediate scroll events,
-    // which makes the message pane visibly oscillate while the body grows.
-    if (followScrollFrameRef.current !== undefined) return;
-    followScrollFrameRef.current = window.requestAnimationFrame(() => {
-      followScrollFrameRef.current = undefined;
-      const current = messagesRef.current;
-      if (current && followOutputRef.current) {
-        current.scrollTo({ top: current.scrollHeight, behavior: 'auto' });
-      }
-    });
-    setShowScrollToBottom(false);
-  }, [
-    lastDisplayMessage?.content,
-    responseExecution?.taskProgress,
-    productionEvents,
-    lastDisplayMessage?.state,
-    selectedId
-  ]);
 
   function clearResponseDraftState() {
     rendererTrace('clearResponseDraftState', {
@@ -1699,7 +1789,7 @@ export function ChatPage({
       await submitWorkflowInput();
       return;
     }
-    await startChatResponse(input.trim(), selected);
+    await startChatResponse(inputValueRef.current.trim(), selected);
   }
 
   async function submitWorkflowInput() {
@@ -1744,7 +1834,7 @@ export function ChatPage({
       let boundConversationId: string | undefined;
       const unsubscribe = productionTrace.subscribeCommand(planningCommand.clientCommandId, (event) => {
         if (inputScope !== composerScopeRef.current || event.projectId !== session.projectId) return;
-        setProductionEvents((current) => mergeProductionEvents(current, [event]));
+        queueLiveProductionEvents([event]);
         setPendingProduction((current) => current?.clientCommandId === planningCommand.clientCommandId
           ? { ...current, conversationId: event.conversationId, sourceMessageId: event.sourceMessageId }
           : current);
@@ -2354,9 +2444,25 @@ export function ChatPage({
       candidateId: selectedCandidateId
     });
     setResponseStarting(true);
-    setNotice('正在准备回复…');
+    releasedByUserRef.current = false;
+    followOutputRef.current = true;
+    if (showScrollButtonRef.current) {
+      showScrollButtonRef.current = false;
+      setShowScrollToBottom(false);
+    }
     clearResponseDraftState();
     const commandEditingMessageId = workflow ? undefined : editingMessageId;
+    const optimistic = !workflow && !commandEditingMessageId;
+    if (optimistic) {
+      setPendingEcho({
+        echoId: crypto.randomUUID(),
+        content: commandContent,
+        createdAt: new Date().toISOString(),
+        ...(conversation ? { conversationId: conversation.conversationId } : {})
+      });
+      updateInput('');
+      setNotice('');
+    }
     try {
       const request = {
         clientCommandId: `chat-start-${crypto.randomUUID()}`,
@@ -2396,7 +2502,13 @@ export function ChatPage({
             confirmed: true
           })
         : await chat.startAgentResponse(request);
-      if (executionScope !== composerScopeRef.current) return;
+      if (executionScope !== composerScopeRef.current) {
+        if (optimistic) {
+          setPendingEcho(undefined);
+          updateInput(commandContent);
+        }
+        return;
+      }
       if (!started.ok) {
         rendererTrace('sendMessage:startResponse-error', {
           code: started.error.code,
@@ -2405,6 +2517,10 @@ export function ChatPage({
         cancelAfterStartRef.current = false;
         cancelRequestedRef.current = false;
         setCancelRequested(false);
+        if (optimistic) {
+          setPendingEcho(undefined);
+          updateInput(commandContent);
+        }
         setNotice(describeChatError(started.error));
         if (conversation) {
           const refreshed = await chat.getConversation(conversation.conversationId);
@@ -2425,7 +2541,8 @@ export function ChatPage({
       commitAttachments([]);
       attachmentSelectionChangedRef.current = false;
 
-      updateInput('');
+      setPendingEcho(undefined);
+      if (!optimistic) updateInput('');
       setEditingMessageId(undefined);
       setNotice('');
       if (cancelAfterStartRef.current) {
@@ -2441,6 +2558,10 @@ export function ChatPage({
       cancelAfterStartRef.current = false;
       cancelRequestedRef.current = false;
       setCancelRequested(false);
+      if (optimistic) {
+        setPendingEcho(undefined);
+        updateInput(commandContent);
+      }
       setNotice(errorMessages.storage_error);
       return;
     } finally {
@@ -3205,13 +3326,35 @@ export function ChatPage({
     }
   }
 
+  function markMessageCopied(messageId: string) {
+    setCopiedMessageId(messageId);
+    setNotice('');
+    window.setTimeout(() => {
+      setCopiedMessageId((current) => current === messageId ? undefined : current);
+    }, 1_600);
+  }
+
   async function copyMessage(message: MessageDto) {
     try {
+      const writeText = window.unicomp?.clipboard?.writeText;
+      if (writeText) {
+        writeText(message.content);
+        markMessageCopied(message.messageId);
+        return;
+      }
+    } catch {
+      // The desktop bridge can be absent in tests; keep the browser fallbacks below.
+    }
+    try {
+      writeClipboardText(message.content);
+      markMessageCopied(message.messageId);
+      return;
+    } catch {
+      // The synchronous path can be unavailable; the async clipboard is the second attempt.
+    }
+    try {
       await navigator.clipboard.writeText(message.content);
-      setCopiedMessageId(message.messageId);
-      window.setTimeout(() => {
-        setCopiedMessageId((current) => current === message.messageId ? undefined : current);
-      }, 1_600);
+      markMessageCopied(message.messageId);
     } catch {
       setNotice('复制失败，请手动选择消息内容。');
     }
@@ -3235,25 +3378,42 @@ export function ChatPage({
     }
   }
 
+  function revealScrollButton(visible: boolean) {
+    if (showScrollButtonRef.current === visible) return;
+    showScrollButtonRef.current = visible;
+    setShowScrollToBottom(visible);
+  }
+
+  function handleMessagesWheel(event: WheelEvent<HTMLDivElement>) {
+    if (event.deltaY >= 0) return;
+    const messages = messagesRef.current;
+    if (!messages || messages.scrollTop <= 0) return;
+    releasedByUserRef.current = true;
+    followOutputRef.current = false;
+    revealScrollButton(true);
+  }
+
   function handleMessagesScroll() {
     const messages = messagesRef.current;
     if (!messages) return;
-    const distanceToBottom = messages.scrollHeight - messages.scrollTop - messages.clientHeight;
-    const nearBottom = distanceToBottom <= 72;
-    followOutputRef.current = nearBottom;
-    setShowScrollToBottom(!nearBottom);
+    const distance = messages.scrollHeight - messages.scrollTop - messages.clientHeight;
+    if (pinningScrollRef.current && distance <= 1) return;
+    const atBottom = distance <= 1;
+    if (atBottom) {
+      releasedByUserRef.current = false;
+      followOutputRef.current = true;
+    } else {
+      releasedByUserRef.current = true;
+      followOutputRef.current = false;
+    }
+    revealScrollButton(!atBottom);
   }
 
   function scrollMessagesToBottom() {
-    const messages = messagesRef.current;
-    if (!messages) return;
-    if (followScrollFrameRef.current !== undefined) {
-      window.cancelAnimationFrame(followScrollFrameRef.current);
-      followScrollFrameRef.current = undefined;
-    }
+    releasedByUserRef.current = false;
     followOutputRef.current = true;
-    messages.scrollTo({ top: messages.scrollHeight, behavior: 'auto' });
-    setShowScrollToBottom(false);
+    pinMessagesToBottomRef.current();
+    revealScrollButton(false);
   }
 
   async function toggleContextUsage(
@@ -3653,7 +3813,7 @@ export function ChatPage({
           <LuSearch aria-hidden="true" />
           搜索项目或对话
         </button>
-        <div className="uc-chat-page__workspace-scroll">
+        <div className="uc-chat-page__workspace-scroll uc-scrollbar">
           <section className="uc-chat-page__project-list" aria-labelledby="chat-project-list-title">
             <h3 id="chat-project-list-title">项目</h3>
             {loading && projects.length === 0 ? (
@@ -3688,7 +3848,7 @@ export function ChatPage({
                       {expanded ? <LuChevronDown aria-hidden="true" /> : <LuChevronRight aria-hidden="true" />}
                     </button>
                     {expanded ? (
-                      <div className="uc-chat-page__workspace-conversations">
+                      <div className="uc-chat-page__workspace-conversations uc-scrollbar">
                         {projectChats.length === 0 ? (
                           <p className="uc-chat-page__workspace-hint">
                             {conversationsMatchProject || project.projectId in chatsByProject
@@ -3839,8 +3999,9 @@ export function ChatPage({
         </div>
 
         <div
-          className="uc-chat-page__messages"
+          className="uc-chat-page__messages uc-scrollbar"
           onScroll={handleMessagesScroll}
+          onWheel={handleMessagesWheel}
           ref={messagesRef}
         >
           <div className="uc-chat-page__messages-inner">
@@ -3879,7 +4040,8 @@ export function ChatPage({
                   const taskProgress = isCurrentAssistant ? responseExecution?.taskProgress : undefined;
                   const traceEvents = productionProjection.timelineByMessage.get(item.messageId) ?? [];
                   const isVirtualProductionMessage = item.messageId.startsWith('production-') && traceEvents.length > 0;
-                  const showProductionProgress = isDocumentDraftMessage || hideDocumentDraftContent || Boolean(taskProgress?.length) || traceEvents.length > 0;
+                  const showActivityLine = traceEvents.length > 0 && !isDocumentDraftMessage && !hideDocumentDraftContent && !taskProgress?.length;
+                  const showProductionProgress = isDocumentDraftMessage || hideDocumentDraftContent || Boolean(taskProgress?.length) || (traceEvents.length > 0 && openProductionIds.has(item.messageId));
                   const isGeneratingFile = documentGenerationActive &&
                     activeDocumentGenerationRef.current?.messageId === item.messageId;
                   const isDocumentStopping = (isCurrentAssistant && (cancelRequested ||
@@ -3902,25 +4064,73 @@ export function ChatPage({
                               : isCurrentAssistant && responseExecution && ['failed', 'cancelled', 'interrupted'].includes(responseExecution.state)
                                 ? responseExecution.state === 'cancelled' ? '文档内容生成已停止。' : '文档内容生成未完成。'
                                 : documentGenerationMessage(item.documentGenerationStatus);
-                  const responseLabel = cancelRequested
-                    ? '正在停止回复…'
-                    : responseExecution?.state === 'pending'
-                      ? '正在准备回复…'
-                      : responseExecution?.state === 'streaming'
-                        ? '正在接收回复…'
-                        : responseExecution?.state === 'completed'
-                          ? `回复已完成${executionDuration ? `，用时 ${executionDuration}` : ''}`
-                          : responseExecution?.state === 'cancelled'
-                            ? '回复已停止'
-                            : item.content ? '回复已中断' : '回复未完成';
+                  const liveAssistant = isCurrentAssistant || item.messageId.startsWith('pending-assistant-');
+                  const liveReasoning = liveAssistant
+                    ? (responseExecution?.reasoningContent || item.reasoningContent || '')
+                    : (item.reasoningContent || '');
+                  const liveInProgress = liveAssistant
+                    ? responseInProgress || item.state === 'pending' || item.state === 'streaming'
+                    : item.state === 'pending' || item.state === 'streaming';
+                  const replyCue = item.role === 'assistant'
+                    ? liveReplyCue({
+                        productFeature: (liveAssistant && responseFeature === 'text_reasoning') || liveReasoning.trim()
+                          ? 'text_reasoning'
+                          : 'text_chat',
+                        reasoning: liveReasoning,
+                        content: item.content,
+                        inProgress: liveInProgress
+                      })
+                    : 'answer';
+                  const thoughtOpen = reasoningExpanded({
+                    reasoning: liveReasoning,
+                    content: item.content,
+                    inProgress: liveInProgress,
+                    opened: openThoughtIds.has(item.messageId)
+                  });
+                  const responseLabel = !liveAssistant
+                    ? ''
+                    : cancelRequested
+                      ? '正在停止回复…'
+                      : replyCue === 'organizing'
+                        ? '正在组织回答'
+                        : replyCue === 'thinking'
+                          ? ''
+                          : responseExecution?.state === 'completed'
+                            ? `回复已完成${executionDuration ? `，用时 ${executionDuration}` : ''}`
+                            : responseExecution?.state === 'cancelled'
+                              ? '回复已停止'
+                              : item.content
+                                ? ''
+                                : '回复未完成';
+                  const streamed = isCurrentAssistant ? responseExecutionSnapshotRef.current : undefined;
+                  const streamedHere = streamed?.assistantMessageId === item.messageId ? streamed : undefined;
+                  const shownContent = streamedHere?.content || item.content;
+                  const shownReasoning = streamedHere?.reasoningContent || liveReasoning;
+                  const directStream = Boolean(
+                    isCurrentAssistant &&
+                    responseInProgress &&
+                    !isDocumentDraftMessage &&
+                    !hideDocumentDraftContent &&
+                    !showProductionProgress
+                  );
                   return (
-                    <li className={`uc-chat-page__message-item uc-chat-page__message-item--${item.role}`} key={item.messageId}>
-                      {isCurrentAssistant && !showProductionProgress ? (
+                    <li className={`uc-chat-page__message-item uc-chat-page__message-item--${item.role}${directStream ? ' uc-chat-page__message-item--live' : ''}`} key={item.messageId}>
+                      {directStream ? (
+                        <p
+                          aria-label="回复状态"
+                          className="uc-chat-page__response-status"
+                          ref={liveStatusRef}
+                          role="status"
+                          style={responseLabel ? undefined : { display: 'none' }}
+                        >
+                          {responseLabel}
+                        </p>
+                      ) : (isCurrentAssistant && !showProductionProgress || item.messageId.startsWith('pending-assistant-') && !showProductionProgress) && responseLabel ? (
                         <p className="uc-chat-page__response-status" aria-label="回复状态" role="status">
                           {responseLabel}
                         </p>
                       ) : null}
-                      {item.state !== 'completed' && !isCurrentAssistant && !isVirtualProductionMessage ? (
+                      {item.state !== 'completed' && !isCurrentAssistant && !item.messageId.startsWith('pending-assistant-') && !isVirtualProductionMessage ? (
                         <div className="uc-chat-page__message-heading">
                           <strong>{item.role === 'user' ? '你' : '助手'}</strong>
                           <StatusPill tone={messageStatusTone(item)}>{messageStatusLabel(item)}</StatusPill>
@@ -3928,8 +4138,27 @@ export function ChatPage({
                       ) : null}
                       {item.role === 'assistant' ? (
                         <div className="uc-chat-page__message-content">
+                          {showActivityLine ? (
+                            <div className="uc-chat-turn__activity">
+                              <button
+                                className="uc-chat-turn__disclosure"
+                                aria-expanded={openProductionIds.has(item.messageId)}
+                                onClick={() => setOpenProductionIds((current) => {
+                                  const next = new Set(current);
+                                  if (next.has(item.messageId)) next.delete(item.messageId);
+                                  else next.add(item.messageId);
+                                  return next;
+                                })}
+                                type="button"
+                              >
+                                <span>{productionActivityLabel(traceEvents[traceEvents.length - 1])}</span>
+                                <LuChevronRight aria-hidden="true" />
+                              </button>
+                            </div>
+                          ) : null}
                           {showProductionProgress ? (
                             <DocumentProgress
+                              hideSummary={showActivityLine}
                               detail={progressDetail}
                               taskProgress={taskProgress}
                               events={traceEvents}
@@ -3948,10 +4177,52 @@ export function ChatPage({
                               developerMode={developerMode}
                             />
                           ) : null}
-                          {!isDocumentDraftMessage && !hideDocumentDraftContent && (item.content || !showProductionProgress) ? (
+                          {directStream ? (
+                            <>
+                              <div className="uc-chat-turn__thought" ref={liveThoughtRef} style={shownReasoning.trim() ? undefined : { display: 'none' }}>
+                                <p className="uc-chat-turn__disclosure is-open" role="status">
+                                  <span>思考</span>
+                                  <LuChevronRight aria-hidden="true" />
+                                </p>
+                                <p className="uc-chat-turn__thought-body" ref={liveReasoningNodeRef} style={shownContent.trim() ? { display: 'none' } : undefined}>{shownReasoning}</p>
+                              </div>
+                              <div className="uc-markdown-message uc-chat-stream-plain" ref={liveTextNodeRef}>{shownContent}</div>
+                              <span className="uc-chat-page__caret" aria-hidden="true">▌</span>
+                            </>
+                          ) : (
+                            <>
+                          {!isDocumentDraftMessage && !hideDocumentDraftContent && (shownReasoning.trim() || replyCue === 'thinking') ? (
+                            <div className="uc-chat-turn__thought">
+                              {shownReasoning.trim() && (shownContent.trim() || !liveInProgress) ? (
+                                <button
+                                  className="uc-chat-turn__disclosure"
+                                  aria-expanded={thoughtOpen}
+                                  onClick={() => setOpenThoughtIds((current) => {
+                                    const next = new Set(current);
+                                    if (next.has(item.messageId)) next.delete(item.messageId);
+                                    else next.add(item.messageId);
+                                    return next;
+                                  })}
+                                  type="button"
+                                >
+                                  <span>思考</span>
+                                  <LuChevronRight aria-hidden="true" />
+                                </button>
+                              ) : (
+                                <p className={shownReasoning.trim() ? 'uc-chat-turn__disclosure is-open' : 'uc-chat-turn__disclosure'} role="status">
+                                  <span>{shownReasoning.trim() ? '思考' : '正在思考'}</span>
+                                  {shownReasoning.trim() ? <LuChevronRight aria-hidden="true" /> : null}
+                                </p>
+                              )}
+                              {shownReasoning.trim() && thoughtOpen ? (
+                                <p className="uc-chat-turn__thought-body">{shownReasoning}</p>
+                              ) : null}
+                            </div>
+                          ) : null}
+                          {!isDocumentDraftMessage && !hideDocumentDraftContent && (shownContent || item.state === 'completed' || item.state === 'failed') ? (
                             <StreamingMarkdown
-                              streaming={item.state === 'streaming' && Boolean(item.content)}
-                              content={item.content || (item.state === 'failed' ? '' : item.state === 'streaming' || item.state === 'pending' ? '正在接收…' : '尚无内容')}
+                              streaming={item.state === 'streaming' && Boolean(shownContent)}
+                              content={shownContent || (item.state === 'failed' ? '' : item.state === 'completed' ? '尚无内容' : '')}
                             />
                           ) : null}
                           {item.state === 'failed' ? (
@@ -3962,6 +4233,8 @@ export function ChatPage({
                             </p>
                           ) : null}
                           {item.state === 'streaming' && !showProductionProgress ? <span className="uc-chat-page__caret" aria-hidden="true">▌</span> : null}
+                            </>
+                          )}
                         </div>
                       ) : (
                         <div className="uc-chat-page__message-bubble">
@@ -4142,6 +4415,9 @@ export function ChatPage({
           ) : null}
             </div>
           </div>
+        </div>
+
+        <div className="uc-chat-page__composer-region">
           {showScrollToBottom ? (
             <Button
               aria-label="回到最新消息"
@@ -4153,9 +4429,6 @@ export function ChatPage({
               <LuArrowDown aria-hidden="true" />
             </Button>
           ) : null}
-        </div>
-
-        <div className="uc-chat-page__composer-region">
           <section
             aria-labelledby="chat-composer-title"
             className="uc-chat-page__composer"
@@ -4356,7 +4629,7 @@ export function ChatPage({
           ) : conversations.length === 0 ? (
             <EmptyState description="发送第一条消息后，对话会自动保存在这里。" icon="对" title="暂无历史对话" />
           ) : (
-            <div className="uc-chat-page__history-list">
+            <div className="uc-chat-page__history-list uc-scrollbar">
               {visibleConversations.map((conversation) => (
                     <div
                       aria-current={conversation.conversationId === selectedId ? 'true' : undefined}

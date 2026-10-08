@@ -203,7 +203,8 @@ test('chat workspace uses a quiet project list and search dialog', () => {
   assert.match(source, /retainProjectOrder\(current, projectsResult\.value\)/);
   assert.match(source, /aria-expanded=\{expanded\}/);
   assert.doesNotMatch(source, /isCurrent && projectChatsExpanded/);
-  assert.match(styles, /\.uc-chat-page__workspace-scroll\s*\{[\s\S]*scrollbar-width: thin/);
+  assert.match(source, /uc-chat-page__workspace-scroll uc-scrollbar/);
+  assert.match(styles, /\.uc-scrollbar \{[\s\S]*scrollbar-width: thin/);
   assert.match(styles, /\.uc-chat-page__project-item\s*\{[\s\S]*min-height: 28px/);
   assert.doesNotMatch(styles, /\.uc-chat-page__workspace-conversations\s*\{[^}]*max-height:/);
   assert.match(layoutSource, /activeItemId === 'chat' \|\| activeItemId === 'projects' \? ' workspace--chat'/);
@@ -212,6 +213,11 @@ test('chat workspace uses a quiet project list and search dialog', () => {
   assert.match(styles, /\.uc-chat-page__empty\s*\{[\s\S]*place-items: center;[\s\S]*text-align: center;/);
   assert.match(styles, /\.uc-chat-page__conversation\s*\{[\s\S]*gap: 0;/);
   assert.match(styles, /\.uc-chat-search__dialog/);
+});
+
+test('chat copy uses the desktop clipboard bridge before the browser fallback', () => {
+  assert.match(source, /window\.unicomp\?\.clipboard\?\.writeText/);
+  assert.match(source, /复制失败，请手动选择消息内容。/);
 });
 
 test('chat composer imports images through the controlled attachment API', () => {
@@ -255,7 +261,8 @@ test('project context uses a single explicit registration action and separates u
 
 test('chat transparency only reports observable execution state', () => {
   assert.match(source, /aria-label="回复状态"/);
-  assert.match(source, /正在接收回复/);
+  assert.match(source, /正在组织回答/);
+  assert.match(source, /正在思考/);
   assert.match(source, /回复已完成/);
   assert.match(source, /isCurrentAssistant && !showProductionProgress/);
   assert.doesNotMatch(source, /AI 工作过程|模型返回的思考内容|activityExpanded|setActivityExpanded/);

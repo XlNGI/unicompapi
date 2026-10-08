@@ -704,7 +704,7 @@ export function SettingsPage() {
       </header>
 
       <div className="uc-settings__workspace">
-        <nav className="uc-settings__categories" aria-label="本地设置分类">
+        <nav className="uc-settings__categories uc-scrollbar" aria-label="本地设置分类">
           <strong>设置分类</strong>
           {visibleCategories.map((item) => {
             const Icon = item.icon;

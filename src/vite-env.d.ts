@@ -41,6 +41,9 @@ declare global {
       providers: ProviderApi;
       settings: SettingsApi;
       storage: StorageApi;
+      clipboard?: {
+        writeText: (text: string) => void;
+      };
       windowControls: {
         minimize: () => void;
         toggleMaximize: () => void;

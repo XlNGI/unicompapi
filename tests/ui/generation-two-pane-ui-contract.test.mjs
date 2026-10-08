@@ -35,7 +35,7 @@ test('the shared generation workbench keeps parameters left and generated conten
   );
   assert.match(styles, /\.uc-generation-two-pane__controls \{[\s\S]*overflow-y: auto;/);
   assert.match(styles, /\.uc-generation-two-pane__result > \.uc-image-workbench__canvas \{[\s\S]*min-height: 100%;/);
-  assert.match(styles, /\.uc-scrollbar::-webkit-scrollbar \{[\s\S]*width: 12px;/);
+  assert.match(styles, /\.uc-scrollbar::-webkit-scrollbar \{[\s\S]*width: 6px;/);
   assert.match(styles, /\.uc-scrollbar::-webkit-scrollbar-button \{[\s\S]*display: none;/);
   assert.match(styles, /\.uc-scrollbar::-webkit-scrollbar-thumb \{[\s\S]*border-radius: var\(--uc-radius-full\);/);
 });

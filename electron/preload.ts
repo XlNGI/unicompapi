@@ -3,7 +3,7 @@ import {
   productionTraceIpcChannels, parseProductionTraceEvent,
   type ProductionTraceApi, type ProductionTraceIssueDto
 } from '../src/shared/conversation-production-ipc';
-import { contextBridge, ipcRenderer, webUtils } from 'electron';
+import { clipboard, contextBridge, ipcRenderer, webUtils } from 'electron';
 import {
   storageIpcChannels,
   type StorageApi
@@ -1078,6 +1078,12 @@ const chatContexts: ChatContextApi = {
 };
 
 contextBridge.exposeInMainWorld('unicomp', {
+  clipboard: {
+    writeText: (text: string) => {
+      if (typeof text !== 'string') throw new Error('clipboard text required');
+      clipboard.writeText(text);
+    }
+  },
   autosaveDiagnostics,
   parameterInputDiagnostics,
   chatContexts,

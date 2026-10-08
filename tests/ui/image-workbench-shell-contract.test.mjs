@@ -91,3 +91,26 @@ test('saving a draft stays separate from task submission', () => {
   assert.match(workbenchSource, /没有创建或提交任务/);
   assert.match(workbenchSource, /没有上传图片，也没有创建任务/);
 });
+
+const pagesSource = await readFile('src/styles/pages.css', 'utf8');
+
+test('empty image and video shells fill the wide workspace and keep the narrow capability card content-sized', () => {
+  assert.match(workbenchSource, /currentDraft \? '' : ' uc-image-workbench--offline'/);
+  assert.match(videoWorkbenchSource, /currentDraft \? '' : ' uc-image-workbench--offline'/);
+  assert.match(workbenchSource, /PROJECT_SESSION_CHANGED_EVENT/);
+  assert.match(videoWorkbenchSource, /PROJECT_SESSION_CHANGED_EVENT/);
+  assert.match(
+    pagesSource,
+    /\.uc-image-workbench--offline \{[\s\S]*height: 100%;[\s\S]*grid-template-rows: auto minmax\(0, 1fr\) auto;/
+  );
+  assert.match(
+    pagesSource,
+    /\.uc-image-workbench--generation\.uc-image-workbench--offline \{[\s\S]*grid-template-rows: auto minmax\(0, 1fr\) auto;/
+  );
+  assert.match(pagesSource, /@media \(max-width: 1280px\) \{[\s\S]*\.uc-image-workbench--offline \.uc-image-workbench__workspace \{[\s\S]*minmax\(min-content, 1fr\) auto;/);
+  assert.match(pagesSource, /@media \(max-width: 1180px\) \{[\s\S]*\.uc-image-workbench--offline \.uc-image-workbench__workspace \{[\s\S]*minmax\(min-content, 1fr\) minmax\(min-content, 1fr\) auto;/);
+  assert.match(
+    pagesSource,
+    /\.uc-image-workbench--generation \{[\s\S]*grid-template-rows: auto minmax\(0, 1fr\);[\s\S]*padding-bottom: 0;/
+  );
+});

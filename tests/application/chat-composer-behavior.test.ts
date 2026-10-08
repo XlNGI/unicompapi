@@ -33,6 +33,17 @@ vi.mock('react', async (original) => ({
         (hooks.slots[index] as { cleanup?: () => void }).cleanup = effect() ?? undefined;
       });
     }
+  },
+  useLayoutEffect(effect: () => (() => void) | void, deps?: readonly unknown[]) {
+    const index = hooks.cursor++;
+    const old = hooks.slots[index] as { deps?: readonly unknown[]; cleanup?: () => void } | undefined;
+    if (!old || !deps || deps.some((value, at) => !Object.is(value, old.deps?.[at]))) {
+      hooks.slots[index] = { deps };
+      hooks.effects.push(() => {
+        old?.cleanup?.();
+        (hooks.slots[index] as { cleanup?: () => void }).cleanup = effect() ?? undefined;
+      });
+    }
   }
 }));
 
@@ -741,5 +752,71 @@ describe('chat composer event behavior', () => {
     (element('新聊天').props.onClick as () => void)();
     await settle();
     expect(element('对话输入').props.value).toBe('');
+  });
+
+  it.each(['enter', 'button'] as const)('%s sends a normal chat through the agent response', async (method) => {
+    const startAgentResponse = vi.fn(async (_request: { readonly content: string }) => ({
+      ok: true,
+      value: {
+        conversation,
+        execution: {
+          responseExecutionId: 'execution-1',
+          conversationId: conversation.conversationId,
+          userMessageId: 'user-1',
+          assistantMessageId: 'assistant-1',
+          productFeature: 'text_chat' as const,
+          state: 'completed' as const,
+          streamSequence: 1,
+          reasoningContent: '',
+          content: '可以回答问题。',
+          createdAt: conversation.updatedAt,
+          updatedAt: conversation.updatedAt
+        }
+      }
+    }));
+    Object.assign(window.unicomp!.chatContexts!, { startAgentResponse });
+    await settle();
+    await type('你好，你能做什么');
+    expect(element('发送消息').props.disabled).toBe(false);
+    await send(method);
+    expect(startAgentResponse).toHaveBeenCalledTimes(1);
+    expect(startAgentResponse.mock.calls[0][0]).toMatchObject({ content: '你好，你能做什么' });
+    expect(startWorkflow).not.toHaveBeenCalled();
+    expect(element('对话输入').props.value).toBe('');
+  });
+
+  it('shows the outgoing text before the agent response returns and restores it on failure', async () => {
+    let finish: (value: unknown) => void = () => {};
+    const startAgentResponse = vi.fn(() => new Promise((resolve) => { finish = resolve; }));
+    Object.assign(window.unicomp!.chatContexts!, { startAgentResponse });
+    await settle();
+    await type('你好，你能做什么');
+    await send('button');
+    expect(startAgentResponse).toHaveBeenCalledTimes(1);
+    expect(element('对话输入').props.value).toBe('');
+    expect(containsText(tree, '你好，你能做什么')).toBe(true);
+    expect(containsText(tree, '正在组织回答')).toBe(true);
+    expect(containsText(tree, '正在准备回复…')).toBe(false);
+
+    finish({ ok: false, error: { code: 'storage_error', message: '保存失败' } });
+    await settle();
+    expect(element('对话输入').props.value).toBe('你好，你能做什么');
+    expect(containsText(tree, '正在组织回答')).toBe(false);
+    expect(containsText(tree, '本地保存失败，请检查存储状态后重试。')).toBe(true);
+  });
+
+  it('shows real thinking only for reasoning mode before the answer exists', async () => {
+    let finish: (value: unknown) => void = () => {};
+    initialModelSelection = { projectId: session.projectId, candidateId: 'candidate-reasoning', productFeature: 'text_reasoning' };
+    const startAgentResponse = vi.fn(() => new Promise((resolve) => { finish = resolve; }));
+    Object.assign(window.unicomp!.chatContexts!, { startAgentResponse });
+    await settle();
+    await type('你好，你能做什么');
+    await send('button');
+    expect(containsText(tree, '你好，你能做什么')).toBe(true);
+    expect(containsText(tree, '正在思考')).toBe(true);
+    expect(containsText(tree, '正在组织回答')).toBe(false);
+    finish({ ok: false, error: { code: 'storage_error', message: '保存失败' } });
+    await settle();
   });
 });
