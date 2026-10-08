@@ -64,7 +64,7 @@ import {
 
 const isDev = Boolean(process.env.VITE_DEV_SERVER_URL);
 const isMac = process.platform === 'darwin';
-const rendererTraceEnabled = isDev || process.env.UNICOMP_RENDERER_TRACE === '1';
+const rendererTraceEnabled = process.env.UNICOMP_RENDERER_TRACE === '1';
 
 async function appendRendererTraceLine(line: string): Promise<void> {
   const logsDirectory = path.join(app.getPath('userData'), 'logs');

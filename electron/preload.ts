@@ -751,12 +751,7 @@ interface ResponseSubscription {
 const responseSubscriptions = new Map<string, ResponseSubscription>();
 
 function subscriptionTrace(message: string, detail?: unknown): void {
-  if (
-    process.env.UNICOMP_RENDERER_TRACE !== '1' &&
-    !process.env.VITE_DEV_SERVER_URL
-  ) {
-    return;
-  }
+  if (process.env.UNICOMP_RENDERER_TRACE !== '1') return;
   console.info('[preload-subscription]', message, detail ?? '');
 }
 
@@ -809,10 +804,11 @@ const chatContexts: ChatContextApi = {
     }),
   getConversation: (conversationId) =>
     ipcRenderer.invoke(chatContextIpcChannels.getConversation, { conversationId }),
-  listConversations: (includeArchived, includeDeleted) =>
+  listConversations: (includeArchived, includeDeleted, readMode) =>
     ipcRenderer.invoke(chatContextIpcChannels.listConversations, {
       includeArchived,
-      includeDeleted
+      includeDeleted,
+      ...(readMode ? { readMode } : {})
     }),
   listConversationCandidates: () =>
     ipcRenderer.invoke(chatContextIpcChannels.listConversationCandidates),

@@ -238,6 +238,44 @@ describe('ConversationController', () => {
     expect(JSON.stringify(candidates)).not.toContain('messages');
   });
 
+  it('supports a fast sidebar list without hydrating conversation messages or sessions', async () => {
+    const value = await fixture();
+    value.openProject();
+    const created = await value.controller.create({
+      title: 'Fast sidebar chat',
+      bindToCurrentProject: true
+    });
+    if (!created.ok) throw new Error('fixture creation failed');
+    const withMessage = await value.controller.addUserMessage({
+      conversationId: created.value.conversationId,
+      expectedRevision: created.value.revision,
+      content: 'message stays out of the sidebar payload'
+    });
+    if (!withMessage.ok) throw new Error('fixture message failed');
+
+    const fast = await value.controller.list({
+      includeArchived: true,
+      includeDeleted: false,
+      readMode: 'fast'
+    });
+    expect(fast).toMatchObject({
+      ok: true,
+      value: [{
+        conversationId: created.value.conversationId,
+        title: 'Fast sidebar chat',
+        revision: withMessage.value.revision,
+        messages: []
+      }]
+    });
+    expect(JSON.stringify(fast)).not.toContain('message stays out of the sidebar payload');
+
+    const full = await value.controller.list({ includeArchived: true, includeDeleted: false });
+    expect(full).toMatchObject({
+      ok: true,
+      value: [{ messages: [{ content: 'message stays out of the sidebar payload' }] }]
+    });
+  });
+
   it('creates a persisted response draft and reports no fabricated candidates', async () => {
     const value = await fixture();
     await expect(value.responses.createDraft({

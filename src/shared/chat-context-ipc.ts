@@ -309,6 +309,8 @@ export interface ConversationRevisionRequest extends ConversationIdRequest {
 export interface ListConversationsRequest {
   readonly includeArchived: boolean;
   readonly includeDeleted: boolean;
+  /** Fast reads avoid recovery and per-conversation artifact/session hydration for first paint. */
+  readonly readMode?: 'fast' | 'full';
 }
 
 export interface RenameConversationRequest extends ConversationRevisionRequest {
@@ -787,10 +789,14 @@ export const chatContextRequestParsers = {
     };
   },
   listConversations(value: unknown): ListConversationsRequest {
-    const record = exactRecord(value, ['includeArchived', 'includeDeleted']);
+    const record = exactRecord(value, ['includeArchived', 'includeDeleted'], ['readMode']);
+    if (record.readMode !== undefined && record.readMode !== 'fast' && record.readMode !== 'full') {
+      throw new TypeError('readMode is invalid');
+    }
     return {
       includeArchived: booleanValue(record.includeArchived, 'includeArchived'),
-      includeDeleted: booleanValue(record.includeDeleted, 'includeDeleted')
+      includeDeleted: booleanValue(record.includeDeleted, 'includeDeleted'),
+      ...(record.readMode === undefined ? {} : { readMode: record.readMode })
     };
   },
   renameConversation(value: unknown): RenameConversationRequest {
@@ -1319,7 +1325,8 @@ export interface ChatContextApi {
   ): Promise<ChatContextIpcResult<ConversationDto>>;
   listConversations(
     includeArchived: boolean,
-    includeDeleted: boolean
+    includeDeleted: boolean,
+    readMode?: ListConversationsRequest['readMode']
   ): Promise<ChatContextIpcResult<readonly ConversationDto[]>>;
   listConversationCandidates(): Promise<
     ChatContextIpcResult<readonly ConversationCandidateDto[]>
@@ -1510,15 +1517,16 @@ export interface ChatContextApi {
 
 function exactRecord(
   value: unknown,
-  keys: readonly string[]
+  keys: readonly string[],
+  optionalKeys: readonly string[] = []
 ): Record<string, unknown> {
   if (typeof value !== 'object' || value === null || Array.isArray(value)) {
     throw new TypeError('Request must be an object');
   }
   const record = value as Record<string, unknown>;
-  const allowed = new Set(keys);
+  const allowed = new Set([...keys, ...optionalKeys]);
   const actual = Object.keys(record);
-  if (actual.length !== allowed.size || actual.some((key) => !allowed.has(key))) {
+  if (actual.some((key) => !allowed.has(key)) || keys.some((key) => !Object.prototype.hasOwnProperty.call(record, key))) {
     throw new TypeError('Request contains unexpected or missing fields');
   }
   return record;

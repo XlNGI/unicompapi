@@ -131,6 +131,7 @@ const api = {
     subscribe: (id: string, _after: number, event: TraceSubscription['event'], issue?: TraceSubscription['issue']) => {
       const subscription = { conversationId: id, event, issue };
       traceSubscriptions.add(subscription);
+      for (const trace of traces) if (trace.conversationId === id && trace.sequence > _after) event(trace);
       return () => { traceSubscriptions.delete(subscription); };
     },
     subscribeCommand: (id: string, event: TraceSubscription['event'], issue?: TraceSubscription['issue']) => {

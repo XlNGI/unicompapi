@@ -150,6 +150,7 @@ test('chat page uses project conversations and composer-first streaming workflow
   assert.match(markdownSource, /const markdownComponents/);
   assert.doesNotMatch(source, /RESPONSE_STREAM_POLL_INTERVAL_MS/);
   assert.match(source, /void sendMessage\(\)/);
+  assert.match(source, /conversationHydratingId !== undefined && conversationHydratingId === selected\?\.conversationId/);
   assert.match(source, /confirmLeaveUnsentInput/);
   assert.doesNotMatch(source, /首次外发前请核对/);
   assert.doesNotMatch(source, /确认并发送/);
@@ -157,7 +158,7 @@ test('chat page uses project conversations and composer-first streaming workflow
   assert.doesNotMatch(source, /保存消息/);
   assert.doesNotMatch(source, /等待保存消息/);
   assert.doesNotMatch(source, /setSelectedCandidateId\(candidates\.value\[0\]/);
-  assert.match(source, /chat\.listConversations\(true, false\)/);
+  assert.match(source, /chat\.listConversations\(true, false, 'fast'\)/);
   assert.match(source, /uc-chat-page__workspace-sidebar/);
   assert.match(source, /storage\.listProjects\(\)/);
   assert.match(source, /storage\.openRecentProject\(projectId\)/);

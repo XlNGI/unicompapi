@@ -175,7 +175,7 @@ const documentErrorMessages: Record<string, string> = {
 };
 
 function rendererTrace(message: string, detail?: unknown): void {
-  if (!import.meta.env.DEV) return;
+  if (import.meta.env.VITE_UNICOMP_RENDERER_TRACE !== '1') return;
   console.info('[chat-page]', message, detail ?? '');
 }
 
@@ -514,6 +514,19 @@ function sidebarChatFromConversation(conversation: ConversationDto): ProjectSide
   };
 }
 
+function mergeConversationRead(
+  current: readonly ConversationDto[],
+  incoming: readonly ConversationDto[]
+): readonly ConversationDto[] {
+  return incoming.map((next) => {
+    const previous = current.find((item) => item.conversationId === next.conversationId && item.projectId === next.projectId);
+    // Fast sidebar reads intentionally omit messages. Keep an already hydrated
+    // conversation until a newer revision is fetched by the detail read.
+    if (previous && next.messages.length === 0 && previous.revision >= next.revision && previous.messages.length > 0) return previous;
+    return previous && previous.revision > next.revision ? previous : next;
+  });
+}
+
 function retainProjectOrder(
   previous: readonly StorageProjectSummaryDto[],
   incoming: readonly StorageProjectSummaryDto[]
@@ -575,6 +588,8 @@ function ChatDraftField({
   pasteEnabled,
   planningActive,
   planningCancelRequested,
+  workflowExecutionActive,
+  workflowCancelRequested,
   documentGenerationActive,
   documentResponseActive,
   documentCancelRequested,
@@ -598,6 +613,8 @@ function ChatDraftField({
   readonly pasteEnabled: boolean;
   readonly planningActive: boolean;
   readonly planningCancelRequested: boolean;
+  readonly workflowExecutionActive: boolean;
+  readonly workflowCancelRequested: boolean;
   readonly documentGenerationActive: boolean;
   readonly documentResponseActive: boolean;
   readonly documentCancelRequested: boolean;
@@ -637,13 +654,15 @@ function ChatDraftField({
     resizeComposer(textareaRef.current);
   }, [shown]);
   const documentStop = documentGenerationActive || (documentResponseActive && !responseInProgress);
-  const showStop = planningActive || responseInProgress || documentGenerationActive || documentResponseActive;
+  const showStop = planningActive || workflowExecutionActive || responseInProgress || documentGenerationActive || documentResponseActive;
   const submitLabel = planningActive
     ? planningCancelRequested ? '正在停止需求理解' : '停止需求理解'
-    : documentStop
-      ? documentCancelRequested ? '正在停止文档生成' : '停止文档生成'
-      : responseInProgress
-        ? cancelRequested ? '正在停止生成' : '停止生成'
+    : responseInProgress
+      ? cancelRequested ? '正在停止生成' : '停止生成'
+      : workflowExecutionActive
+        ? workflowCancelRequested ? '正在停止任务' : '停止任务'
+      : documentStop
+        ? documentCancelRequested ? '正在停止文档生成' : '停止文档生成'
         : '发送消息';
   return (
     <>
@@ -683,24 +702,28 @@ function ChatDraftField({
           className={`uc-chat-page__submit${showStop ? ' uc-chat-page__submit--stop' : ''}`}
           disabled={planningActive
             ? planningCancelRequested
-            : documentGenerationActive || (documentResponseActive && !responseInProgress)
-              ? documentCancelRequested
-              : responseInProgress
-                ? cancelRequested
-                : !chat ||
-                  !canCompose ||
-                  !selectedCandidate?.available ||
-                  !shown.trim() ||
-                  busy ||
-                  cancelRequested}
+            : workflowExecutionActive
+              ? workflowCancelRequested
+              : documentGenerationActive || (documentResponseActive && !responseInProgress)
+                ? documentCancelRequested
+                : responseInProgress
+                  ? cancelRequested
+                  : !chat ||
+                    !canCompose ||
+                    !selectedCandidate?.available ||
+                    !shown.trim() ||
+                    busy ||
+                    cancelRequested}
           onClick={onPress}
           title={planningActive
             ? planningCancelRequested ? '正在停止需求理解' : '停止需求理解'
-            : documentStop
-              ? documentCancelRequested ? '正在停止文档生成' : '停止文档生成'
-              : responseInProgress
-                ? cancelRequested ? '正在停止' : '停止生成'
-                : !selectedCandidate?.available ? '请先选择一个可用模型' : '发送'}
+            : responseInProgress
+              ? cancelRequested ? '正在停止' : '停止生成'
+              : workflowExecutionActive
+                ? workflowCancelRequested ? '正在停止任务' : '停止任务'
+                : documentStop
+                  ? documentCancelRequested ? '正在停止文档生成' : '停止文档生成'
+                  : !selectedCandidate?.available ? '请先选择一个可用模型' : '发送'}
           type='button'
         >
           {showStop ? <LuSquare aria-hidden='true' /> : <LuArrowUp aria-hidden='true' />}
@@ -769,6 +792,7 @@ export function ChatPage({
   const [projectCreateName, setProjectCreateName] = useState('');
   const [conversations, setConversations] = useState<readonly ConversationDto[]>([]);
   const [selectedId, setSelectedId] = useState<string | undefined>(initialConversationId);
+  const [conversationHydratingId, setConversationHydratingId] = useState<string>();
   const [historyOpen, setHistoryOpen] = useState(false);
   const [renameTitle, setRenameTitle] = useState('');
   const [renamingConversationId, setRenamingConversationId] = useState<string>();
@@ -794,6 +818,8 @@ export function ChatPage({
   const [responseStarting, setResponseStarting] = useState(false);
   const [newAgentTaskRequested, setNewAgentTaskRequested] = useState(false);
   const [activeWorkflow, setActiveWorkflow] = useState<ConversationWorkflowDto>();
+  const [workflowExecutionActive, setWorkflowExecutionActive] = useState(false);
+  const [workflowCancelRequested, setWorkflowCancelRequested] = useState(false);
   const [webResearchSession, setWebResearchSession] = useState<WebResearchSessionDto>();
   const [cancelRequested, setCancelRequested] = useState(false);
   const [editingMessageId, setEditingMessageId] = useState<string>();
@@ -819,6 +845,8 @@ export function ChatPage({
   const [productionIssues, setProductionIssues] = useState<readonly string[]>([]);
   const [pendingProduction, setPendingProduction] = useState<PendingProductionInput>();
   const subscribedProductionConversation = useRef<string>();
+  const productionEventQueueRef = useRef<ProductionTraceEventDto[]>([]);
+  const productionEventFrameRef = useRef<number>();
   const [planningCancelRequested, setPlanningCancelRequested] = useState(false);
   const [notice, setNotice] = useState('');
   const [candidatesLoading, setCandidatesLoading] = useState(false);
@@ -875,6 +903,24 @@ export function ChatPage({
   const followOutputRef = useRef(true);
   const responseExecutionSnapshotRef = useRef(responseExecution);
   responseExecutionSnapshotRef.current = responseExecution;
+
+  const enqueueProductionEvents = (incoming: readonly ProductionTraceEventDto[]) => {
+    if (incoming.length === 0) return;
+    productionEventQueueRef.current.push(...incoming);
+    if (typeof window.requestAnimationFrame !== 'function') {
+      const queued = productionEventQueueRef.current;
+      productionEventQueueRef.current = [];
+      setProductionEvents(current => mergeProductionEvents(current, queued));
+      return;
+    }
+    if (productionEventFrameRef.current !== undefined) return;
+    productionEventFrameRef.current = window.requestAnimationFrame(() => {
+      productionEventFrameRef.current = undefined;
+      const queued = productionEventQueueRef.current;
+      productionEventQueueRef.current = [];
+      if (queued.length > 0) setProductionEvents(current => mergeProductionEvents(current, queued));
+    });
+  };
 
   const selected = useMemo(
     () => conversations.find((conversation) => conversation.conversationId === selectedId),
@@ -962,9 +1008,22 @@ export function ChatPage({
   const completedMessages = selected?.messages.filter(
     (message) => message.state === 'completed'
   ) ?? [];
-  const visibleProductionEvents = productionEvents.filter((event) => event.projectId === session?.projectId &&
-    event.conversationId === (selected?.conversationId ?? pendingProduction?.conversationId));
-  const productionProjection = projectProductionMessages(selected, visibleProductionEvents, pendingProduction);
+  const visibleProductionEvents = useMemo(() => productionEvents.filter((event) =>
+    event.projectId === session?.projectId &&
+    event.conversationId === (selected?.conversationId ?? pendingProduction?.conversationId)
+  ), [productionEvents, session?.projectId, selected?.conversationId, pendingProduction?.conversationId]);
+  const productionProjection = useMemo(() => projectProductionMessages(
+    selected, visibleProductionEvents, pendingProduction
+  ), [selected, visibleProductionEvents, pendingProduction]);
+  const previousUserByMessageId = useMemo(() => {
+    const previousUserById = new Map<string, MessageDto | undefined>();
+    let previousUser: MessageDto | undefined;
+    for (const message of selected?.messages ?? []) {
+      previousUserById.set(message.messageId, previousUser);
+      if (message.role === 'user') previousUser = message;
+    }
+    return previousUserById;
+  }, [selected?.messages]);
   const displayMessages = useMemo(() => {
     return productionProjection.messages.map((message) => {
       if (!responseExecution || message.messageId !== responseExecution.assistantMessageId) {
@@ -1016,6 +1075,7 @@ export function ChatPage({
   );
   projectSwitchBlockedRef.current = responseInProgress
     || busy
+    || workflowExecutionActive
     || documentGenerationActive
     || documentGenerationInFlightRef.current;
   useEffect(() => {
@@ -1041,7 +1101,7 @@ export function ChatPage({
           : Promise.resolve({ ok: true as const, value: [] as readonly StorageProjectSummaryDto[] });
         const [sessionResult, conversationResult, projectsResult] = await Promise.all([
           storage.getProjectSession(),
-          chat.listConversations(true, false),
+          chat.listConversations(true, false, 'fast'),
           projectListPromise
         ]);
         if (!isCurrentLoad()) return;
@@ -1082,42 +1142,34 @@ export function ChatPage({
         }
         else setNotice('读取当前项目失败，请重试。');
         if (conversationResult.ok) {
-          let loadedConversations = conversationResult.value;
-          let reconciledInterruptedRun = false;
-          if (sessionResult.ok && sessionResult.value && documentGeneration) {
-            for (const conversation of loadedConversations) {
-              for (const message of conversation.messages) {
-                if (
-                  message.documentGenerationStatus &&
-                  ['generating_content', 'validating_outline', 'generating_file'].includes(
-                    message.documentGenerationStatus.state
-                  )
-                ) {
-                  const result = await documentGeneration.reconcileGeneration({
-                    conversationId: conversation.conversationId,
-                    expectedRevision: conversation.revision,
-                    messageId: message.messageId
-                  });
-                  reconciledInterruptedRun ||= result.ok && result.value.interrupted;
-                }
-              }
-            }
-            if (reconciledInterruptedRun) {
-              const refreshed = await chat.listConversations(true, false);
-              if (refreshed.ok) loadedConversations = refreshed.value;
-            }
-          }
+          const loadedConversations = conversationResult.value;
           if (!isCurrentLoad()) return;
-          setConversations((current) => loadedConversations.map((incoming) => {
-            const existing = current.find((item) => item.conversationId === incoming.conversationId &&
-              item.projectId === incoming.projectId);
-            return existing && existing.revision > incoming.revision ? existing : incoming;
-          }));
+          setConversations((current) => mergeConversationRead(current, loadedConversations));
           setSelectedId((current) =>
             current && loadedConversations.some((item) => item.conversationId === current)
               ? current
               : undefined
           );
+          if (sessionResult.ok && sessionResult.value && documentGeneration) {
+            void (async () => {
+              const pendingGenerations = loadedConversations.flatMap((conversation) =>
+                conversation.messages.flatMap((message) => message.documentGenerationStatus &&
+                  ['generating_content', 'validating_outline', 'generating_file'].includes(message.documentGenerationStatus.state)
+                  ? [{ conversationId: conversation.conversationId, expectedRevision: conversation.revision, messageId: message.messageId }]
+                  : [])
+              );
+              const reconciliationResults = await Promise.allSettled(pendingGenerations.map((request) =>
+                documentGeneration.reconcileGeneration(request)
+              ));
+              const reconciledInterruptedRun = reconciliationResults.some((result) =>
+                result.status === 'fulfilled' && result.value.ok && result.value.value.interrupted
+              );
+              if (!reconciledInterruptedRun || !isCurrentLoad()) return;
+              const refreshed = await chat.listConversations(true, false, 'fast');
+              if (!isCurrentLoad() || !refreshed.ok) return;
+              setConversations((current) => mergeConversationRead(current, refreshed.value));
+            })().catch(() => undefined);
+          }
         } else {
           setNotice(errorMessages[conversationResult.error.code]);
         }
@@ -1125,8 +1177,9 @@ export function ChatPage({
           setProjects((current) => retainProjectOrder(current, projectsResult.value));
         }
         if (sessionResult.ok && sessionResult.value) {
-          const contexts = await chat.listProjectContextCandidates();
-          if (isCurrentLoad() && contexts.ok) setRegisteredContexts(contexts.value);
+          void chat.listProjectContextCandidates().then((contexts) => {
+            if (isCurrentLoad() && contexts.ok) setRegisteredContexts(contexts.value);
+          }).catch(() => undefined);
         } else if (isCurrentLoad()) {
           setRegisteredContexts([]);
         }
@@ -1172,7 +1225,7 @@ export function ChatPage({
     const refresh = async () => {
       try {
         const result = await chat.getConversation(selectedId);
-        if (active && result.ok) replaceConversation(result.value);
+        if (active && result.ok) replaceConversation(result.value, { skipUnchangedRevision: true });
       } finally {
         if (active && ++reads < 600) timer = setTimeout(() => { void refresh().catch(() => undefined); }, 750);
       }
@@ -1223,7 +1276,7 @@ export function ChatPage({
     let active = true;
     const receive = (event: ProductionTraceEventDto) => {
       if (active && event.projectId === session.projectId && event.conversationId === selectedId) {
-        setProductionEvents((current) => mergeProductionEvents(current, [event]));
+        enqueueProductionEvents([event]);
       }
     };
     const issue = () => {
@@ -1232,13 +1285,16 @@ export function ChatPage({
     // Subscribe before reading history, then merge by the durable conversation sequence.
     const unsubscribe = productionTrace.subscribe(selectedId, 0, receive, issue);
     subscribedProductionConversation.current = selectedId;
-    void productionTrace.list(selectedId).then((result) => {
-      if (!active) return;
-      if (result.ok) setProductionEvents((current) => mergeProductionEvents(current,
-        result.value.filter((event) => event.projectId === session.projectId && event.conversationId === selectedId)));
-      else issue();
-    }).catch(issue);
-    return () => { active = false; subscribedProductionConversation.current = undefined; unsubscribe(); };
+    return () => {
+      active = false;
+      subscribedProductionConversation.current = undefined;
+      unsubscribe();
+      if (productionEventFrameRef.current !== undefined) {
+        window.cancelAnimationFrame(productionEventFrameRef.current);
+        productionEventFrameRef.current = undefined;
+      }
+      productionEventQueueRef.current = [];
+    };
   }, [productionTrace, session, selectedId]);
 
   useEffect(() => {
@@ -1253,6 +1309,14 @@ export function ChatPage({
     productionCommandSubscriptions.current.clear();
   }, []);
 
+  useEffect(() => () => {
+    if (productionEventFrameRef.current !== undefined) {
+      window.cancelAnimationFrame(productionEventFrameRef.current);
+      productionEventFrameRef.current = undefined;
+    }
+    productionEventQueueRef.current = [];
+  }, []);
+
   useEffect(() => {
     let active = true;
     if (!chat || !selected?.conversationId) {
@@ -1262,16 +1326,46 @@ export function ChatPage({
         active = false;
       };
     }
-    void chat.getPendingWorkflow(selected.conversationId).then(async (result) => {
+    const conversationId = selected.conversationId;
+    setConversationHydratingId(conversationId);
+    void Promise.all([
+      chat.getPendingWorkflow(conversationId),
+      chat.getConversation(conversationId)
+    ]).then(async ([result, refreshed]) => {
       if (!active) return;
       setActiveWorkflow(result.ok ? result.value ?? undefined : undefined);
       setWebResearchSession(undefined);
-      if (result.ok && result.value) {
-        const restored = await chat.getConversation(selected.conversationId);
-        if (active && restored.ok) replaceConversation(restored.value);
+      if (refreshed.ok) {
+        replaceConversation(refreshed.value);
+        if (documentGeneration) {
+          const pendingGenerations = refreshed.value.messages.flatMap((message) =>
+            message.documentGenerationStatus &&
+            ['generating_content', 'validating_outline', 'generating_file'].includes(message.documentGenerationStatus.state)
+              ? [{
+                  conversationId,
+                  expectedRevision: refreshed.value.revision,
+                  messageId: message.messageId
+                }]
+              : []
+          );
+          const reconciliationResults = await Promise.allSettled(pendingGenerations.map((request) =>
+            documentGeneration.reconcileGeneration(request)
+          ));
+          const reconciledInterruptedRun = reconciliationResults.some((item) =>
+            item.status === 'fulfilled' && item.value.ok && item.value.value.interrupted
+          );
+          if (active && reconciledInterruptedRun) {
+            const reconciled = await chat.getConversation(conversationId);
+            if (reconciled.ok) replaceConversation(reconciled.value);
+          }
+        }
       }
+      if (active) setConversationHydratingId(undefined);
     }).catch(() => {
-      if (active) setActiveWorkflow(undefined);
+      if (active) {
+        setActiveWorkflow(undefined);
+        setConversationHydratingId(undefined);
+      }
     });
     return () => {
       active = false;
@@ -1373,6 +1467,13 @@ export function ChatPage({
   }, [chat, session, selected?.conversationId, selected?.readOnly, selected?.status, candidateReloadVersion]);
 
   useEffect(() => {
+    if (!activeWorkflow || activeWorkflow.status !== 'ready' || !selected || !selectedCandidate?.available ||
+        busy || responseInProgress || webResearchSession?.status === 'authorization_required' ||
+        workflowExecutionInFlightRef.current) return;
+    void executeReadyWorkflow(activeWorkflow, selected);
+  }, [activeWorkflow, busy, responseInProgress, selected, selectedCandidate?.available, webResearchSession?.status]);
+
+  useEffect(() => {
     const execution = responseExecutionSnapshotRef.current;
     if (!chat || !execution || !['pending', 'streaming'].includes(execution.state)) {
       return;
@@ -1401,26 +1502,32 @@ export function ChatPage({
         count: events.length,
         sequences: events.map((event) => event.sequence)
       });
+      const contentDelta = events.map((event) => event.contentDelta ?? '').join('');
+      const reasoningDelta = events.map((event) => event.reasoningDelta ?? '').join('');
       setResponseExecution((current) => {
         if (!current || current.responseExecutionId !== executionId) return current;
-        return events.reduce<ConversationResponseExecutionDto>((next, event) => {
-          const state = event.type === 'stream_completed' ? 'completed'
+        let state = current.state;
+        let taskProgress = current.taskProgress;
+        for (const event of events) {
+          state = event.type === 'stream_completed' ? 'completed'
             : event.type === 'stream_cancelled' ? 'cancelled'
               : event.type === 'stream_failed' ? 'failed'
                 : event.type === 'stream_interrupted' ? 'interrupted'
                   : event.type === 'stream_started' || event.type === 'stream_resumed'
                     ? 'streaming'
-                    : next.state;
-          return {
-            ...next,
-            state,
-            streamSequence: event.sequence,
-            taskProgress: projectTaskProgress(next.taskProgress, event),
-            reasoningContent: `${next.reasoningContent}${event.reasoningDelta ?? ''}`,
-            content: `${next.content}${event.contentDelta ?? ''}`,
-            updatedAt: event.occurredAt
-          };
-        }, current);
+                    : state;
+          taskProgress = projectTaskProgress(taskProgress, event);
+        }
+        const lastEvent = events[events.length - 1];
+        return {
+          ...current,
+          state,
+          streamSequence: lastEvent.sequence,
+          taskProgress,
+          reasoningContent: `${current.reasoningContent}${reasoningDelta}`,
+          content: `${current.content}${contentDelta}`,
+          updatedAt: lastEvent.occurredAt
+        };
       });
     };
 
@@ -1717,14 +1824,19 @@ export function ChatPage({
     setHistoryOpen(false);
   }
 
-  function replaceConversation(conversation: ConversationDto) {
-    setConversations((items) => items.some(
-      (item) => item.conversationId === conversation.conversationId
-    )
-      ? items.map((item) =>
-          item.conversationId === conversation.conversationId && item.revision <= conversation.revision ? conversation : item
-        )
-      : [conversation, ...items]);
+  function replaceConversation(
+    conversation: ConversationDto,
+    options: { readonly skipUnchangedRevision?: boolean } = {}
+  ) {
+    setConversations((items) => {
+      const index = items.findIndex((item) => item.conversationId === conversation.conversationId);
+      if (index < 0) return [conversation, ...items];
+      if (items[index].revision > conversation.revision) return items;
+      if (options.skipUnchangedRevision && items[index].revision >= conversation.revision) return items;
+      const next = items.slice();
+      next[index] = conversation;
+      return next;
+    });
   }
 
   async function mutateConversation(
@@ -1876,7 +1988,7 @@ export function ChatPage({
       let boundConversationId: string | undefined;
       const unsubscribe = productionTrace.subscribeCommand(planningCommand.clientCommandId, (event) => {
         if (inputScope !== composerScopeRef.current || event.projectId !== session.projectId) return;
-        setProductionEvents((current) => mergeProductionEvents(current, [event]));
+        enqueueProductionEvents([event]);
         setPendingProduction((current) => current?.clientCommandId === planningCommand.clientCommandId
           ? { ...current, conversationId: event.conversationId, sourceMessageId: event.sourceMessageId }
           : current);
@@ -2041,6 +2153,8 @@ export function ChatPage({
   ) {
     if (workflowExecutionInFlightRef.current) return;
     workflowExecutionInFlightRef.current = true;
+    setWorkflowExecutionActive(true);
+    setWorkflowCancelRequested(false);
     const executionScope = composerScopeRef.current;
     documentOrchestrationCancelRef.current = false;
     let currentWorkflow = workflow;
@@ -2123,8 +2237,25 @@ export function ChatPage({
       setNotice('任务状态未能确认，请刷新后核对；已交付作品已保留，请勿重复发送。');
     } finally {
       workflowExecutionInFlightRef.current = false;
+      setWorkflowExecutionActive(false);
+      setWorkflowCancelRequested(false);
       setBusy(false);
     }
+  }
+
+  async function stopWorkflowExecution() {
+    if (!workflowExecutionActive || workflowCancelRequested) return;
+    documentOrchestrationCancelRef.current = true;
+    setWorkflowCancelRequested(true);
+    if (documentGenerationActive || documentResponseActive) {
+      await cancelDocumentGeneration();
+      return;
+    }
+    if (responseInProgress || responseStarting || startingClientCommandIdRef.current) {
+      await cancelResponse();
+      return;
+    }
+    setNotice('已请求停止后续步骤，正在等待当前步骤结束。');
   }
 
   async function executeWorkflowStep(
@@ -2331,43 +2462,6 @@ export function ChatPage({
     }
     if (confirmed && conversation) {
       await executeReadyWorkflow(confirmed, conversation);
-    }
-  }
-
-  async function continueActiveWorkflow() {
-    if (!activeWorkflow || activeWorkflow.status !== 'ready' || !selected || busy) return;
-    await executeReadyWorkflow(activeWorkflow, selected);
-  }
-
-  async function cancelActiveWorkflow() {
-    if (!chat || !activeWorkflow || busy) return;
-    setBusy(true);
-    try {
-      if (
-        webResearch &&
-        webResearchSession &&
-        ['authorization_required', 'searching'].includes(webResearchSession.status)
-      ) {
-        await webResearch.cancel({
-          workflowId: activeWorkflow.workflowId,
-          expectedWorkflowRevision: activeWorkflow.revision
-        }).catch(() => undefined);
-      }
-      const result = await chat.cancelWorkflow(
-        activeWorkflow.workflowId,
-        activeWorkflow.revision
-      );
-      if (!result.ok) {
-        setNotice(errorMessages[result.error.code]);
-        return;
-      }
-      setActiveWorkflow(undefined);
-      setWebResearchSession(undefined);
-      setNotice('当前任务已取消。');
-    } catch {
-      setNotice(errorMessages.storage_error);
-    } finally {
-      setBusy(false);
     }
   }
 
@@ -4056,7 +4150,12 @@ export function ChatPage({
           ref={messagesRef}
         >
           <div className="uc-chat-page__messages-inner">
-            {!selected && displayMessages.length === 0 ? (
+            {conversationHydratingId !== undefined && conversationHydratingId === selected?.conversationId && displayMessages.length === 0 ? (
+              <div className="uc-chat-page__empty">
+                <strong>正在读取这段对话…</strong>
+                <p>正在恢复会话内容。</p>
+              </div>
+            ) : !selected && displayMessages.length === 0 ? (
               <div className="uc-chat-page__empty">
                 <strong>开始新的对话</strong>
                 <p>选择模型并发送第一条消息，名称将自动生成。</p>
@@ -4071,8 +4170,7 @@ export function ChatPage({
                 {displayMessages.map((item) => {
                   const isCurrentAssistant = item.role === 'assistant' &&
                     item.messageId === responseExecution?.assistantMessageId;
-                  const sourceIndex = selected?.messages.findIndex(message => message.messageId === item.messageId) ?? -1;
-                  const sourceMessage = sourceIndex >= 0 ? selected?.messages.slice(0, sourceIndex).reverse().find(message => message.role === 'user') : undefined;
+                  const sourceMessage = previousUserByMessageId.get(item.messageId);
                   const parentRun = (isCurrentAssistant ? responseExecution?.parentRun : undefined) ?? selected?.parentRuns?.find(parent => parent.sourceMessageId === sourceMessage?.messageId);
                   const executionDuration = responseExecution
                     ? formatExecutionDuration(responseExecution.createdAt, responseExecution.updatedAt)
@@ -4279,29 +4377,22 @@ export function ChatPage({
             onCancel={() => { void cancelWaitingAgentSession(); }}
             onCloseUnknown={() => { void cancelWaitingAgentSession(true); }}
             onNewTask={() => { setNewAgentTaskRequested(true); setNotice('请输入新的任务需求，新任务将使用独立预算。'); draftFieldRef.current.focus(); }} /> : null}
-          {activeWorkflow && !activeWorkflow.planningFailureCode && !selected?.messages.at(-1)?.workflowReply?.workflowId.startsWith('native-') && !['needs_clarification', 'needs_confirmation'].includes(activeWorkflow.status) ? (
-            <div className="uc-chat-page__workflow-status" role="status">
-              <div className="uc-chat-page__workflow-copy">
-                <span>
-                  {webResearchSession?.status === 'authorization_required'
-                    ? `联网检索授权：${webResearchSession.authorization?.querySummary ?? '当前查询'}（允许域名：${webResearchSession.authorization?.allowedDomains.join('、') ?? '未配置'}）`
-                    : activeWorkflow.status === 'needs_clarification'
-                    ? workflowQuestion(activeWorkflow)
+            {activeWorkflow && !activeWorkflow.planningFailureCode && !selected?.messages.at(-1)?.workflowReply?.workflowId.startsWith('native-') &&
+                (activeWorkflow.status === 'needs_confirmation' || activeWorkflow.status === 'failed' || webResearchSession?.status === 'authorization_required') ? (
+              <div className="uc-chat-page__workflow-status" role="status">
+                <div className="uc-chat-page__workflow-copy">
+                  <span>
+                    {webResearchSession?.status === 'authorization_required'
+                      ? `联网检索授权：${webResearchSession.authorization?.querySummary ?? '当前查询'}（允许域名：${webResearchSession.authorization?.allowedDomains.join('、') ?? '未配置'}）`
                     : activeWorkflow.status === 'needs_confirmation'
                       ? '这项任务需要确认后才能执行。'
-                      : activeWorkflow.status === 'executing'
-                        ? '正在按顺序完成文档，已交付的作品会保留。'
-                        : activeWorkflow.status === 'failed'
-                          ? activeWorkflow.plan.action === 'revise' && activeWorkflow.deliveries?.length === 1
-                            ? selected?.messages.some((message) => activeWorkflow.deliveries?.some((delivery) => delivery.resultMessageId === message.messageId) && message.documentGenerationStatus?.errorCode === 'result_sync_pending')
-                              ? '对话已保存，新版文档已保存，结果同步待恢复。'
-                              : '对话已保存，原作品已保留，本次修改未交付。'
-                            : '任务尚未全部完成，已交付的作品已保留。'
-                          : activeWorkflow.status === 'ready' && !selectedCandidate?.available
-                            ? '需求已准备好，请先选择一个可用模型，再点“继续执行”。'
-                            : '这项任务已准备好。'}
-                </span>
-                {activeWorkflow.deliveries && activeWorkflow.deliveries.length > 1 ? (
+                      : activeWorkflow.plan.action === 'revise' && activeWorkflow.deliveries?.length === 1
+                        ? selected?.messages.some((message) => activeWorkflow.deliveries?.some((delivery) => delivery.resultMessageId === message.messageId) && message.documentGenerationStatus?.errorCode === 'result_sync_pending')
+                          ? '对话已保存，新版文档已保存，结果同步待恢复。'
+                          : '对话已保存，原作品已保留，本次修改未交付。'
+                        : '任务尚未全部完成，已交付的作品已保留。'}
+                  </span>
+                {activeWorkflow.status === 'failed' && activeWorkflow.deliveries && activeWorkflow.deliveries.length > 1 ? (
                   <div className="uc-chat-page__workflow-details" role="note">
                     {activeWorkflow.deliveries.map((delivery) => (
                       <span key={delivery.kind}>
@@ -4340,14 +4431,6 @@ export function ChatPage({
                     确认并继续
                   </Button>
                 ) : null}
-                {activeWorkflow.status === 'ready' ? (
-                  <Button
-                    disabled={busy || responseInProgress || !selectedCandidate?.available}
-                    onClick={() => void continueActiveWorkflow()}
-                  >
-                    继续执行
-                  </Button>
-                ) : null}
                 {activeWorkflow.status === 'failed' && activeWorkflow.deliveries?.some(
                   (delivery) => delivery.status === 'failed' && delivery.failureReason === 'execution_failed'
                 ) ? (
@@ -4356,15 +4439,8 @@ export function ChatPage({
                   </Button>
                 ) : null}
                 {activeWorkflow.status === 'failed' && activeWorkflow.deliveries?.some((delivery) => delivery.failureReason === 'input_required') ? (
-                  <span>请核对页码或章节，取消本任务后重新发送修改要求。</span>
+                  <span>请核对页码或章节后，重新发送修改要求。</span>
                 ) : null}
-                <Button
-                  disabled={busy || responseInProgress}
-                  onClick={() => void cancelActiveWorkflow()}
-                  variant="ghost"
-                >
-                  取消任务
-                </Button>
               </div>
             </div>
           ) : null}
@@ -4417,6 +4493,8 @@ export function ChatPage({
               pasteEnabled={Boolean(session) && !busy && !responseInProgress}
               planningActive={planningActive}
               planningCancelRequested={planningCancelRequested}
+              workflowExecutionActive={workflowExecutionActive}
+              workflowCancelRequested={workflowCancelRequested}
               documentGenerationActive={documentGenerationActive}
               documentResponseActive={documentResponseActive}
               documentCancelRequested={documentCancelRequested}
@@ -4431,6 +4509,8 @@ export function ChatPage({
               onPress={() =>
                 planningActive
                   ? void cancelWorkflowPlanning()
+                  : workflowExecutionActive
+                    ? void stopWorkflowExecution()
                   : documentGenerationActive || documentResponseActive
                     ? void cancelDocumentGeneration()
                     : responseInProgress

@@ -89,6 +89,20 @@ test('all composer sends use the semantic workflow entry and accept pending task
   assert.match(page, /resetComposerScope/);
 });
 
+test('ready workflows execute automatically and do not add a second chat action row', () => {
+  const submit = page.slice(page.indexOf('async function submitWorkflowInput()'), page.indexOf('async function executeReadyWorkflow'));
+  assert.match(submit, /if \(ready\) await executeReadyWorkflow\(ready\.workflow, ready\.conversation\)/);
+  assert.doesNotMatch(page, /继续执行/);
+  assert.doesNotMatch(page, /当前任务已取消。/);
+  assert.doesNotMatch(page, /onClick=\{\(\) => void cancelActiveWorkflow\(\)\}/);
+  assert.match(page, /workflowExecutionActive/);
+  assert.match(page, /stopWorkflowExecution/);
+  assert.match(page, /setWorkflowExecutionActive\(true\)/);
+  assert.match(page, /允许联网检索/);
+  assert.match(page, /确认并继续/);
+  assert.match(page, /重试失败文档/);
+});
+
 test('composer rejects missing models before planning and keeps stop controls independent', () => {
   const submit = page.slice(page.indexOf('async function submitWorkflowInput()'), page.indexOf('async function executeReadyWorkflow'));
   assert.match(submit, /if \(!selectedCandidateId \|\| !selectedCandidate\?\.available\) \{\s*setNotice\(errorMessages\.model_selection_required\);\s*return;/);
@@ -143,7 +157,7 @@ test('production trace starts collapsed around a visible real status and preserv
   assert.match(page, /events=\{traceEvents\}/);
   assert.match(page, /productionTrace\.subscribeCommand/);
   assert.match(page, /productionTrace\.subscribe\(selectedId/);
-  assert.match(page, /productionTrace\.list\(selectedId\)/);
+  assert.doesNotMatch(page, /productionTrace\.list\(selectedId\)/);
   assert.match(progress, /aria-label="生产进度"/);
   assert.match(progress, /<ol className="uc-chat-production-trace" aria-label="完整生产链路">/);
   assert.match(progress, /displayEvents\.map\(\(\{ event, key \}\) =>/);
