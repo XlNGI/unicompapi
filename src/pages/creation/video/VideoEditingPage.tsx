@@ -298,8 +298,13 @@ export function VideoEditingPage({
   const timelinePendingScrollLeftRef = useRef(0);
   const timelineZoomScrollLeftRef = useRef<number>();
   const [session, setSession] = useState<StorageProjectSessionDto>();
+  const projectIdRef = useRef(session?.projectId);
   const [drafts, setDrafts] = useState<readonly VideoEditorDraftDto[]>([]);
   const [currentDraft, setCurrentDraft] = useState<VideoEditorDraftDto>();
+  const currentDraftRef = useRef(currentDraft);
+  currentDraftRef.current = currentDraft;
+  const acceptDraftRef = useRef(acceptDraft);
+  acceptDraftRef.current = acceptDraft;
   const [videoWorks, setVideoWorks] = useState<readonly StorageWorkSummaryDto[]>([]);
   const [imageWorks, setImageWorks] = useState<readonly StorageWorkSummaryDto[]>([]);
   const [selectedWorkId, setSelectedWorkId] = useState('');
@@ -460,6 +465,16 @@ export function VideoEditingPage({
     let cancelled = false;
     let requestId = 0;
 
+    function clearProject() {
+      projectIdRef.current = undefined;
+      setSession(undefined);
+      acceptDraftRef.current(undefined);
+      setDrafts([]);
+      setVideoWorks([]);
+      setImageWorks([]);
+      setSelectedWorkId('');
+    }
+
     async function load() {
       const request = ++requestId;
       const expired = () => cancelled || request !== requestId;
@@ -474,13 +489,18 @@ export function VideoEditingPage({
         const sessionResult = await storage.getProjectSession();
         if (expired()) return;
         if (!sessionResult.ok) {
+          clearProject();
           setLoading(false);
           setMessage('读取当前项目失败，请返回“项目”页面重试。');
           return;
         }
+        if (currentDraftRef.current?.projectId !== sessionResult.value?.projectId) {
+          clearProject();
+        }
+        projectIdRef.current = sessionResult.value?.projectId;
         setSession(sessionResult.value);
         if (!sessionResult.value) {
-          acceptDraft(undefined);
+          acceptDraftRef.current(undefined);
           setLoading(false);
           return;
         }
@@ -505,14 +525,20 @@ export function VideoEditingPage({
           setSelectedWorkId(works[0]?.workId ?? '');
         }
         const sorted = sortDrafts(listResult.value);
+        if (sorted.some((draft) => draft.projectId !== sessionResult.value?.projectId)) {
+          setMessage('编辑草稿不属于当前项目，已停止加载。');
+          return;
+        }
         setDrafts(sorted);
         const preferred = preferredDraftId
           ? sorted.find((draft) => draft.draftId === preferredDraftId)
           : undefined;
-        const next = preferred ?? sorted.find((item) => item.draftId === currentDraft?.draftId) ?? sorted[0];
-        if (!expired() && (next?.draftId !== currentDraft?.draftId || next?.revision !== currentDraft?.revision)) acceptDraft(next);
+        const current = currentDraftRef.current;
+        const next = preferred ?? sorted.find((item) => item.draftId === current?.draftId) ?? sorted[0];
+        if (!expired() && (next?.draftId !== current?.draftId || next?.revision !== current?.revision)) acceptDraftRef.current(next);
       } catch {
         if (!expired()) {
+          clearProject();
           setLoading(false);
           setMessage('读取基础编辑工作区失败，请重试。');
         }
@@ -520,10 +546,16 @@ export function VideoEditingPage({
     }
 
     void load();
-    window.addEventListener(PROJECT_SESSION_CHANGED_EVENT, load);
+    const onProjectChanged = () => {
+      setLoading(true);
+      setMessage('');
+      clearProject();
+      void load();
+    };
+    window.addEventListener(PROJECT_SESSION_CHANGED_EVENT, onProjectChanged);
     return () => {
       cancelled = true;
-      window.removeEventListener(PROJECT_SESSION_CHANGED_EVENT, load);
+      window.removeEventListener(PROJECT_SESSION_CHANGED_EVENT, onProjectChanged);
     };
   }, [active, preferredDraftId, storage, videoEditors]);
 
@@ -654,6 +686,8 @@ export function VideoEditingPage({
     preferredClipId?: string,
     preferredPlayheadUs?: number
   ) {
+    if (draft && draft.projectId !== projectIdRef.current) return false;
+    currentDraftRef.current = draft;
     timelinePlayingRef.current = false;
     previewActuallyPlayingRef.current = false;
     timelineEndedRef.current = false;
@@ -748,7 +782,7 @@ export function VideoEditingPage({
     if (nextClipId) {
       void ensurePreview(nextClipId, false, draft, nextPlayheadUs);
     }
-    if (!draft) return;
+    if (!draft) return true;
     setDrafts((items) =>
       sortDrafts(
         items.some((item) => item.draftId === draft.draftId)
@@ -756,11 +790,12 @@ export function VideoEditingPage({
           : [...items, draft]
       )
     );
+    return true;
   }
 
   function handleError(error: EditorError) {
     if (error.recoverableDraft) {
-      acceptDraft(error.recoverableDraft, selectedClipId);
+      if (!acceptDraft(error.recoverableDraft, selectedClipId)) return;
       setSaveState('failed');
       setMessage(
         '修改仍保留在本机内存中，但尚未写入项目；继续编辑时会再次尝试保存。'
@@ -787,11 +822,11 @@ export function VideoEditingPage({
         handleError(result.error);
         return;
       }
-      acceptDraft(
+      if (!acceptDraft(
         result.value,
         preferredClipId,
         preferredPlayheadUs
-      );
+      )) return;
       setMessage(successMessage);
     } catch {
       setSaveState('failed');
@@ -835,7 +870,7 @@ export function VideoEditingPage({
         setMessage(errorMessage('draft_not_found', '编辑草稿已不存在。'));
         return;
       }
-      acceptDraft(result.value);
+      if (!acceptDraft(result.value)) return;
       setMessage('已打开项目内编辑草稿。');
     } catch {
       setMessage('打开编辑草稿失败，请重试。');
@@ -882,7 +917,7 @@ export function VideoEditingPage({
         setMessage('已取消选择视频，没有修改草稿。');
         return;
       }
-      acceptDraft(result.value.draft, result.value.source?.clipId);
+      if (!acceptDraft(result.value.draft, result.value.source?.clipId)) return;
       setMediaTab('timeline');
       setMessage(
         strategy === 'managed_project_copy'
@@ -910,7 +945,7 @@ export function VideoEditingPage({
         handleError(result.error);
         return;
       }
-      acceptDraft(result.value.draft, result.value.source?.clipId);
+      if (!acceptDraft(result.value.draft, result.value.source?.clipId)) return;
       setMediaTab('timeline');
       setMessage('项目视频作品已加入当前时间线，没有复制或覆盖原作品。');
     } catch {
@@ -939,7 +974,7 @@ export function VideoEditingPage({
         setMessage('已取消选择音乐，草稿保持不变。');
         return;
       }
-      acceptDraft(result.value.draft, selectedClipId);
+      if (!acceptDraft(result.value.draft, selectedClipId)) return;
       setInspectorTab('audio');
       setMessage('背景音乐已校验并保存；草稿仍只包含一条背景音乐。');
     } catch {
@@ -974,7 +1009,7 @@ export function VideoEditingPage({
         setMessage('已取消选择封面，草稿保持不变。');
         return;
       }
-      acceptDraft(result.value.draft, selectedClipId);
+      if (!acceptDraft(result.value.draft, selectedClipId)) return;
       setInspectorTab('cover');
       setMessage('本机图片已经过内容校验并设为封面。');
     } catch {
@@ -1045,7 +1080,7 @@ export function VideoEditingPage({
         handleError(confirmed.error);
         return;
       }
-      acceptDraft(confirmed.value.draft, clipId);
+      if (!acceptDraft(confirmed.value.draft, clipId)) return;
       setMessage('片段源文件已重新定位；该修改可撤销。');
     } catch {
       setMessage('重新定位失败，请重试。');

@@ -164,7 +164,11 @@ test('chat page uses project conversations and composer-first streaming workflow
   assert.match(source, /<Button[\s\S]*新建项目/);
   assert.match(styles, /\.uc-chat-page\s*\{[\s\S]*grid-template-columns: 260px minmax\(0, 1fr\);/);
   assert.match(styles, /\.uc-chat-page__workspace-sidebar\s*\{[\s\S]*grid-column: 1;/);
-  assert.match(appSource, /activeItemId === 'projects' && !activeSubItemId \?[\s\S]*<ChatPage/);
+  assert.match(appSource, /\(activeItemId === 'chat' \|\| activeItemId === 'projects'\) && !activeSubItemId/);
+  assert.equal((appSource.match(/<ChatPage\b/g) ?? []).length, 1);
+  assert.match(appSource, /hidden=\{!chatVisible\}/);
+  assert.match(source, /hidden=\{hidden\}/);
+  assert.match(styles, /\.uc-chat-page\[hidden\]\s*\{[^}]*display:\s*none;/);
   assert.match(source, /key: 'archive'/);
   assert.match(source, /key: 'restore'/);
   assert.doesNotMatch(source, /新建项目对话|创建项目对话/);
@@ -204,7 +208,7 @@ test('chat workspace uses a quiet project list and search dialog', () => {
   assert.match(source, /aria-expanded=\{expanded\}/);
   assert.doesNotMatch(source, /isCurrent && projectChatsExpanded/);
   assert.match(source, /uc-chat-page__workspace-scroll uc-scrollbar/);
-  assert.match(styles, /\.uc-scrollbar \{[\s\S]*scrollbar-width: thin/);
+  assert.match(styles, /\.uc-scrollbar,[\s\S]*scrollbar-width: thin/);
   assert.match(styles, /\.uc-chat-page__project-item\s*\{[\s\S]*min-height: 28px/);
   assert.doesNotMatch(styles, /\.uc-chat-page__workspace-conversations\s*\{[^}]*max-height:/);
   assert.match(layoutSource, /activeItemId === 'chat' \|\| activeItemId === 'projects' \? ' workspace--chat'/);
@@ -270,6 +274,19 @@ test('chat transparency only reports observable execution state', () => {
   assert.doesNotMatch(source, /已创建回复请求/);
   assert.doesNotMatch(source, /完整思考过程|模型内心|模拟思考|伪造思考/);
   assert.doesNotMatch(source, /编辑并重新生成|重新生成/);
+});
+
+test('expanded execution trace does not take the live reply off its isolated renderer', () => {
+  const directStream = source.match(/const directStream = Boolean\([\s\S]*?\);/)?.[0] ?? '';
+  assert.match(directStream, /isCurrentAssistant/);
+  assert.match(directStream, /responseInProgress/);
+  assert.match(directStream, /!isDocumentDraftMessage/);
+  assert.match(directStream, /!hideDocumentDraftContent/);
+  assert.match(directStream, /!taskProgress\?\.length/);
+  assert.doesNotMatch(directStream, /showProductionProgress/);
+  assert.match(source, /execution=\{responseExecution!\}/);
+  assert.doesNotMatch(source, /execution=\{streamedHere/);
+  assert.match(source, /if \(hidden\) return;/);
 });
 
 test('chat page does not expose creation or task submission controls', () => {

@@ -1,11 +1,12 @@
-import { mkdtemp, rm } from 'node:fs/promises';
+import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
+import { createHash } from 'node:crypto';
 import os from 'node:os';
 import path from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { createDocumentTaskRuntime, toConversationId, toDocumentTaskRuntimeId, toIsoTimestamp, toMessageId, toProjectId } from '../../src/domain';
 import { DocumentTaskRuntimeService } from '../../src/application';
 import { runPersistentDocumentAgent } from '../../src/platform/documents/persistent-document-agent';
-import { DocumentTaskRuntimeRevisionConflictError, JsonDocumentTaskRuntimeRepository } from '../../src/platform/repositories';
+import { DocumentTaskRuntimeRepositoryDataError, DocumentTaskRuntimeRevisionConflictError, JsonDocumentTaskRuntimeRepository } from '../../src/platform/repositories';
 import { NodeProjectStorage, projectStoragePaths } from '../../src/platform/storage';
 
 const roots: string[] = [];
@@ -70,6 +71,42 @@ describe('document task runtime repository', () => {
     await f.repository.create(f.runtime);
     await f.storage.writeJsonAtomically(projectStoragePaths.entities.documentTaskRuntimes, { malformed: true }, { backup: true });
     await expect(f.repository.get(f.runtime.id)).rejects.toThrow('backup requires explicit reconciliation');
+  });
+
+  it('reads retired deadlineAt without rewriting and keeps it when appending', async () => {
+    const f = await fixture();
+    await f.repository.create(f.runtime);
+    const file = path.join(f.root, 'entities/document-task-runtimes.json');
+    const stored = JSON.parse(await readFile(file, 'utf8')) as { runtimes: Array<{ budget: Record<string, unknown> }> };
+    stored.runtimes[0].budget.deadlineAt = 1_700_000_000_000;
+    await writeFile(file, JSON.stringify(stored));
+    const before = createHash('sha256').update(await readFile(file)).digest('hex');
+    const reopened = new JsonDocumentTaskRuntimeRepository(new NodeProjectStorage(f.root), f.projectId);
+    expect((await reopened.list())[0].budget).toEqual({ maxSteps: 8, budgetUnits: 16, timeoutMs: 120_000 });
+    expect(createHash('sha256').update(await readFile(file)).digest('hex')).toBe(before);
+    const second = createDocumentTaskRuntime({
+      ...f.runtime,
+      id: toDocumentTaskRuntimeId('runtime-2'),
+      executionId: 'execution-2',
+      createdAt: toIsoTimestamp(new Date().toISOString())
+    });
+    await reopened.create(second);
+    const after = JSON.parse(await readFile(file, 'utf8')) as { runtimes: Array<{ budget: Record<string, unknown> }> };
+    expect(after.runtimes[0].budget.deadlineAt).toBe(1_700_000_000_000);
+    expect(after.runtimes[1].budget).not.toHaveProperty('deadlineAt');
+  });
+
+  it('rejects an unknown stored budget field without rewriting the file', async () => {
+    const f = await fixture();
+    await f.repository.create(f.runtime);
+    const file = path.join(f.root, 'entities/document-task-runtimes.json');
+    const stored = JSON.parse(await readFile(file, 'utf8')) as { runtimes: Array<{ budget: Record<string, unknown> }> };
+    stored.runtimes[0].budget.other = 1;
+    await writeFile(file, JSON.stringify(stored));
+    const before = createHash('sha256').update(await readFile(file)).digest('hex');
+    const reopened = new JsonDocumentTaskRuntimeRepository(new NodeProjectStorage(f.root), f.projectId);
+    await expect(reopened.list()).rejects.toBeInstanceOf(DocumentTaskRuntimeRepositoryDataError);
+    expect(createHash('sha256').update(await readFile(file)).digest('hex')).toBe(before);
   });
 
   it('rejects binding mutation and cross-project stored records', async () => {

@@ -34,6 +34,9 @@ let execution: ConversationResponseExecutionDto | undefined;
 let subscriber: ((event: ConversationResponseStreamEventDto) => void) | undefined;
 let sequence = 0;
 let copied = '';
+let cancellationDelay = 0;
+let rejectStart = false;
+const interactive = new URLSearchParams(location.search).has('interactive');
 function emit(type: ConversationResponseStreamEventDto['type'], contentDelta = '', reasoningDelta = '') {
   if (!execution || !subscriber) throw new Error('Stream is not subscribed');
   const messageState = type === 'stream_completed' ? 'completed' : type === 'stream_cancelled' ? 'cancelled' : 'streaming';
@@ -61,6 +64,7 @@ window.unicomp = {
     getConversation: async () => ok(conversation),
     listTextCandidates: async (feature: string) => ok(feature === 'text_chat' ? [candidate] : []),
     startAgentResponse: async ({ content }: { content: string }) => {
+      if (rejectStart) return { ok: false, error: { code: 'local_chat_data_invalid' } };
       conversation = { ...conversation, revision: conversation.revision + 1,
         messages: [...conversation.messages, message('request', 'user', content),
           { ...message('answer', 'assistant', ''), state: 'streaming' }] };
@@ -72,9 +76,24 @@ window.unicomp = {
     },
     subscribeResponseEvents: (_executionId: string, _after: number, callback: typeof subscriber) => {
       subscriber = callback;
-      return () => { if (subscriber === callback) subscriber = undefined; };
+      let demoTimer: ReturnType<typeof setInterval> | undefined;
+      if (interactive) {
+        cancellationDelay = 8000;
+        let step = 0;
+        demoTimer = setInterval(() => {
+          if (!subscriber) return;
+          step++;
+          if (step <= 5) emit('reasoning_delta', '', `本地合成思考 ${step}。`);
+          else if (step === 6) emit('content_delta', '# 生成中 Markdown 验收\n\n');
+          else if (step === 7) emit('content_delta', '- **粗体条目**\n- 第二条\n\n```js\nconst local = true;\n```\n\n');
+          else if (step < 120) emit('content_delta', `\n\n第 ${step - 7} 段：本地合成输出，不调用任何服务商。`);
+          else emit('stream_completed');
+        }, 1000);
+      }
+      return () => { clearInterval(demoTimer); if (subscriber === callback) subscriber = undefined; };
     },
     cancelResponseExecution: async () => {
+      await new Promise(resolve => setTimeout(resolve, cancellationDelay));
       emit('stream_cancelled');
       return ok(execution);
     }
@@ -85,4 +104,7 @@ root.render(<ThemeProvider><RSuiteThemeBridge><ChatPage initialConversationId={c
   initialModelSelection={{ projectId, candidateId: candidate.candidateId, productFeature: 'text_chat' }} />
 </RSuiteThemeBridge></ThemeProvider>);
 Object.assign(window, { chatStreamHarness: { emit, state: () => ({ subscribed: Boolean(subscriber), copied,
-  content: execution?.content, executionState: execution?.state }), unmount: () => root.unmount() } });
+  content: execution?.content, executionState: execution?.state }),
+  setCancellationDelay: (milliseconds: number) => { cancellationDelay = milliseconds; },
+  setRejectStart: (reject: boolean) => { rejectStart = reject; },
+  unmount: () => root.unmount() } });

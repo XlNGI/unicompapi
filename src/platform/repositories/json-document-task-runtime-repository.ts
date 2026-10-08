@@ -67,8 +67,8 @@ export class JsonDocumentTaskRuntimeRepository implements DocumentTaskRuntimeRep
           schemaVersion: 1,
           revision: document.revision + 1,
           updatedAt: maxTimestamp(this.now(), validated.updatedAt, ...document.runtimes.map((item) => item.updatedAt)),
-          runtimes: [...document.runtimes, validated]
-        } satisfies DocumentTaskRuntimeDocumentV1;
+          runtimes: [...preservedRuntimes(current, document.runtimes), validated]
+        } as DocumentTaskRuntimeDocumentV1;
       },
       { backup: true }
     );
@@ -86,14 +86,14 @@ export class JsonDocumentTaskRuntimeRepository implements DocumentTaskRuntimeRep
         const actualRevision = index < 0 ? null : document.runtimes[index].revision;
         if (actualRevision !== expectedRevision) throw new DocumentTaskRuntimeRevisionConflictError(validated.id, expectedRevision, actualRevision);
         assertDocumentTaskRuntimeUpdate(document.runtimes[index], validated);
-        const runtimes = [...document.runtimes];
+        const runtimes = preservedRuntimes(current, document.runtimes).slice();
         runtimes[index] = validated;
         return {
           schemaVersion: 1,
           revision: document.revision + 1,
-          updatedAt: maxTimestamp(this.now(), validated.updatedAt, ...runtimes.map((item) => item.updatedAt)),
+          updatedAt: maxTimestamp(this.now(), validated.updatedAt, ...document.runtimes.map((item, itemIndex) => itemIndex === index ? validated.updatedAt : item.updatedAt)),
           runtimes
-        } satisfies DocumentTaskRuntimeDocumentV1;
+        } as DocumentTaskRuntimeDocumentV1;
       },
       { backup: true }
     );
@@ -124,6 +124,22 @@ export function parseDocumentTaskRuntimeDocument(
   return parseOrEmpty(value, projectId, now);
 }
 
+function parseStoredRuntime(value: unknown): DocumentTaskRuntime {
+  try {
+    return parseDocumentTaskRuntime(value);
+  } catch (error) {
+    if (error instanceof TypeError) throw new DocumentTaskRuntimeRepositoryDataError('document_task_runtime_unreadable');
+    throw error;
+  }
+}
+
+function preservedRuntimes(current: unknown, parsed: readonly DocumentTaskRuntime[]): readonly unknown[] {
+  if (typeof current !== 'object' || current === null || Array.isArray(current)) return parsed;
+  const raw = (current as { readonly runtimes?: unknown }).runtimes;
+  if (!Array.isArray(raw) || raw.length !== parsed.length) return parsed;
+  return parsed.map((runtime, index) => raw[index] ?? runtime);
+}
+
 function parseOrEmpty(value: unknown | undefined, projectId: ProjectId | undefined, now: () => string): DocumentTaskRuntimeDocumentV1 {
   if (value === undefined) return emptyDocument(now);
   if (typeof value !== 'object' || value === null || Array.isArray(value)) throw new DocumentTaskRuntimeRepositoryDataError('Document task runtime document must be an object');
@@ -134,7 +150,7 @@ function parseOrEmpty(value: unknown | undefined, projectId: ProjectId | undefin
   }
   const ids = new Set<string>();
   const runtimes = item.runtimes.map((raw) => {
-    const runtime = parseDocumentTaskRuntime(raw);
+    const runtime = parseStoredRuntime(raw);
     if (projectId !== undefined && runtime.projectId !== projectId) throw new DocumentTaskRuntimeRepositoryDataError('Document task runtime document contains another project');
     if (ids.has(runtime.id)) throw new DocumentTaskRuntimeRepositoryDataError('Document task runtime document contains duplicate IDs');
     ids.add(runtime.id);

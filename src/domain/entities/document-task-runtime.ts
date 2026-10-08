@@ -283,10 +283,17 @@ export function assertDocumentTaskRuntimeUpdate(previous: DocumentTaskRuntime, n
 
 function parseBudget(value: unknown): DocumentTaskRuntimeBudget {
   const record = requireRecord(value, 'budget');
-  requireExactKeys(record, ['maxSteps', 'budgetUnits', 'timeoutMs']);
-  const maxSteps = positiveInteger(record.maxSteps, 'budget.maxSteps');
-  const budgetUnits = positiveInteger(record.budgetUnits, 'budget.budgetUnits');
-  const timeoutMs = positiveInteger(record.timeoutMs, 'budget.timeoutMs');
+  // deadlineAt is a retired execution clock. It grants no permission and is not
+  // persisted again; every other stored field stays strict.
+  const persisted: Record<string, unknown> = {};
+  for (const key of Object.keys(record)) {
+    if (key === 'deadlineAt') continue;
+    persisted[key] = record[key];
+  }
+  requireExactKeys(persisted, ['maxSteps', 'budgetUnits', 'timeoutMs']);
+  const maxSteps = positiveInteger(persisted.maxSteps, 'budget.maxSteps');
+  const budgetUnits = positiveInteger(persisted.budgetUnits, 'budget.budgetUnits');
+  const timeoutMs = positiveInteger(persisted.timeoutMs, 'budget.timeoutMs');
   if (maxSteps > 32 || budgetUnits > 10_000 || timeoutMs > 900_000) throw new TypeError('Document task runtime budget exceeds limits');
   return { maxSteps, budgetUnits, timeoutMs };
 }

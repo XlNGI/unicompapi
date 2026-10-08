@@ -243,21 +243,29 @@
 }
 
 /* Reusable desktop scrollbar for scrollable work surfaces. */
-.uc-scrollbar {
+.uc-scrollbar,
+.uc-model-select__popup .rs-picker-select-menu-items,
+.uc-model-select__popup .rs-picker-listbox {
   scrollbar-width: thin;
   scrollbar-color: color-mix(in srgb, var(--uc-color-text-tertiary) 64%, transparent) transparent;
 }
 
-.uc-scrollbar::-webkit-scrollbar {
+.uc-scrollbar::-webkit-scrollbar,
+.uc-model-select__popup .rs-picker-select-menu-items::-webkit-scrollbar,
+.uc-model-select__popup .rs-picker-listbox::-webkit-scrollbar {
   width: 6px;
   height: 6px;
 }
 
-.uc-scrollbar::-webkit-scrollbar-track {
+.uc-scrollbar::-webkit-scrollbar-track,
+.uc-model-select__popup .rs-picker-select-menu-items::-webkit-scrollbar-track,
+.uc-model-select__popup .rs-picker-listbox::-webkit-scrollbar-track {
   background: transparent;
 }
 
-.uc-scrollbar::-webkit-scrollbar-button {
+.uc-scrollbar::-webkit-scrollbar-button,
+.uc-model-select__popup .rs-picker-select-menu-items::-webkit-scrollbar-button,
+.uc-model-select__popup .rs-picker-listbox::-webkit-scrollbar-button {
   display: none !important;
   width: 0;
   height: 0;
@@ -265,7 +273,9 @@
   background: transparent;
 }
 
-.uc-scrollbar::-webkit-scrollbar-thumb {
+.uc-scrollbar::-webkit-scrollbar-thumb,
+.uc-model-select__popup .rs-picker-select-menu-items::-webkit-scrollbar-thumb,
+.uc-model-select__popup .rs-picker-listbox::-webkit-scrollbar-thumb {
   min-height: 28px;
   border: 1px solid transparent;
   border-radius: var(--uc-radius-full);
@@ -273,7 +283,9 @@
   background-clip: padding-box;
 }
 
-.uc-scrollbar::-webkit-scrollbar-thumb:hover {
+.uc-scrollbar::-webkit-scrollbar-thumb:hover,
+.uc-model-select__popup .rs-picker-select-menu-items::-webkit-scrollbar-thumb:hover,
+.uc-model-select__popup .rs-picker-listbox::-webkit-scrollbar-thumb:hover {
   background-color: color-mix(in srgb, var(--uc-color-text-secondary) 80%, transparent);
 }
 
@@ -8463,6 +8475,7 @@ button.uc-project-center__project-card:disabled {
 
 .uc-chat-page__message-list {
   gap: var(--uc-space-4);
+  grid-template-columns: minmax(0, 1fr);
   width: 100%;
   max-width: none;
   padding-bottom: var(--uc-space-3);
@@ -11727,6 +11740,10 @@ button.uc-project-center__project-card:disabled {
    existing project and conversation IPC boundaries remain unchanged. */
 .uc-chat-page {
   grid-template-columns: 260px minmax(0, 1fr);
+}
+
+.uc-chat-page[hidden] {
+  display: none;
 }
 
 .uc-chat-page__workspace-sidebar {

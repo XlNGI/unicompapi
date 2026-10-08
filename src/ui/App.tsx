@@ -88,6 +88,10 @@ export function App() {
   const ActivePage = activeSubItemId
     ? pagesBySecondaryNavigationItem[activeSubItemId]
     : pagesByNavigationItem[activeItemId];
+  const chatVisible =
+    (activeItemId === 'chat' || activeItemId === 'projects') && !activeSubItemId;
+  const [chatKept, setChatKept] = useState(chatVisible);
+  if (chatVisible && !chatKept) setChatKept(true);
 
   function handleNavigate(itemId: NavigationItemId, taskId?: string) {
     setOpenedVideoDraftId(undefined);
@@ -147,8 +151,9 @@ export function App() {
       onNavigate={handleNavigate}
       onSecondaryNavigate={handleSecondaryNavigate}
     >
-      {activeItemId === 'chat' && !activeSubItemId ? (
+      {chatKept ? (
         <ChatPage
+          hidden={!chatVisible}
           initialConversationId={selectedChatConversationId}
           initialModelSelection={chatModelSelection}
           onConversationChange={setSelectedChatConversationId}
@@ -156,16 +161,8 @@ export function App() {
           onOpenLibrary={() => handleNavigate('library')}
           onNavigateToCreation={(itemId) => handleNavigate(itemId)}
         />
-      ) : activeItemId === 'projects' && !activeSubItemId ? (
-        <ChatPage
-          initialConversationId={selectedChatConversationId}
-          initialModelSelection={chatModelSelection}
-          onConversationChange={setSelectedChatConversationId}
-          onModelSelectionChange={setChatModelSelection}
-          onOpenLibrary={() => handleNavigate('library')}
-          onNavigateToCreation={(itemId) => handleNavigate(itemId)}
-        />
-      ) : activeItemId === 'tasks' && !activeSubItemId ? (
+      ) : null}
+      {chatVisible ? null : activeItemId === 'tasks' && !activeSubItemId ? (
         <TasksPage
           onNavigate={handleNavigate}
           onReuseParameters={handleReuseParameters}

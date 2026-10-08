@@ -7,7 +7,7 @@ import {
   type ConversationResponseDraftV1,
   type ProjectId
 } from '../../domain';
-import { projectStoragePaths, type ProjectStorageAdapter } from '../storage';
+import { JsonStorageDataError, projectStoragePaths, type ProjectStorageAdapter } from '../storage';
 
 export interface ConversationResponseDraftDocumentV1 {
   readonly schemaVersion: 1;
@@ -68,7 +68,7 @@ export class JsonConversationResponseDraftRepository
         'A new conversation response draft must have revision 0'
       );
     }
-    await this.storage.mutateJsonAtomically(
+    await withStoredDraftErrors(() => this.storage.mutateJsonAtomically(
       projectStoragePaths.entities.conversationResponseDrafts,
       (current) => {
         const document = this.parseOrEmpty(current);
@@ -88,7 +88,7 @@ export class JsonConversationResponseDraftRepository
         } satisfies ConversationResponseDraftDocumentV1;
       },
       { backup: true }
-    );
+    ));
   }
 
   async save(
@@ -104,7 +104,7 @@ export class JsonConversationResponseDraftRepository
         'Saved response draft revision must increment exactly once'
       );
     }
-    await this.storage.mutateJsonAtomically(
+    await withStoredDraftErrors(() => this.storage.mutateJsonAtomically(
       projectStoragePaths.entities.conversationResponseDrafts,
       (current) => {
         const document = this.parseOrEmpty(current);
@@ -127,14 +127,14 @@ export class JsonConversationResponseDraftRepository
         } satisfies ConversationResponseDraftDocumentV1;
       },
       { backup: true }
-    );
+    ));
   }
 
   private async loadDocument(): Promise<ConversationResponseDraftDocumentV1> {
-    const loaded = await this.storage.readJsonWithBackup(
+    const loaded = await withStoredDraftErrors(() => this.storage.readJsonWithBackup(
       projectStoragePaths.entities.conversationResponseDrafts,
       (value) => this.parseOrEmpty(value)
-    );
+    ));
     return loaded?.value ?? this.emptyDocument();
   }
 
@@ -171,6 +171,40 @@ export function parseConversationResponseDraftDocument(
   value: unknown,
   projectId?: ProjectId
 ): ConversationResponseDraftDocumentV1 {
+  try {
+    return parseStoredDocument(value, projectId);
+  } catch (error) {
+    if (error instanceof ConversationResponseDraftRepositoryDataError) throw error;
+    throw new ConversationResponseDraftRepositoryDataError('Stored conversation response drafts are invalid', error);
+  }
+}
+
+async function withStoredDraftErrors<T>(operation: () => Promise<T>): Promise<T> {
+  try {
+    return await operation();
+  } catch (error) {
+    if (error instanceof SyntaxError || error instanceof JsonStorageDataError) {
+      throw new ConversationResponseDraftRepositoryDataError('Stored conversation response drafts could not be decoded', error);
+    }
+    throw error;
+  }
+}
+
+function parseStoredDraft(value: unknown): ConversationResponseDraftV1 {
+  if (typeof value === 'object' && value !== null && !Array.isArray(value) &&
+      Object.prototype.hasOwnProperty.call(value, 'promptMode')) {
+    const { promptMode, ...current } = value as Record<string, unknown>;
+    if (current.schemaVersion !== 1 || (promptMode !== 'conversation' && promptMode !== 'document_revision')) {
+      throw new ConversationResponseDraftRepositoryDataError('Stored conversation response draft mode is unsupported');
+    }
+    // These obsolete routing labels are not permissions. Validate every remaining
+    // field using the current domain contract; new domain inputs stay strict.
+    return parseConversationResponseDraft(current);
+  }
+  return parseConversationResponseDraft(value);
+}
+
+function parseStoredDocument(value: unknown, projectId?: ProjectId): ConversationResponseDraftDocumentV1 {
   if (typeof value !== 'object' || value === null || Array.isArray(value)) {
     throw new ConversationResponseDraftRepositoryDataError(
       'Conversation response draft document must be an object'
@@ -192,7 +226,7 @@ export function parseConversationResponseDraftDocument(
   }
   const ids = new Set<string>();
   const drafts = item.drafts.map((draft) => {
-    const parsed = parseConversationResponseDraft(draft);
+    const parsed = parseStoredDraft(draft);
     if (projectId !== undefined && parsed.projectId !== projectId) {
       throw new ConversationResponseDraftRepositoryDataError(
         'Conversation response draft document contains another project'

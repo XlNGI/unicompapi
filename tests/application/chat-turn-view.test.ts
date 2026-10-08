@@ -10,7 +10,8 @@ describe('chat turn view', () => {
   });
 
   it('keeps reasoning open only while it is the live reply, then follows the user toggle', () => {
-    expect(reasoningExpanded({ reasoning: '先确认问题', content: '', inProgress: true, opened: false })).toBe(true);
+    expect(reasoningExpanded({ reasoning: '先确认问题', content: '', inProgress: true })).toBe(true);
+    expect(reasoningExpanded({ reasoning: '先确认问题', content: '', inProgress: true, opened: false })).toBe(false);
     expect(reasoningExpanded({ reasoning: '先确认问题', content: '可以。', inProgress: true, opened: false })).toBe(false);
     expect(reasoningExpanded({ reasoning: '先确认问题', content: '可以。', inProgress: false, opened: true })).toBe(true);
     expect(reasoningExpanded({ reasoning: '', content: '', inProgress: true, opened: true })).toBe(false);

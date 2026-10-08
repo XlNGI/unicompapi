@@ -6,8 +6,7 @@ export const StreamingMarkdown = memo(function StreamingMarkdown({ content, stre
   readonly streaming: boolean;
   readonly allowImages?: boolean;
 }) {
-  if (streaming) {
-    return <div className="uc-markdown-message uc-chat-stream-plain">{content}</div>;
-  }
-  return <MarkdownMessage allowImages={allowImages} content={content} />;
+  return <div data-streaming={streaming ? 'true' : undefined}>
+    <MarkdownMessage allowImages={allowImages && !streaming} content={content} />
+  </div>;
 });

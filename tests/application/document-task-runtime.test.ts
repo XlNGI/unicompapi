@@ -261,4 +261,12 @@ describe('runtime persistence data boundary', () => {
     expect(() => parseDocumentTaskRuntime({ ...base, unexpected: true })).toThrow();
     expect(() => assertDocumentTaskRuntimeUpdate(base, { ...base, revision: 1, status: 'completed' })).toThrow();
   });
+
+  it('drops retired budget deadlineAt without accepting another budget field', () => {
+    const base = createDocumentTaskRuntime({ ...input, createdAt: toIsoTimestamp(now()) });
+    const parsed = parseDocumentTaskRuntime({ ...base, budget: { ...base.budget, deadlineAt: 1_700_000_000_000 } });
+    expect(parsed.budget).toEqual(base.budget);
+    expect(parsed.budget).not.toHaveProperty('deadlineAt');
+    expect(() => parseDocumentTaskRuntime({ ...base, budget: { ...base.budget, other: 1 } })).toThrow(/unsupported field: other/);
+  });
 });

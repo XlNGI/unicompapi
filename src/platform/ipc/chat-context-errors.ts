@@ -16,6 +16,8 @@ import {
   ConversationRepositoryDataError,
   ConversationRevisionConflictError,
   ConversationResponseDraftRepositoryDataError,
+  ConversationAgentRunRepositoryDataError,
+  DocumentTaskRuntimeRepositoryDataError,
   ConversationResponseDraftRevisionConflictError,
   ConversationResponseExecutionRepositoryDataError,
   ConversationWorkflowRepositoryDataError,
@@ -37,6 +39,10 @@ export function chatContextFailure<T>(
   onError?: (error: unknown) => void
 ): ChatContextIpcResult<T> {
   onError?.(error);
+  if (error instanceof ConversationResponseDraftRepositoryDataError || error instanceof ConversationAgentRunRepositoryDataError ||
+      error instanceof DocumentTaskRuntimeRepositoryDataError) {
+    return failure('local_chat_data_invalid', 'Local conversation data is invalid or unsupported');
+  }
   if (error instanceof ConversationAttachmentError) {
     return failure(error.code, error.message);
   }
@@ -132,7 +138,6 @@ export function chatContextFailure<T>(
   if (
     error instanceof ConversationRepositoryDataError ||
     error instanceof ProjectContextRepositoryDataError ||
-    error instanceof ConversationResponseDraftRepositoryDataError ||
     error instanceof ConversationResponseExecutionRepositoryDataError ||
     error instanceof ConversationWorkflowRepositoryDataError
   ) {

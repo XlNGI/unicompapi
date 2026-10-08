@@ -10,6 +10,7 @@ import {
   toChatBlockedDiagnostic,
   toProviderDiagnostic
 } from '../../src/platform';
+import { DocumentTaskRuntimeRepositoryDataError } from '../../src/platform/repositories';
 import { FeatureSubmissionError } from '../../src/platform/providers/provider-feature-candidates';
 import { RuntimeAuthorizationDeniedError } from '../../src/platform/providers/runtime-authorization-ledger';
 
@@ -89,6 +90,9 @@ describe('diagnostic event catalog', () => {
       facts: { reason: 'runtime_not_allowed' }
     });
     expect(toChatBlockedDiagnostic(new TypeError('bad json'))).toBeUndefined();
+    const runtimeHistory = toChatBlockedDiagnostic(new DocumentTaskRuntimeRepositoryDataError('unsupported field: deadlineAt'));
+    expect(runtimeHistory).toEqual({ code: 'chat.request_blocked', facts: { reason: 'document_task_runtime_unreadable' } });
+    expect(JSON.stringify(runtimeHistory)).not.toMatch(/deadlineAt/);
     expect(diagnosticErrorName(new FeatureSubmissionError('candidate_unavailable', 'hidden')))
       .toBe('FeatureSubmissionError');
   });

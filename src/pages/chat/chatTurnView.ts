@@ -16,9 +16,8 @@ export function reasoningExpanded(input: {
   readonly reasoning: string;
   readonly content: string;
   readonly inProgress: boolean;
-  readonly opened: boolean;
+  readonly opened?: boolean;
 }): boolean {
   if (!input.reasoning.trim()) return false;
-  if (!input.content.trim() && input.inProgress) return true;
-  return input.opened;
+  return input.opened ?? (!input.content.trim() && input.inProgress);
 }

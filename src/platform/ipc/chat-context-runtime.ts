@@ -40,6 +40,7 @@ import {
   JsonConversationResponseDraftRepository,
   JsonConversationResponseExecutionRepository,
   JsonConversationAgentRunRepository,
+  JsonDocumentTaskRuntimeRepository,
   JsonConversationWorkflowRepository,
   JsonProviderExecutionRouteSnapshotRepository,
   JsonProviderInvocationRepository,
@@ -260,6 +261,7 @@ export function createChatContextRuntime(
       session.projectId
     );
     const agentRuns = new JsonConversationAgentRunRepository(storage, session.projectId, now);
+    const documentTaskRuntimes = new JsonDocumentTaskRuntimeRepository(storage, session.projectId, now);
     const invocationRoutes = new JsonProviderExecutionRouteSnapshotRepository(
       storage,
       session.projectId
@@ -419,6 +421,7 @@ export function createChatContextRuntime(
       streamChannel,
       workflowService,
       agentRuns,
+      documentTaskRuntimes,
       attachments,
       documentPages,
       documentTools,

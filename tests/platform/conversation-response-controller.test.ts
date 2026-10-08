@@ -1,7 +1,7 @@
 import { NativeSearchAuthorizationError, type ConversationNativeSearch } from '../../src/platform/providers/conversation-native-search';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { mkdtempSync } from 'node:fs';
-import { rm } from 'node:fs/promises';
+import { readFile, rm, writeFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 
@@ -14,10 +14,14 @@ import {
   addCompletedAssistantMessage,
   beginAssistantMessage,
   createConversation,
+  createConversationAgentRun,
+  createDocumentTaskRuntime,
   createConversationResponseDraft,
   createConversationWorkflow,
   parseConversationIntentPlan,
   toConnectionId,
+  toConversationAgentRunId,
+  toDocumentTaskRuntimeId,
   toConversationId,
   toConversationResponseDraftId,
   toConversationResponseExecutionId,
@@ -32,10 +36,15 @@ import {
 } from '../../src/domain';
 import {
   ConversationResponseController,
+  ConversationAgentRunRepositoryDataError,
+  DocumentTaskRuntimeRepositoryDataError,
+  JsonConversationAgentRunRepository,
+  JsonDocumentTaskRuntimeRepository,
   toResponseDraftDto,
   type ConversationResponseControllerRuntime
 } from '../../src/platform';
 import { ConversationDocumentPageError } from '../../src/platform/documents/conversation-document-page-context';
+import { NodeProjectStorage, projectStoragePaths } from '../../src/platform/storage';
 
 const projectId = toProjectId('project-response-controller');
 const createdAt = toIsoTimestamp('2026-08-18T00:00:00.000Z');
@@ -187,7 +196,8 @@ function fixture(documentPages?: ConversationResponseControllerRuntime['document
     draftRepository,
     readyWorkflow,
     workflowService,
-    errors
+    errors,
+    traceRoot
   };
 }
 
@@ -206,6 +216,69 @@ function startRequest(clientCommandId = 'client-command-controller') {
 }
 
 describe('ConversationResponseController', () => {
+  it('starts an Agent reply with finalized newer task history without dropping the task manifest', async () => {
+    const value = fixture();
+    const storage = new NodeProjectStorage(value.traceRoot);
+    const stored = { ...createConversationAgentRun({ id: toConversationAgentRunId('historic-run'),
+      projectId, conversationId: toConversationId('historic-conversation'), sourceMessageId: toMessageId('historic-message'),
+      createdAt }), status: 'completed', documentTaskIds: ['historic-document-task'] };
+    await storage.writeJsonAtomically(projectStoragePaths.entities.conversationAgentRuns,
+      { schemaVersion: 1, revision: 1, updatedAt: createdAt, runs: [stored] });
+    Object.assign(value.runtime, { agentRuns: new JsonConversationAgentRunRepository(storage, projectId, () => createdAt) });
+    const result = await value.controller.startAgent(startRequest());
+    expect(result.ok).toBe(true);
+    expect(value.runtime.start).toHaveBeenCalledTimes(1);
+    const document = JSON.parse(await readFile(path.join(value.traceRoot, 'entities/conversation-agent-runs.json'), 'utf8'));
+    expect(document.runs[0]).toEqual(stored);
+    expect(document.runs).toHaveLength(2);
+  });
+
+  it('rejects unreadable Agent history before creating messages, drafts or preparing provider submission', async () => {
+    const value = fixture();
+    Object.assign(value.runtime, { agentRuns: { list: vi.fn().mockRejectedValue(new ConversationAgentRunRepositoryDataError()) } });
+    await expect(value.controller.startAgent(startRequest())).resolves.toMatchObject({ ok: false, error: { code: 'local_chat_data_invalid' } });
+    expect(value.service.create).not.toHaveBeenCalled();
+    expect(value.draftRepository.create).not.toHaveBeenCalled();
+    expect(value.candidateService.prepareSubmission).not.toHaveBeenCalled();
+    expect(value.runtime.start).not.toHaveBeenCalled();
+  });
+
+  it('checks document runtime history before creating a conversation', async () => {
+    const readable = fixture();
+    const storage = new NodeProjectStorage(readable.traceRoot);
+    const repository = new JsonDocumentTaskRuntimeRepository(storage, projectId, () => createdAt);
+    const runtime = createDocumentTaskRuntime({
+      id: toDocumentTaskRuntimeId('runtime-controller'),
+      projectId,
+      conversationId: toConversationId('historic-conversation'),
+      sourceMessageId: toMessageId('historic-message'),
+      executionId: 'execution-controller',
+      documentKind: 'ppt',
+      budget: { maxSteps: 8, budgetUnits: 16, timeoutMs: 120_000 },
+      createdAt
+    });
+    await repository.create(runtime);
+    const relative = projectStoragePaths.entities.documentTaskRuntimes;
+    const file = path.join(readable.traceRoot, relative);
+    const stored = JSON.parse(await readFile(file, 'utf8')) as { runtimes: Array<{ budget: Record<string, unknown> }> };
+    stored.runtimes[0].budget.deadlineAt = 1_700_000_000_000;
+    await writeFile(file, JSON.stringify(stored));
+    Object.assign(readable.runtime, { documentTaskRuntimes: new JsonDocumentTaskRuntimeRepository(storage, projectId, () => createdAt) });
+    await expect(readable.controller.startAgent(startRequest())).resolves.toMatchObject({ ok: true });
+    expect(readable.service.create).toHaveBeenCalledTimes(1);
+
+    const rejected = fixture();
+    stored.runtimes[0].budget.other = 1;
+    const rejectedStorage = new NodeProjectStorage(rejected.traceRoot);
+    await rejectedStorage.writeJsonAtomically(relative, stored);
+    Object.assign(rejected.runtime, { documentTaskRuntimes: new JsonDocumentTaskRuntimeRepository(rejectedStorage, projectId, () => createdAt) });
+    await expect(rejected.controller.startAgent(startRequest())).resolves.toMatchObject({ ok: false, error: { code: 'local_chat_data_invalid' } });
+    expect(rejected.service.create).not.toHaveBeenCalled();
+    expect(rejected.draftRepository.create).not.toHaveBeenCalled();
+    expect(rejected.runtime.start).not.toHaveBeenCalled();
+    expect(rejected.errors[0]).toBeInstanceOf(DocumentTaskRuntimeRepositoryDataError);
+  });
+
   it('includes replayed task progress in the execution IPC snapshot', async () => {
     const value = fixture();
     const taskProgress = [{

@@ -79,6 +79,7 @@ describe('video editor visibility effect behavior', () => {
   let tree: ReactElement;
   const getProjectSession = vi.fn();
   const listDrafts = vi.fn();
+  const getDraft = vi.fn();
   const listWorks = vi.fn();
   const listTasks = vi.fn();
   let windowEvents: EventTarget;
@@ -112,7 +113,7 @@ describe('video editor visibility effect behavior', () => {
       removeEventListener: windowEvents.removeEventListener.bind(windowEvents),
       unicomp: {
         storage: { getProjectSession, listWorks, listTasks },
-        videoEditors: { list: listDrafts }
+        videoEditors: { list: listDrafts, get: getDraft }
       }
     });
   });
@@ -199,5 +200,71 @@ describe('video editor visibility effect behavior', () => {
     windowEvents.dispatchEvent(new Event(PROJECT_SESSION_CHANGED_EVENT));
     await settle(false);
     expect(getProjectSession).toHaveBeenCalledTimes(2);
+  });
+  it('clears the previous project draft when switching to a project with no drafts', async () => {
+    await settle(true);
+    expect(picker().props.value).toBe(draft.draftId);
+    getProjectSession.mockResolvedValue({ ok: true, value: { ...session, projectId: 'empty-project' } });
+    listDrafts.mockResolvedValue({ ok: true, value: [] });
+    windowEvents.dispatchEvent(new Event(PROJECT_SESSION_CHANGED_EVENT));
+    await settle(true);
+    expect(picker().props.data).toEqual([]);
+    expect(picker().props.value).toBeNull();
+  });
+
+  it('does not retain an editable old draft when the new project draft list fails', async () => {
+    await settle(true);
+    getProjectSession.mockResolvedValue({ ok: true, value: { ...session, projectId: 'failed-project' } });
+    listDrafts.mockResolvedValue({ ok: false, error: { code: 'storage_error' } });
+    windowEvents.dispatchEvent(new Event(PROJECT_SESSION_CHANGED_EVENT));
+    await settle(true);
+    expect(picker().props.value).toBeNull();
+  });
+
+  it('ignores a late draft list from the previous project', async () => {
+    let resolveDrafts!: (value: unknown) => void;
+    listDrafts.mockImplementationOnce(() => new Promise(resolve => { resolveDrafts = resolve; }));
+    await settle(true);
+    getProjectSession.mockResolvedValue({ ok: true, value: { ...session, projectId: 'empty-project' } });
+    listDrafts.mockResolvedValue({ ok: true, value: [] });
+    windowEvents.dispatchEvent(new Event(PROJECT_SESSION_CHANGED_EVENT));
+    await settle(true);
+    resolveDrafts({ ok: true, value: [draft] });
+    await settle(true);
+    expect(picker().props.data).toEqual([]);
+    expect(picker().props.value).toBeNull();
+  });
+
+  it('rejects drafts belonging to another project', async () => {
+    await settle(true);
+    getProjectSession.mockResolvedValue({ ok: true, value: { ...session, projectId: 'next-project' } });
+    windowEvents.dispatchEvent(new Event(PROJECT_SESSION_CHANGED_EVENT));
+    await settle(true);
+    expect(picker().props.data).toEqual([]);
+    expect(picker().props.value).toBeNull();
+  });
+
+  it('does not reopen a previous project draft when an open request returns late', async () => {
+    await settle(true);
+    let resolveDraft!: (value: unknown) => void;
+    getDraft.mockImplementationOnce(() => new Promise(resolve => { resolveDraft = resolve; }));
+    (picker().props.onChange as (id: string) => void)(draft.draftId);
+    getProjectSession.mockResolvedValue({ ok: true, value: { ...session, projectId: 'empty-project' } });
+    listDrafts.mockResolvedValue({ ok: true, value: [] });
+    windowEvents.dispatchEvent(new Event(PROJECT_SESSION_CHANGED_EVENT));
+    await settle(true);
+    resolveDraft({ ok: true, value: draft });
+    await settle(true);
+    expect(picker().props.value).toBeNull();
+    expect(picker().props.data).toEqual([]);
+  });
+
+  it('clears an old hidden workspace if its project cannot be verified on return', async () => {
+    await settle(true);
+    await settle(false);
+    getProjectSession.mockResolvedValue({ ok: false, error: { code: 'storage_error' } });
+    await settle(true);
+    expect(picker().props.value).toBeNull();
+    expect(picker().props.data).toEqual([]);
   });
 });

@@ -19,6 +19,7 @@ import {
   toProjectContextId,
   type ConversationIntentPlan,
   type ConversationAgentRunRepository,
+  type DocumentTaskRuntimeRepository,
   type ConversationResponseDraftRepository,
   type ConversationResponseDraftV1,
   type ConversationResponseExecutionReadModelV1,
@@ -79,6 +80,7 @@ export interface ConversationResponseControllerRuntime {
   readonly attachments?: Pick<ConversationAttachmentContextService, 'pin' | 'resolve'>;
   readonly documentPages?: Pick<ConversationDocumentPageContextService, 'resolve'>;
   readonly documentTools?: Pick<ConversationDocumentToolSessionService, 'select' | 'pinDraft'>;
+  readonly documentTaskRuntimes?: Pick<DocumentTaskRuntimeRepository, 'list'>;
   /** Completes startup recovery before accessing persisted response state or executing writes. */
   readonly ready: Promise<void>;
   submit?(input: {
@@ -502,6 +504,10 @@ export class ConversationResponseController {
     const workflow = input.workflow
       ? await this.requireReadyWorkflow(runtime, input)
       : undefined;
+    // Validate stored ownership before creating a conversation or authorizing a
+    // provider call; an unsupported project must not leave invisible new messages.
+    if (input.agentNative && !workflow && runtime.agentRuns) await runtime.agentRuns.list();
+    if (runtime.documentTaskRuntimes) await runtime.documentTaskRuntimes.list();
     const attachmentFileIds = input.attachmentFileIds ?? [];
     if (attachmentFileIds.length && !runtime.attachments) {
       throw new ConversationAttachmentError('attachment_unavailable', '附件读取服务尚未配置。');

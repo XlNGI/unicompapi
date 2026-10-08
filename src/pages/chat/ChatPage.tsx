@@ -29,6 +29,7 @@ import { Button } from '../../components/Button';
 import { Card } from '../../components/Card';
 import { EmptyState } from '../../components/EmptyState';
 import { StreamingMarkdown } from './StreamingMarkdown';
+import { LiveChatResponse, type LiveChatResponseHandle } from './LiveChatResponse';
 import { ChatAttachment } from './ChatAttachment';
 import { DocumentProgress, productionActivityLabel } from './DocumentProgress';
 import { liveReplyCue, reasoningExpanded } from './chatTurnView';
@@ -83,6 +84,7 @@ import { documentPresentationPreferences } from '../../application/document-pres
 import '../../styles/pages.css';
 
 const errorMessages: Record<ChatContextIpcErrorCode, string> = {
+  local_chat_data_invalid: '此项目的本地聊天数据格式异常或版本不受支持，无法完成本次对话操作。请保留历史文件，并使用兼容该项目数据的版本；不要清空聊天记录。',
   local_safety_rejected: '本地安全检查未通过，请修改输入后重试。',
   model_selection_required: '本次请求尚未发出，请先选择一个可用模型。',
   invalid_request: '当前操作数据无效，请刷新后重试。',
@@ -319,6 +321,7 @@ interface ChatPageProps {
   readonly onModelSelectionChange?: (selection?: ChatModelSelection) => void;
   readonly onOpenLibrary?: () => void;
   readonly onNavigateToCreation?: (itemId: 'image-creation' | 'video-creation') => void;
+  readonly hidden?: boolean;
 }
 
 function formatBytes(value?: number): string {
@@ -722,7 +725,8 @@ export function ChatPage({
   initialModelSelection,
   onModelSelectionChange,
   onOpenLibrary,
-  onNavigateToCreation
+  onNavigateToCreation,
+  hidden = false
 }: ChatPageProps) {
   const chat = window.unicomp?.chatContexts;
   const productionTrace = window.unicomp?.productionTrace;
@@ -767,7 +771,7 @@ export function ChatPage({
     readonly createdAt: string;
     readonly conversationId?: string;
   }>();
-  const [openThoughtIds, setOpenThoughtIds] = useState<ReadonlySet<string>>(() => new Set());
+  const [thoughtPreferences, setThoughtPreferences] = useState<ReadonlyMap<string, boolean>>(() => new Map());
   const [openProductionIds, setOpenProductionIds] = useState<ReadonlySet<string>>(() => new Set());
   const [activeWorkflow, setActiveWorkflow] = useState<ConversationWorkflowDto>();
   const [webResearchSession, setWebResearchSession] = useState<WebResearchSessionDto>();
@@ -873,10 +877,7 @@ export function ChatPage({
     });
   };
   const responseExecutionSnapshotRef = useRef(responseExecution);
-  const liveTextNodeRef = useRef<HTMLDivElement>(null);
-  const liveReasoningNodeRef = useRef<HTMLParagraphElement>(null);
-  const liveThoughtRef = useRef<HTMLDivElement>(null);
-  const liveStatusRef = useRef<HTMLParagraphElement>(null);
+  const liveResponseRef = useRef<LiveChatResponseHandle>(null);
   const incomingExecution = responseExecution;
   const rememberedExecution = responseExecutionSnapshotRef.current;
   if (
@@ -1391,25 +1392,8 @@ export function ChatPage({
         };
       }, current);
       responseExecutionSnapshotRef.current = reduced;
-      const textNode = liveTextNodeRef.current;
-      if (!shouldCommitResponseFrame(current, reduced) && textNode) {
-        textNode.textContent = reduced.content;
-        if (liveReasoningNodeRef.current) liveReasoningNodeRef.current.textContent = reduced.reasoningContent;
-        const thought = liveThoughtRef.current;
-        if (thought) {
-          const reasoning = reduced.reasoningContent.trim();
-          const answer = reduced.content.trim();
-          thought.style.display = reasoning.length === 0 ? 'none' : '';
-          const body = thought.querySelector('.uc-chat-turn__thought-body');
-          if (body instanceof HTMLElement) body.style.display = reasoning.length === 0 || answer.length > 0 ? 'none' : '';
-        }
-        const status = liveStatusRef.current;
-        if (status) {
-          const label = reduced.content.trim() || reduced.reasoningContent.trim() ? '' : '正在组织回答';
-          status.style.display = label.length === 0 ? 'none' : '';
-          status.textContent = label;
-        }
-        pinMessagesToBottomRef.current();
+      if (!shouldCommitResponseFrame(current, reduced) && liveResponseRef.current) {
+        liveResponseRef.current.update(reduced);
         return;
       }
       setResponseExecution(reduced);
@@ -3742,6 +3726,7 @@ export function ChatPage({
   };
 
   useEffect(() => {
+    if (hidden) return;
     const onKeyDown = (event: KeyboardEvent) => {
       if (event.repeat) return;
       const key = event.key.toLowerCase();
@@ -3777,12 +3762,13 @@ export function ChatPage({
     };
     window.addEventListener('keydown', onKeyDown);
     return () => window.removeEventListener('keydown', onKeyDown);
-  }, [searchOpen, searchResults]);
+  }, [hidden, searchOpen, searchResults]);
 
   return (
     <section
       aria-labelledby="chat-page-title"
       className="uc-chat-page"
+      hidden={hidden}
       onDragEnter={handlePageDragEnter}
       onDragLeave={handlePageDragLeave}
       onDragOver={handlePageDragOver}
@@ -4085,7 +4071,7 @@ export function ChatPage({
                     reasoning: liveReasoning,
                     content: item.content,
                     inProgress: liveInProgress,
-                    opened: openThoughtIds.has(item.messageId)
+                    opened: thoughtPreferences.get(item.messageId)
                   });
                   const responseLabel = !liveAssistant
                     ? ''
@@ -4111,21 +4097,11 @@ export function ChatPage({
                     responseInProgress &&
                     !isDocumentDraftMessage &&
                     !hideDocumentDraftContent &&
-                    !showProductionProgress
+                    !taskProgress?.length
                   );
                   return (
                     <li className={`uc-chat-page__message-item uc-chat-page__message-item--${item.role}${directStream ? ' uc-chat-page__message-item--live' : ''}`} key={item.messageId}>
-                      {directStream ? (
-                        <p
-                          aria-label="回复状态"
-                          className="uc-chat-page__response-status"
-                          ref={liveStatusRef}
-                          role="status"
-                          style={responseLabel ? undefined : { display: 'none' }}
-                        >
-                          {responseLabel}
-                        </p>
-                      ) : (isCurrentAssistant && !showProductionProgress || item.messageId.startsWith('pending-assistant-') && !showProductionProgress) && responseLabel ? (
+                      {!directStream && (isCurrentAssistant && !showProductionProgress || item.messageId.startsWith('pending-assistant-') && !showProductionProgress) && responseLabel ? (
                         <p className="uc-chat-page__response-status" aria-label="回复状态" role="status">
                           {responseLabel}
                         </p>
@@ -4178,31 +4154,21 @@ export function ChatPage({
                             />
                           ) : null}
                           {directStream ? (
-                            <>
-                              <div className="uc-chat-turn__thought" ref={liveThoughtRef} style={shownReasoning.trim() ? undefined : { display: 'none' }}>
-                                <p className="uc-chat-turn__disclosure is-open" role="status">
-                                  <span>思考</span>
-                                  <LuChevronRight aria-hidden="true" />
-                                </p>
-                                <p className="uc-chat-turn__thought-body" ref={liveReasoningNodeRef} style={shownContent.trim() ? { display: 'none' } : undefined}>{shownReasoning}</p>
-                              </div>
-                              <div className="uc-markdown-message uc-chat-stream-plain" ref={liveTextNodeRef}>{shownContent}</div>
-                              <span className="uc-chat-page__caret" aria-hidden="true">▌</span>
-                            </>
+                            <LiveChatResponse key={responseExecution!.responseExecutionId} ref={liveResponseRef}
+                              execution={responseExecution!} stopping={cancelRequested}
+                              thoughtOpened={thoughtPreferences.get(item.messageId)}
+                              onThoughtToggle={(opened) => setThoughtPreferences((current) =>
+                                new Map(current).set(item.messageId, opened))} />
                           ) : (
                             <>
                           {!isDocumentDraftMessage && !hideDocumentDraftContent && (shownReasoning.trim() || replyCue === 'thinking') ? (
                             <div className="uc-chat-turn__thought">
-                              {shownReasoning.trim() && (shownContent.trim() || !liveInProgress) ? (
+                              {shownReasoning.trim() ? (
                                 <button
                                   className="uc-chat-turn__disclosure"
                                   aria-expanded={thoughtOpen}
-                                  onClick={() => setOpenThoughtIds((current) => {
-                                    const next = new Set(current);
-                                    if (next.has(item.messageId)) next.delete(item.messageId);
-                                    else next.add(item.messageId);
-                                    return next;
-                                  })}
+                                  onClick={() => setThoughtPreferences((current) =>
+                                    new Map(current).set(item.messageId, !thoughtOpen))}
                                   type="button"
                                 >
                                   <span>思考</span>

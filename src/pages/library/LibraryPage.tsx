@@ -277,7 +277,7 @@ export function LibraryPage({ onNavigate }: LibraryPageProps) {
         />
       ) : (
         <div className="uc-work-library__workspace">
-          <section className="uc-work-library__list" aria-labelledby="work-list-title">
+          <section className="uc-work-library__list uc-scrollbar" aria-labelledby="work-list-title">
             <h2 id="work-list-title">作品列表（{filteredWorks.length}）</h2>
             {filteredWorks.length === 0 ? (
               <p className="uc-work-library__muted">没有符合当前筛选条件的作品。</p>
@@ -427,7 +427,7 @@ function WorkDetails({
   }, [previewExpanded]);
 
   return (
-    <div className="uc-work-library__details-content">
+    <div className="uc-work-library__details-content uc-scrollbar">
       <div className={`uc-work-library__preview${previewExpanded ? ' uc-work-library__preview--expanded' : ''}`}>
         {canPreview && details.mediaKind === 'image' ? (
           <img alt={details.name} src={media.url} />

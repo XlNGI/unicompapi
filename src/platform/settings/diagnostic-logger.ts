@@ -190,6 +190,9 @@ export function toChatBlockedDiagnostic(error: unknown): DiagnosticLogInput | un
   ) {
     return { code: 'chat.request_blocked', facts: { reason: 'native_search_authorization_required' } };
   }
+  if (error.name === 'DocumentTaskRuntimeRepositoryDataError') {
+    return { code: 'chat.request_blocked', facts: { reason: 'document_task_runtime_unreadable' } };
+  }
   return undefined;
 }
 
