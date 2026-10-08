@@ -81,6 +81,7 @@ import { ConversationSemanticClassifier, conversationSemanticLimits } from '../p
 import { featureCandidateId } from '../providers/provider-registry-feature-candidates';
 import { ConversationController } from './conversation-controller';
 import { toConversationDto } from './conversation-controller';
+import { ConversationThreadReadController } from './conversation-thread-read-controller';
 import { verifyRetainedDocumentArtifacts } from './retained-document-artifact-projection';
 import {
   ConversationWorkflowController,
@@ -172,6 +173,7 @@ export interface ChatContextRuntimeDependencies {
 
 export interface ChatContextRuntime {
   readonly conversations: ConversationControllerPort;
+  readonly threadReads: ConversationThreadReadController;
   readonly responses: ConversationResponseController;
   readonly projectContexts: ProjectContextController;
   readonly workflows: ConversationWorkflowController;
@@ -1249,6 +1251,10 @@ export function createChatContextRuntime(
       ));
     }
   };
+  const threadReads = new ConversationThreadReadController(
+    conversations,
+    () => dependencies.getSession()?.projectId ?? 'legacy-unbound'
+  );
   const projectContexts = new ProjectContextController({
     getSession: dependencies.getSession,
     onError: dependencies.onError,
@@ -1290,6 +1296,7 @@ export function createChatContextRuntime(
   });
   return {
     conversations,
+    threadReads,
     responses,
     projectContexts,
     workflows,

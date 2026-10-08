@@ -1,4 +1,5 @@
 declare const domainIdBrand: unique symbol;
+declare const itemIdBrand: unique symbol;
 
 type DomainId<Name extends string> = string & {
   readonly [domainIdBrand]: Name;
@@ -40,6 +41,14 @@ export type UsageSchemaId = DomainId<'UsageSchemaId'>;
 export type ProviderExecutionRouteSnapshotId = DomainId<'ProviderExecutionRouteSnapshotId'>;
 export type SubmissionIntentId = DomainId<'SubmissionIntentId'>;
 export type DocumentTaskRuntimeId = DomainId<'DocumentTaskRuntimeId'>;
+export type ThreadId = DomainId<'ThreadId'>;
+export type TurnId = DomainId<'TurnId'>;
+export type ToolCallId = DomainId<'ToolCallId'>;
+export type ItemId = {
+  readonly namespace: 'message' | 'projection';
+  readonly value: string;
+  readonly [itemIdBrand]: 'ItemId';
+};
 
 function toDomainId<Name extends string>(value: string, label: Name): DomainId<Name> {
   const normalized = value.trim();
@@ -116,3 +125,39 @@ export const toSubmissionIntentId = (value: string) =>
   toDomainId(value, 'SubmissionIntentId');
 export const toDocumentTaskRuntimeId = (value: string) =>
   toDomainId(value, 'DocumentTaskRuntimeId');
+export const toThreadId = (value: string) => toDomainId(value, 'ThreadId');
+export const toTurnId = (value: string) => {
+  const id = toDomainId(value, 'TurnId');
+  if (!/^turn-(?:[A-Za-z0-9][A-Za-z0-9._:-]{0,190})$/.test(id)) {
+    throw new TypeError('TurnId must use the turn- prefix');
+  }
+  return id;
+};
+export const toToolCallId = (value: string) => toDomainId(value, 'ToolCallId');
+
+export function toMessageItemId(value: MessageId | string): ItemId {
+  const messageId = toMessageId(String(value));
+  return { namespace: 'message', value: messageId } as unknown as ItemId;
+}
+
+export function toProjectionItemId(value: string): ItemId {
+  const normalized = value.trim();
+  if (!/^item-projection-v1:[a-f0-9]{64}$/.test(normalized)) {
+    throw new TypeError('Projection ItemId must use the item-projection-v1 sha256 format');
+  }
+  return { namespace: 'projection', value: normalized } as unknown as ItemId;
+}
+
+export function toItemId(value: unknown): ItemId {
+  if (typeof value !== 'object' || value === null || Array.isArray(value)) {
+    throw new TypeError('ItemId must be a tagged object');
+  }
+  const item = value as { readonly namespace?: unknown; readonly value?: unknown };
+  if (item.namespace === 'message' && typeof item.value === 'string') return toMessageItemId(item.value);
+  if (item.namespace === 'projection' && typeof item.value === 'string') return toProjectionItemId(item.value);
+  throw new TypeError('ItemId namespace is invalid');
+}
+
+export function itemIdKey(value: ItemId): string {
+  return `${value.namespace}:${value.value}`;
+}

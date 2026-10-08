@@ -814,6 +814,18 @@ const chatContexts: ChatContextApi = {
       includeArchived,
       includeDeleted
     }),
+  listThreadSummaries: ({ includeArchived, includeDeleted, limit, cursor }) =>
+    ipcRenderer.invoke(chatContextIpcChannels.listThreadSummaries, {
+      includeArchived, includeDeleted, limit, cursor: cursor ?? null
+    }),
+  getThread: (threadId) =>
+    ipcRenderer.invoke(chatContextIpcChannels.getThread, { threadId }),
+  getThreadItemsPage: ({ threadId, limit, direction, cursor }) =>
+    ipcRenderer.invoke(chatContextIpcChannels.getThreadItemsPage, {
+      threadId, limit, direction: direction ?? 'older', cursor: cursor ?? null
+    }),
+  getTurn: (turnId) =>
+    ipcRenderer.invoke(chatContextIpcChannels.getTurn, { turnId }),
   listConversationCandidates: () =>
     ipcRenderer.invoke(chatContextIpcChannels.listConversationCandidates),
   renameConversation: (conversationId, expectedRevision, title) =>

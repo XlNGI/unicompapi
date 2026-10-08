@@ -131,6 +131,42 @@ describe('ConversationController', () => {
     expect(JSON.stringify(invalid)).not.toContain('C:\\private');
   });
 
+  it('keeps get and list as complete conversation reads with stable message IDs and revisions', async () => {
+    const value = await fixture();
+    value.openProject();
+    const created = await value.controller.create({
+      title: 'Complete API contract',
+      bindToCurrentProject: true
+    });
+    if (!created.ok) throw new Error('fixture creation failed');
+
+    let revision = created.value.revision;
+    const messageIds: string[] = [];
+    for (const content of ['first full body', 'second full body', 'third full body']) {
+      const added = await value.controller.addUserMessage({
+        conversationId: created.value.conversationId,
+        expectedRevision: revision,
+        content
+      });
+      if (!added.ok) throw new Error('fixture message failed');
+      revision = added.value.revision;
+      messageIds.push(added.value.messages.at(-1)!.messageId);
+    }
+
+    const loaded = await value.controller.get({ conversationId: created.value.conversationId });
+    const listed = await value.controller.list({ includeArchived: false, includeDeleted: false });
+    if (!loaded.ok || !listed.ok) throw new Error('complete conversation read failed');
+    const listEntry = listed.value.find(item => item.conversationId === created.value.conversationId);
+
+    expect(loaded.value.messages.map(message => message.messageId)).toEqual(messageIds);
+    expect(loaded.value.messages.map(message => message.content)).toEqual([
+      'first full body', 'second full body', 'third full body'
+    ]);
+    expect(loaded.value.revision).toBe(revision);
+    expect(listEntry?.messages.map(message => message.messageId)).toEqual(messageIds);
+    expect(listEntry?.messages.map(message => message.revision)).toEqual([0, 0, 0]);
+  });
+
   it('edits the last user message only after its response is cancelled', async () => {
     const value = await fixture();
     value.openProject();

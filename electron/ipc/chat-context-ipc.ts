@@ -55,6 +55,18 @@ export function registerChatContextIpcHandlers(options: {
   ipcMain.handle(chatContextIpcChannels.listConversations, (_event, request: unknown) =>
     conversations.list(request)
   );
+  ipcMain.handle(chatContextIpcChannels.listThreadSummaries, (_event, request: unknown) =>
+    runtime.threadReads.listThreadSummaries(request)
+  );
+  ipcMain.handle(chatContextIpcChannels.getThread, (_event, request: unknown) =>
+    runtime.threadReads.getThread(request)
+  );
+  ipcMain.handle(chatContextIpcChannels.getThreadItemsPage, (_event, request: unknown) =>
+    runtime.threadReads.getThreadItemsPage(request)
+  );
+  ipcMain.handle(chatContextIpcChannels.getTurn, (_event, request: unknown) =>
+    runtime.threadReads.getTurn(request)
+  );
   ipcMain.handle(chatContextIpcChannels.listConversationCandidates, () =>
     conversations.listCandidates()
   );

@@ -24,3 +24,5 @@ export * from './conversation-completion-coordinator';
 export * from './conversation-agent-runtime-service';
 export * from './conversation-agent-recovery-coordinator';
 export * from './conversation-agent-session-service';
+export * from './conversation-thread-adapter';
+export * from './model-history-reader';

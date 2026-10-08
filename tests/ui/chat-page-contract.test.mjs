@@ -126,7 +126,9 @@ test('chat page uses project conversations and composer-first streaming workflow
   assert.match(styles, /\.uc-chat-page__model-tool \.rs-picker-toggle \{[\s\S]*border: 0;[\s\S]*border-radius: var\(--uc-radius-full\);[\s\S]*background: transparent;/);
   assert.match(styles, /\.uc-chat-page__model-tool \.rs-picker-toggle:hover/);
   assert.match(source, /responseInProgress/);
-  assert.match(source, /displayMessages/);
+  assert.match(source, /displayMessageIds/);
+  assert.match(source, /ThreadItemRow/);
+  assert.match(source, /StreamingItem/);
   assert.match(source, /<StreamingMarkdown/);
   assert.match(source, /className="uc-chat-page__message-bubble"/);
   assert.match(styles, /\.uc-chat-page__message-item--user > \.uc-chat-page__message-bubble \{[\s\S]*padding: 8px 12px;[\s\S]*background: var\(--uc-color-surface-subtle\);/);
@@ -158,6 +160,9 @@ test('chat page uses project conversations and composer-first streaming workflow
   assert.doesNotMatch(source, /等待保存消息/);
   assert.doesNotMatch(source, /setSelectedCandidateId\(candidates\.value\[0\]/);
   assert.match(source, /chat\.listConversations\(true, false\)/);
+  assert.match(source, /listThreadSummaries/);
+  assert.match(source, /getThreadItemsPage/);
+  assert.match(source, /VITE_UNICOMP_THREAD_READ_PATH/);
   assert.match(source, /uc-chat-page__workspace-sidebar/);
   assert.match(source, /storage\.listProjects\(\)/);
   assert.match(source, /storage\.openRecentProject\(projectId\)/);

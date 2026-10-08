@@ -1,5 +1,5 @@
-import { Children, cloneElement, isValidElement, useEffect, useMemo, useRef, useState } from 'react';
-import type { ClipboardEvent, FormEvent, ReactNode } from 'react';
+import { Children, cloneElement, isValidElement, memo, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import type { ClipboardEvent, FormEvent, ReactNode, SetStateAction } from 'react';
 import {
   LuArchive,
   LuArchiveRestore,
@@ -29,16 +29,31 @@ import { Button } from '../../components/Button';
 import { Card } from '../../components/Card';
 import { EmptyState } from '../../components/EmptyState';
 import { StreamingMarkdown } from './StreamingMarkdown';
+import { StreamingItem } from './StreamingItem';
 import { ChatAttachment } from './ChatAttachment';
 import { DocumentProgress } from './DocumentProgress';
 import { RetainedDocumentCard } from './RetainedDocumentCard';
 import { mergeProductionEvents, projectProductionMessages, type PendingProductionInput } from './productionTimeline';
+import {
+  createThreadItemStore,
+  mergeThreadItemStore,
+  threadItemKey,
+  threadItemStoreItems,
+  type ThreadItemStore
+} from './threadItemStore';
+import {
+  createThreadSummaryStore,
+  replaceThreadSummaryStore,
+  threadSummaryStoreItems,
+  type ThreadSummaryStore
+} from './threadSummaryStore';
 import type { ProductionTraceEventDto } from '../../shared/conversation-production-ipc';
 import { projectTaskProgress } from '../../shared/conversation-task-progress';
 import { ModelSelect } from '../../components/ModelSelect';
 import { StatusPill } from '../../components/StatusPill';
 import { ProjectsPage } from '../projects/ProjectsPage';
 import type {
+  ChatContextApi,
   ChatContextIpcErrorCode,
   ConversationDto,
   ConversationResponseCandidateDto,
@@ -49,6 +64,9 @@ import type {
   ConversationResponseStreamEventDto,
   ConversationWorkflowDto,
   MessageDto,
+  ThreadDto,
+  ThreadItemDto,
+  ThreadSummaryDto,
   ProjectContextCandidateDto,
   ProjectContextDetailDto,
   ProjectContextDraftPreviewDto
@@ -84,6 +102,10 @@ import {
 } from '../../application';
 import { documentPresentationPreferences } from '../../application/document-presentation-preferences';
 import '../../styles/pages.css';
+
+// The hook runner used by non-DOM composer tests only implements useEffect;
+// Electron's renderer still gets a real layout effect for scroll compensation.
+const useChatLayoutEffect = typeof window === 'undefined' ? useEffect : useLayoutEffect;
 
 const errorMessages: Record<ChatContextIpcErrorCode, string> = {
   local_safety_rejected: '本地安全检查未通过，请修改输入后重试。',
@@ -140,6 +162,12 @@ const errorMessages: Record<ChatContextIpcErrorCode, string> = {
   document_page_scope_exceeded: '该页面超出本次完整读取范围，请缩小问题范围。',
   clarification_required: '请先补充会话任务所需的信息。',
   confirmation_expired: '任务确认已过期，请重新发送需求。',
+  thread_not_found: '该会话或交互轮次已不存在。',
+  thread_cursor_invalid: '会话列表位置已失效，请重新加载。',
+  thread_cursor_expired: '会话列表快照已过期，请重新加载。',
+  thread_cursor_scope_mismatch: '会话分页位置不属于当前项目或会话，请重新加载。',
+  thread_page_limit_out_of_range: '每次读取的历史消息数量无效。',
+  thread_read_degraded: '该会话数据需要本地检查，目前无法完整读取。',
   adapter_unavailable: '文本适配器当前不可用。',
   storage_error: '本地保存失败，请检查存储状态后重试。'
 };
@@ -314,8 +342,17 @@ function findEditableCancelledUserMessage(
 }
 
 type DeleteTarget =
-  | { readonly kind: 'conversation'; readonly value: ConversationDto }
+  | { readonly kind: 'conversation'; readonly value: ThreadSummaryDto }
   | { readonly kind: 'context'; readonly value: ProjectContextCandidateDto };
+
+type ChatConversationView = ThreadDto & {
+  readonly messages: readonly MessageDto[];
+  readonly messagesComplete: boolean;
+  readonly hasOlderItems: boolean;
+};
+
+const threadSummaryPageSize = 100;
+const threadItemPageSize = 100;
 
 export interface ChatModelSelection {
   readonly projectId: string;
@@ -331,6 +368,22 @@ interface ChatPageProps {
   readonly onOpenLibrary?: () => void;
   readonly onNavigateToCreation?: (itemId: 'image-creation' | 'video-creation') => void;
 }
+
+interface ThreadItemRowProps {
+  readonly item: MessageDto;
+  /** Explicitly lists the local state that can change this row's controls. */
+  readonly rowRevision: string;
+  readonly children: ReactNode;
+}
+
+/** Stable reconciliation boundary for historical Items and the one stream Item. */
+const ThreadItemRow = memo(function ThreadItemRow({ item, children }: ThreadItemRowProps) {
+  return (
+    <li className={`uc-chat-page__message-item uc-chat-page__message-item--${item.role}`}>
+      {children}
+    </li>
+  );
+}, (previous, next) => previous.item === next.item && previous.rowRevision === next.rowRevision);
 
 function formatBytes(value?: number): string {
   if (value === undefined) return '未知大小';
@@ -497,12 +550,12 @@ interface ProjectSidebarChat {
   readonly projectId: string;
   readonly title: string;
   readonly updatedAt: string;
-  readonly status: ConversationDto['status'];
+  readonly status: ThreadSummaryDto['status'];
   readonly readOnly: boolean;
-  readonly source?: ConversationDto;
+  readonly source?: ThreadSummaryDto;
 }
 
-function sidebarChatFromConversation(conversation: ConversationDto): ProjectSidebarChat {
+function sidebarChatFromConversation(conversation: ThreadSummaryDto): ProjectSidebarChat {
   return {
     conversationId: conversation.conversationId,
     projectId: conversation.projectId ?? '',
@@ -512,6 +565,66 @@ function sidebarChatFromConversation(conversation: ConversationDto): ProjectSide
     readOnly: conversation.readOnly,
     source: conversation
   };
+}
+
+function threadSummaryFromConversation(conversation: ConversationDto): ThreadSummaryDto {
+  const last = conversation.messages.at(-1);
+  return {
+    threadId: conversation.conversationId,
+    conversationId: conversation.conversationId,
+    revision: conversation.revision,
+    projectId: conversation.projectId,
+    title: conversation.title,
+    status: conversation.status,
+    storageScope: conversation.storageScope,
+    readOnly: conversation.readOnly,
+    createdAt: conversation.createdAt,
+    updatedAt: conversation.updatedAt,
+    ...(conversation.archivedAt ? { archivedAt: conversation.archivedAt } : {}),
+    ...(conversation.deletedAt ? { deletedAt: conversation.deletedAt } : {}),
+    messageCount: conversation.messages.length,
+    turnCount: conversation.messages.filter(message => message.role === 'user').length,
+    hasActiveDocumentGeneration: conversation.messages.some(message =>
+      ['generating_content', 'validating_outline', 'generating_file'].includes(message.documentGenerationStatus?.state ?? '')),
+    ...(last ? { lastItemId: { namespace: 'message', value: last.messageId } } : {})
+  };
+}
+
+function threadItemsFromConversation(conversation: ConversationDto): readonly ThreadItemDto[] {
+  return conversation.messages.map((message, index) => threadItemFromMessage(conversation.conversationId, message, index + 1));
+}
+
+function threadItemFromMessage(threadId: string, message: MessageDto, sequence: number): ThreadItemDto {
+  return {
+    itemId: { namespace: 'message', value: message.messageId },
+    threadId,
+    sequence,
+    itemType: message.role === 'user' ? 'user_message' : 'assistant_message',
+    status: message.state,
+    createdAt: message.createdAt,
+    updatedAt: message.updatedAt,
+    messageId: message.messageId,
+    message
+  };
+}
+
+function mergeThreadSummaries(
+  current: readonly ThreadSummaryDto[],
+  incoming: readonly ThreadSummaryDto[]
+): readonly ThreadSummaryDto[] {
+  const byId = new Map(current.map(item => [item.conversationId, item]));
+  for (const item of incoming) {
+    const previous = byId.get(item.conversationId);
+    if (!previous || previous.revision <= item.revision) byId.set(item.conversationId, item);
+  }
+  return [...byId.values()].sort((left, right) =>
+    right.updatedAt.localeCompare(left.updatedAt) || left.conversationId.localeCompare(right.conversationId)
+  );
+}
+
+function threadReadPathEnabled(chat: ChatContextApi | undefined): boolean {
+  if (!chat?.listThreadSummaries || !chat.getThread || !chat.getThreadItemsPage || !chat.getTurn) return false;
+  return import.meta.env.VITE_UNICOMP_THREAD_READ_PATH !== 'legacy';
 }
 
 function retainProjectOrder(
@@ -756,6 +869,7 @@ export function ChatPage({
   const documentAttachments = window.unicomp?.documentAttachments;
   const imageFeatures = window.unicomp?.imageFeatures;
   const storage = window.unicomp?.storage;
+  const [threadReadsEnabled] = useState(() => threadReadPathEnabled(chat));
   const [session, setSession] = useState<StorageProjectSessionDto>();
   const [projects, setProjects] = useState<readonly StorageProjectSummaryDto[]>([]);
   const [expandedProjectIds, setExpandedProjectIds] = useState<ReadonlySet<string>>(() => new Set());
@@ -767,7 +881,26 @@ export function ChatPage({
   const [projectCreateOpen, setProjectCreateOpen] = useState(false);
   const [projectManagementOpen, setProjectManagementOpen] = useState(false);
   const [projectCreateName, setProjectCreateName] = useState('');
-  const [conversations, setConversations] = useState<readonly ConversationDto[]>([]);
+  const [threadSummaryStore, setThreadSummaryStore] = useState<ThreadSummaryStore>(() => createThreadSummaryStore());
+  const conversations = useMemo(() => threadSummaryStoreItems(threadSummaryStore), [threadSummaryStore]);
+  // Compatibility setter keeps existing summary mutation call sites explicit
+  // while the renderer state remains normalized by Thread ID.
+  const setConversations = (update: SetStateAction<readonly ThreadSummaryDto[]>) => {
+    setThreadSummaryStore((current) => {
+      const currentItems = threadSummaryStoreItems(current);
+      const nextItems = typeof update === 'function' ? update(currentItems) : update;
+      return replaceThreadSummaryStore(nextItems, current);
+    });
+  };
+  // Thread summaries and the selected Thread Item store are intentionally
+  // separate. Response deltas only replace one Item object in this store.
+  const [threadItemPages, setThreadItemPages] = useState<Readonly<Record<string, ThreadItemStore>>>({});
+  const [threadMetadata, setThreadMetadata] = useState<Readonly<Record<string, ThreadDto>>>({});
+  const [threadSummaryCursor, setThreadSummaryCursor] = useState<string>();
+  const [threadSummariesHaveMore, setThreadSummariesHaveMore] = useState(false);
+  const [threadSummariesLoadingMore, setThreadSummariesLoadingMore] = useState(false);
+  const [threadItemsLoading, setThreadItemsLoading] = useState(false);
+  const [threadItemsLoadingOlder, setThreadItemsLoadingOlder] = useState(false);
   const [selectedId, setSelectedId] = useState<string | undefined>(initialConversationId);
   const [historyOpen, setHistoryOpen] = useState(false);
   const [renameTitle, setRenameTitle] = useState('');
@@ -794,6 +927,7 @@ export function ChatPage({
   const [responseStarting, setResponseStarting] = useState(false);
   const [newAgentTaskRequested, setNewAgentTaskRequested] = useState(false);
   const [activeWorkflow, setActiveWorkflow] = useState<ConversationWorkflowDto>();
+  const [workflowConversation, setWorkflowConversation] = useState<ConversationDto>();
   const [webResearchSession, setWebResearchSession] = useState<WebResearchSessionDto>();
   const [cancelRequested, setCancelRequested] = useState(false);
   const [editingMessageId, setEditingMessageId] = useState<string>();
@@ -826,6 +960,7 @@ export function ChatPage({
   const [candidateReloadVersion, setCandidateReloadVersion] = useState(0);
   const attachmentInputRef = useRef<HTMLInputElement>(null);
   const messagesRef = useRef<HTMLDivElement>(null);
+  const prependScrollAnchorRef = useRef<{ readonly conversationId: string; readonly scrollHeight: number; readonly scrollTop: number }>();
   const followScrollFrameRef = useRef<number>();
   const dragDepthRef = useRef(0);
   const cancelRequestedRef = useRef(false);
@@ -876,10 +1011,24 @@ export function ChatPage({
   const responseExecutionSnapshotRef = useRef(responseExecution);
   responseExecutionSnapshotRef.current = responseExecution;
 
-  const selected = useMemo(
-    () => conversations.find((conversation) => conversation.conversationId === selectedId),
+  const selectedSummary = useMemo(
+    () => conversations.find(conversation => conversation.conversationId === selectedId),
     [conversations, selectedId]
   );
+  const selectedItemStore = selectedSummary ? threadItemPages[selectedSummary.conversationId] : undefined;
+  const selectedItems = useMemo(() => threadItemStoreItems(selectedItemStore), [selectedItemStore]);
+  const selectedThreadMetadata = selectedSummary ? threadMetadata[selectedSummary.conversationId] : undefined;
+  const selected = useMemo<ChatConversationView | undefined>(() => {
+    if (!selectedSummary) return undefined;
+    return {
+      ...selectedSummary,
+      ...(selectedThreadMetadata?.parentRuns ? { parentRuns: selectedThreadMetadata.parentRuns } : {}),
+      ...(selectedThreadMetadata?.agentSessions ? { agentSessions: selectedThreadMetadata.agentSessions } : {}),
+      messages: selectedItems.flatMap(item => item.message ? [item.message] : []),
+      messagesComplete: selectedItemStore?.complete ?? false,
+      hasOlderItems: selectedItemStore?.hasOlder ?? false
+    };
+  }, [selectedSummary, selectedItemStore, selectedItems, selectedThreadMetadata]);
   const renamingConversation = conversations.find(
     (conversation) => conversation.conversationId === renamingConversationId
   );
@@ -945,8 +1094,11 @@ export function ChatPage({
       if (!closed.ok) { setNotice(errorMessages[closed.error.code] ?? closed.error.message); setReconciliationInspection(undefined); return; }
       setReconciliationInspection(undefined); setReconciliationConfirmed(false);
       setResponseExecution(previous => previous?.responseExecutionId === closed.value.responseExecutionId ? { ...previous, parentRun: closed.value } : previous);
-      setConversations(previous => previous.map(conversation => ({ ...conversation,
-        parentRuns: conversation.parentRuns?.map(parent => parent.responseExecutionId === closed.value.responseExecutionId ? closed.value : parent) })));
+      setThreadMetadata(previous => Object.fromEntries(Object.entries(previous).map(([threadId, thread]) => [
+        threadId,
+        { ...thread, parentRuns: thread.parentRuns?.map(parent =>
+          parent.responseExecutionId === closed.value.responseExecutionId ? closed.value : parent) }
+      ])));
       if (selectedId) {
         const refreshed = await chat.getConversation(selectedId);
         if (scope === reconciliationScopeRef.current && epoch === reconciliationEpochRef.current && refreshed.ok) replaceConversation(refreshed.value);
@@ -962,24 +1114,53 @@ export function ChatPage({
   const completedMessages = selected?.messages.filter(
     (message) => message.state === 'completed'
   ) ?? [];
-  const visibleProductionEvents = productionEvents.filter((event) => event.projectId === session?.projectId &&
-    event.conversationId === (selected?.conversationId ?? pendingProduction?.conversationId));
-  const productionProjection = projectProductionMessages(selected, visibleProductionEvents, pendingProduction);
-  const displayMessages = useMemo(() => {
-    return productionProjection.messages.map((message) => {
-      if (!responseExecution || message.messageId !== responseExecution.assistantMessageId) {
-        return message;
+  const visibleProductionEvents = useMemo(() => productionEvents.filter((event) => event.projectId === session?.projectId &&
+    event.conversationId === (selected?.conversationId ?? pendingProduction?.conversationId) &&
+    (selected?.messages.some(message => message.messageId === event.sourceMessageId) ||
+      pendingProduction?.sourceMessageId === event.sourceMessageId)),
+  [productionEvents, session?.projectId, selected?.conversationId, selected?.messages, pendingProduction]);
+  const productionProjection = useMemo(
+    () => projectProductionMessages(selected, visibleProductionEvents, pendingProduction),
+    [selected, visibleProductionEvents, pendingProduction]
+  );
+  const workflowViewConversation = workflowConversation ?? selected;
+  const projectedMessageById = useMemo(() => new Map(
+    productionProjection.messages.map((message) => [message.messageId, message])
+  ), [productionProjection.messages]);
+  const displayMessageIds = useMemo(
+    () => productionProjection.messages.map((message) => message.messageId),
+    [productionProjection.messages]
+  );
+  // The stream overlay is a single Item. Historical message objects and the
+  // ordered ID list remain untouched while response deltas arrive.
+  const streamingMessage = useMemo(() => {
+    if (!responseExecution) return undefined;
+    const message = projectedMessageById.get(responseExecution.assistantMessageId);
+    if (!message) return undefined;
+    return {
+      ...message,
+      state: mapExecutionStateToMessageState(responseExecution.state),
+      reasoningContent: responseExecution.reasoningContent || message.reasoningContent,
+      content: responseExecution.content || message.content
+    };
+  }, [projectedMessageById, responseExecution]);
+  const lastDisplayMessage = displayMessageIds.length > 0
+    ? (streamingMessage?.messageId === displayMessageIds[displayMessageIds.length - 1]
+      ? streamingMessage
+      : projectedMessageById.get(displayMessageIds[displayMessageIds.length - 1]))
+    : undefined;
+  const sourceUserByMessageId = useMemo(() => {
+    const result = new Map<string, MessageDto>();
+    let latestUser: MessageDto | undefined;
+    for (const message of selected?.messages ?? []) {
+      if (message.role === 'user') {
+        latestUser = message;
+      } else if (latestUser) {
+        result.set(message.messageId, latestUser);
       }
-      const state = mapExecutionStateToMessageState(responseExecution.state);
-      return {
-        ...message,
-        state,
-        reasoningContent: responseExecution.reasoningContent || message.reasoningContent,
-        content: responseExecution.content || message.content
-      };
-    });
-  }, [productionProjection.messages, responseExecution]);
-  const lastDisplayMessage = displayMessages[displayMessages.length - 1];
+    }
+    return result;
+  }, [selected?.messages]);
   const duplicateIncludedContexts = useMemo(() => {
     const included = registeredContexts.filter((context) =>
       includedContextIds.includes(context.contextId)
@@ -1039,10 +1220,8 @@ export function ChatPage({
         const projectListPromise = typeof storage.listProjects === 'function'
           ? storage.listProjects()
           : Promise.resolve({ ok: true as const, value: [] as readonly StorageProjectSummaryDto[] });
-        const [sessionResult, conversationResult, projectsResult] = await Promise.all([
-          storage.getProjectSession(),
-          chat.listConversations(true, false),
-          projectListPromise
+        const [sessionResult, projectsResult] = await Promise.all([
+          storage.getProjectSession(), projectListPromise
         ]);
         if (!isCurrentLoad()) return;
         if (sessionResult.ok) {
@@ -1072,7 +1251,10 @@ export function ChatPage({
             setResponseCandidates([]);
             setProductionEvents([]);
             setProductionIssues([]);
+            setThreadItemPages({});
+            setThreadMetadata({});
             setActiveWorkflow(undefined);
+            setWorkflowConversation(undefined);
             setWebResearchSession(undefined);
           }
           setSession(sessionResult.value);
@@ -1081,46 +1263,92 @@ export function ChatPage({
           }
         }
         else setNotice('读取当前项目失败，请重试。');
-        if (conversationResult.ok) {
-          let loadedConversations = conversationResult.value;
-          let reconciledInterruptedRun = false;
-          if (sessionResult.ok && sessionResult.value && documentGeneration) {
-            for (const conversation of loadedConversations) {
-              for (const message of conversation.messages) {
-                if (
-                  message.documentGenerationStatus &&
-                  ['generating_content', 'validating_outline', 'generating_file'].includes(
-                    message.documentGenerationStatus.state
-                  )
-                ) {
-                  const result = await documentGeneration.reconcileGeneration({
-                    conversationId: conversation.conversationId,
-                    expectedRevision: conversation.revision,
-                    messageId: message.messageId
-                  });
-                  reconciledInterruptedRun ||= result.ok && result.value.interrupted;
-                }
-              }
-            }
-            if (reconciledInterruptedRun) {
-              const refreshed = await chat.listConversations(true, false);
-              if (refreshed.ok) loadedConversations = refreshed.value;
-            }
+        let loadedSummaries: readonly ThreadSummaryDto[];
+        let nextSummaryCursor: string | undefined;
+        let hasMoreSummaries = false;
+        if (threadReadsEnabled && chat.listThreadSummaries) {
+          const result = await chat.listThreadSummaries({
+            includeArchived: true, includeDeleted: false, limit: threadSummaryPageSize
+          });
+          if (!result.ok) {
+            setNotice(errorMessages[result.error.code]);
+            return;
           }
-          if (!isCurrentLoad()) return;
-          setConversations((current) => loadedConversations.map((incoming) => {
-            const existing = current.find((item) => item.conversationId === incoming.conversationId &&
-              item.projectId === incoming.projectId);
-            return existing && existing.revision > incoming.revision ? existing : incoming;
-          }));
-          setSelectedId((current) =>
-            current && loadedConversations.some((item) => item.conversationId === current)
-              ? current
-              : undefined
-          );
+          loadedSummaries = result.value.items;
+          nextSummaryCursor = result.value.nextCursor;
+          hasMoreSummaries = result.value.hasMore;
+          setThreadSummaryCursor(nextSummaryCursor);
+          setThreadSummariesHaveMore(hasMoreSummaries);
         } else {
-          setNotice(errorMessages[conversationResult.error.code]);
+          const result = await chat.listConversations(true, false);
+          if (!result.ok) {
+            setNotice(errorMessages[result.error.code]);
+            return;
+          }
+          loadedSummaries = result.value.map(threadSummaryFromConversation);
+          setThreadSummaryCursor(undefined);
+          setThreadSummariesHaveMore(false);
+          setThreadItemPages(Object.fromEntries(result.value.map(conversation => [
+            conversation.conversationId,
+            createThreadItemStore(threadItemsFromConversation(conversation), {
+              readAtSequence: conversation.messages.length, hasOlder: false, complete: true
+            })
+          ])));
+          setThreadMetadata(Object.fromEntries(result.value.map(conversation => [
+            conversation.conversationId, {
+              ...threadSummaryFromConversation(conversation),
+              parentRuns: conversation.parentRuns,
+              agentSessions: conversation.agentSessions
+            }
+          ])));
         }
+        if (!isCurrentLoad()) return;
+        if (documentGeneration && loadedSummaries.some(item => item.hasActiveDocumentGeneration)) {
+          let reconciledInterruptedRun = false;
+          for (const summary of loadedSummaries.filter(item => item.hasActiveDocumentGeneration)) {
+            const complete = await chat.getConversation(summary.conversationId);
+            if (!complete.ok) continue;
+            for (const message of complete.value.messages) {
+              if (!message.documentGenerationStatus ||
+                  !['generating_content', 'validating_outline', 'generating_file'].includes(message.documentGenerationStatus.state)) continue;
+              const result = await documentGeneration.reconcileGeneration({
+                conversationId: complete.value.conversationId,
+                expectedRevision: complete.value.revision,
+                messageId: message.messageId
+              });
+              reconciledInterruptedRun ||= result.ok && result.value.interrupted;
+            }
+            const latest = threadReadsEnabled && chat.getThread
+              ? await chat.getThread(summary.conversationId)
+              : { ok: true as const, value: threadSummaryFromConversation(complete.value) };
+            if (latest.ok) loadedSummaries = loadedSummaries.map(item =>
+              item.threadId === latest.value.threadId ? latest.value : item);
+          }
+          if (reconciledInterruptedRun && threadReadsEnabled && chat.listThreadSummaries) {
+            const refreshedSummaries = await chat.listThreadSummaries({
+              includeArchived: true, includeDeleted: false, limit: threadSummaryPageSize
+            });
+            if (refreshedSummaries.ok) loadedSummaries = refreshedSummaries.value.items;
+          }
+        }
+        if (!isCurrentLoad()) return;
+        let requestedId = selectedIdRef.current;
+        if (requestedId && !loadedSummaries.some(item => item.threadId === requestedId) &&
+            threadReadsEnabled && chat.getThread) {
+          const requested = await chat.getThread(requestedId);
+          if (requested.ok) loadedSummaries = [requested.value, ...loadedSummaries];
+          else requestedId = undefined;
+        }
+        setConversations(current => mergeThreadSummaries(
+          current.filter(item => loadedSummaries.some(incoming => incoming.threadId === item.threadId)),
+          loadedSummaries
+        ));
+        setSelectedId(current => {
+          const retained = current && loadedSummaries.some(item => item.threadId === current)
+            ? current : requestedId && loadedSummaries.some(item => item.threadId === requestedId)
+              ? requestedId : undefined;
+          return retained;
+        });
         if (projectsResult.ok) {
           setProjects((current) => retainProjectOrder(current, projectsResult.value));
         }
@@ -1146,11 +1374,89 @@ export function ChatPage({
       window.removeEventListener('focus', refresh);
       window.removeEventListener(PROJECT_SESSION_CHANGED_EVENT, refresh);
     };
-  }, [chat, documentGeneration, storage]);
+  }, [chat, documentGeneration, storage, threadReadsEnabled]);
 
   useEffect(() => {
     onConversationChange?.(selectedId);
   }, [onConversationChange, selectedId]);
+
+  useEffect(() => {
+    if (!threadReadsEnabled || !chat || !chat.getThread || !chat.getThreadItemsPage || !selectedId) {
+      setThreadItemsLoading(false);
+      return;
+    }
+    const getThread = chat.getThread.bind(chat);
+    const getThreadItemsPage = chat.getThreadItemsPage.bind(chat);
+    let active = true;
+    setThreadItemsLoading(true);
+    void Promise.all([
+      getThread(selectedId),
+      getThreadItemsPage({ threadId: selectedId, limit: threadItemPageSize, direction: 'older' })
+    ]).then(async ([threadResult, pageResult]) => {
+      if (!active) return;
+      if (!threadResult.ok) {
+        setNotice(errorMessages[threadResult.error.code]);
+        return;
+      }
+      if (!pageResult.ok) {
+        setNotice(errorMessages[pageResult.error.code]);
+        return;
+      }
+      let metadata = threadResult.value;
+      let page = pageResult.value;
+      setThreadMetadata(current => ({ ...current, [selectedId]: metadata }));
+      let interrupted = false;
+      if (documentGeneration) {
+        for (const item of page.items) {
+          const message = item.message;
+          if (!message?.documentGenerationStatus ||
+              !['generating_content', 'validating_outline', 'generating_file'].includes(message.documentGenerationStatus.state)) continue;
+          const reconciled = await documentGeneration.reconcileGeneration({
+            conversationId: selectedId,
+            expectedRevision: metadata.revision,
+            messageId: message.messageId
+          });
+          interrupted ||= reconciled.ok && reconciled.value.interrupted;
+          if (!active) return;
+        }
+      }
+      if (interrupted) {
+        const [refreshedThread, refreshedPage] = await Promise.all([
+          getThread(selectedId),
+          getThreadItemsPage({ threadId: selectedId, limit: threadItemPageSize, direction: 'older' })
+        ]);
+        if (!active) return;
+        if (refreshedThread.ok) metadata = refreshedThread.value;
+        if (refreshedPage.ok) page = refreshedPage.value;
+        setThreadMetadata(current => ({ ...current, [selectedId]: metadata }));
+      }
+      setConversations(current => mergeThreadSummaries(current, [metadata]));
+      setThreadItemPages(current => ({
+        ...current,
+        [selectedId]: createThreadItemStore(page.items, {
+          readAtSequence: page.readAtSequence,
+          ...(page.nextCursor ? { olderCursor: page.nextCursor } : {}),
+          hasOlder: page.hasMore,
+          complete: false
+        })
+      }));
+      setNotice('');
+    }).catch(() => {
+      if (active) setNotice('读取会话消息失败，请重试。');
+    }).finally(() => {
+      if (active) setThreadItemsLoading(false);
+    });
+    return () => { active = false; };
+  }, [chat, documentGeneration, selectedId, threadReadsEnabled]);
+
+  useChatLayoutEffect(() => {
+    const anchor = prependScrollAnchorRef.current;
+    const scroller = messagesRef.current;
+    if (!anchor || !scroller || anchor.conversationId !== selectedId) return;
+    scroller.scrollTop = anchor.scrollTop + (scroller.scrollHeight - anchor.scrollHeight);
+    prependScrollAnchorRef.current = undefined;
+    followOutputRef.current = false;
+  }, [selectedId, selected?.messages.length]);
 
   sessionProjectViewRef.current = session?.projectId;
 
@@ -1171,15 +1477,19 @@ export function ChatPage({
     let reads = 0;
     const refresh = async () => {
       try {
-        const result = await chat.getConversation(selectedId);
-        if (active && result.ok) replaceConversation(result.value);
+        if (threadReadsEnabled && chat.getThreadItemsPage) {
+          await refreshThreadItems(selectedId);
+        } else {
+          const result = await chat.getConversation(selectedId);
+          if (active && result.ok) replaceConversation(result.value);
+        }
       } finally {
         if (active && ++reads < 600) timer = setTimeout(() => { void refresh().catch(() => undefined); }, 750);
       }
     };
     void refresh().catch(() => undefined);
     return () => { active = false; clearTimeout(timer); };
-  }, [chat, documentGenerationActive, selectedId]);
+  }, [chat, documentGenerationActive, selectedId, threadReadsEnabled]);
 
   useEffect(() => {
     const content = messagesRef.current?.firstElementChild;
@@ -1257,6 +1567,7 @@ export function ChatPage({
     let active = true;
     if (!chat || !selected?.conversationId) {
       setActiveWorkflow(undefined);
+      setWorkflowConversation(undefined);
       setWebResearchSession(undefined);
       return () => {
         active = false;
@@ -1265,10 +1576,14 @@ export function ChatPage({
     void chat.getPendingWorkflow(selected.conversationId).then(async (result) => {
       if (!active) return;
       setActiveWorkflow(result.ok ? result.value ?? undefined : undefined);
+      setWorkflowConversation(undefined);
       setWebResearchSession(undefined);
       if (result.ok && result.value) {
         const restored = await chat.getConversation(selected.conversationId);
-        if (active && restored.ok) replaceConversation(restored.value);
+        if (active && restored.ok) {
+          setWorkflowConversation(restored.value);
+          replaceConversation(restored.value);
+        }
       }
     }).catch(() => {
       if (active) setActiveWorkflow(undefined);
@@ -1283,14 +1598,18 @@ export function ChatPage({
     let active = true;
     let timer: ReturnType<typeof setTimeout>;
     const refresh = async () => {
-      const current = await chat.getConversation(selected.conversationId).catch(() => undefined);
+      if (threadReadsEnabled && chat.getThreadItemsPage) {
+        await refreshThreadItems(selected.conversationId).catch(() => false);
+      } else {
+        const current = await chat.getConversation(selected.conversationId).catch(() => undefined);
+        if (active && current?.ok) replaceConversation(current.value);
+      }
       if (!active) return;
-      if (current?.ok) replaceConversation(current.value);
       timer = setTimeout(() => void refresh(), 1000);
     };
     timer = setTimeout(() => void refresh(), 1000);
     return () => { active = false; clearTimeout(timer); };
-  }, [chat, responseInProgress, selected?.conversationId]);
+  }, [chat, responseInProgress, selected?.conversationId, threadReadsEnabled]);
 
   useEffect(() => {
     setRenameTitle(selected?.title ?? '');
@@ -1717,18 +2036,138 @@ export function ChatPage({
     setHistoryOpen(false);
   }
 
+  async function loadMoreThreadSummaries() {
+    if (!threadReadsEnabled || !chat?.listThreadSummaries || !threadSummaryCursor || threadSummariesLoadingMore) return;
+    setThreadSummariesLoadingMore(true);
+    try {
+      const result = await chat.listThreadSummaries({ includeArchived: true, includeDeleted: false,
+        limit: threadSummaryPageSize, cursor: threadSummaryCursor });
+      if (!result.ok) { setNotice(errorMessages[result.error.code]); return; }
+      setConversations(current => mergeThreadSummaries(current, result.value.items));
+      setThreadSummaryCursor(result.value.nextCursor);
+      setThreadSummariesHaveMore(result.value.hasMore);
+      setNotice('');
+    } catch { setNotice('继续读取会话列表失败，请重试。'); }
+    finally { setThreadSummariesLoadingMore(false); }
+  }
+
+  async function loadOlderThreadItems() {
+    const threadId = selectedId;
+    const page = threadId ? threadItemPages[threadId] : undefined;
+    if (!threadReadsEnabled || !chat?.getThreadItemsPage || !threadId || !page?.hasOlder ||
+        !page.olderCursor || threadItemsLoadingOlder) return;
+    const scroller = messagesRef.current;
+    if (scroller) {
+      prependScrollAnchorRef.current = { conversationId: threadId,
+        scrollHeight: scroller.scrollHeight, scrollTop: scroller.scrollTop };
+    }
+    followOutputRef.current = false;
+    setThreadItemsLoadingOlder(true);
+    try {
+      const result = await chat.getThreadItemsPage({ threadId, limit: threadItemPageSize,
+        direction: 'older', cursor: page.olderCursor });
+      if (!result.ok) { setNotice(errorMessages[result.error.code]); prependScrollAnchorRef.current = undefined; return; }
+      setConversations(current => current.map(summary => summary.conversationId === threadId && summary.revision <= result.value.revision
+        ? { ...summary, revision: result.value.revision, updatedAt: result.value.updatedAt }
+        : summary));
+      setThreadItemPages(current => {
+        const existing = current[threadId];
+        if (!existing) return current;
+        return { ...current, [threadId]: mergeThreadItemStore(existing, result.value.items, {
+          readAtSequence: result.value.readAtSequence,
+          ...(result.value.nextCursor ? { olderCursor: result.value.nextCursor } : { olderCursor: undefined }),
+          hasOlder: result.value.hasMore
+        }) };
+      });
+      setNotice('');
+    } catch {
+      prependScrollAnchorRef.current = undefined;
+      setNotice('继续读取更早消息失败，请重试。');
+    } finally { setThreadItemsLoadingOlder(false); }
+  }
+
+  async function refreshThreadItems(threadId: string): Promise<boolean> {
+    if (!chat) return false;
+    if (!threadReadsEnabled || !chat.getThreadItemsPage) {
+      const result = await chat.getConversation(threadId);
+      if (!result.ok) return false;
+      replaceConversation(result.value);
+      return true;
+    }
+    const result = await chat.getThreadItemsPage({ threadId, limit: threadItemPageSize, direction: 'older' });
+    if (!result.ok) return false;
+    setConversations(current => current.map(summary => summary.conversationId === threadId && summary.revision <= result.value.revision
+      ? { ...summary, revision: result.value.revision, updatedAt: result.value.updatedAt }
+      : summary));
+    setThreadItemPages(current => {
+      const existing = current[threadId];
+      const items = [...result.value.items, ...threadItemStoreItems(existing)];
+      const hasOlder = (items.sort((left, right) => left.sequence - right.sequence)[0]?.sequence ?? 1) > 1;
+      return { ...current, [threadId]: mergeThreadItemStore(existing, result.value.items, {
+        readAtSequence: result.value.readAtSequence,
+        ...(existing?.hasOlder && existing.olderCursor
+          ? { olderCursor: existing.olderCursor }
+          : result.value.nextCursor ? { olderCursor: result.value.nextCursor } : {}),
+        hasOlder,
+        complete: false
+      }) };
+    });
+    return true;
+  }
+
+  async function readCompleteConversation(conversationId: string): Promise<ConversationDto | undefined> {
+    if (!chat) return undefined;
+    const result = await chat.getConversation(conversationId);
+    if (!result.ok) {
+      setNotice(describeChatError(result.error));
+      return undefined;
+    }
+    replaceConversation(result.value);
+    return result.value;
+  }
+
   function replaceConversation(conversation: ConversationDto) {
-    setConversations((items) => items.some(
-      (item) => item.conversationId === conversation.conversationId
-    )
-      ? items.map((item) =>
-          item.conversationId === conversation.conversationId && item.revision <= conversation.revision ? conversation : item
-        )
-      : [conversation, ...items]);
+    const summary = threadSummaryFromConversation(conversation);
+    setConversations(current => mergeThreadSummaries(current, [summary]));
+    setThreadMetadata(current => ({
+      ...current,
+      [conversation.conversationId]: {
+        ...summary,
+        ...(conversation.parentRuns ? { parentRuns: conversation.parentRuns } : {}),
+        ...(conversation.agentSessions ? { agentSessions: conversation.agentSessions } : {})
+      }
+    }));
+    if (!threadReadsEnabled) {
+      setThreadItemPages(current => ({
+        ...current,
+        [conversation.conversationId]: createThreadItemStore(threadItemsFromConversation(conversation), {
+          readAtSequence: conversation.messages.length,
+          hasOlder: false,
+          complete: true
+        })
+      }));
+      return;
+    }
+    setThreadItemPages(current => {
+      const page = current[conversation.conversationId];
+      if (!page) return current;
+      const incoming: ThreadItemDto[] = [];
+      conversation.messages.forEach((message, index) => {
+        const sequence = index + 1;
+        const adjusted = threadItemFromMessage(conversation.conversationId, message, sequence);
+        if (page.itemById.has(threadItemKey(adjusted)) || sequence > page.readAtSequence) incoming.push(adjusted);
+      });
+      return {
+        ...current,
+        [conversation.conversationId]: mergeThreadItemStore(page, incoming, {
+          readAtSequence: Math.max(page.readAtSequence, conversation.messages.length)
+        })
+      };
+    });
   }
 
   async function mutateConversation(
-    conversation: ConversationDto,
+    conversation: Pick<ThreadSummaryDto, 'conversationId' | 'revision' | 'title' | 'readOnly'>,
     operation: 'rename' | 'archive' | 'restore' | 'delete'
   ) {
     if (!chat || conversation.readOnly || busy) return;
@@ -1783,7 +2222,7 @@ export function ChatPage({
       }
       sealActiveDraft();
       claimDraft(session.projectId, result.value.conversationId);
-      setConversations((items) => [result.value, ...items]);
+      replaceConversation(result.value);
       setSelectedId(result.value.conversationId);
       setNotice('');
     } catch {
@@ -1913,7 +2352,7 @@ export function ChatPage({
     try {
       // Streaming updates can advance storage after the renderer's last snapshot.
       // Refresh before creating a command, without replaying a potentially accepted write.
-      let currentConversation = selected;
+      let currentConversation: ConversationDto | undefined;
       if (selected) {
         const refreshed = await chat.getConversation(selected.conversationId);
         if (inputScope !== composerScopeRef.current) return;
@@ -2041,6 +2480,7 @@ export function ChatPage({
   ) {
     if (workflowExecutionInFlightRef.current) return;
     workflowExecutionInFlightRef.current = true;
+    setWorkflowConversation(conversation);
     const executionScope = composerScopeRef.current;
     documentOrchestrationCancelRef.current = false;
     let currentWorkflow = workflow;
@@ -2288,7 +2728,8 @@ export function ChatPage({
         );
         return;
       }
-      await executeReadyWorkflow(activeWorkflow, selected, result.value.references);
+      const complete = await readCompleteConversation(selected.conversationId);
+      if (complete) await executeReadyWorkflow(activeWorkflow, complete, result.value.references);
     } catch {
       await cancelUnsupportedWebWorkflow(
         activeWorkflow,
@@ -2336,7 +2777,8 @@ export function ChatPage({
 
   async function continueActiveWorkflow() {
     if (!activeWorkflow || activeWorkflow.status !== 'ready' || !selected || busy) return;
-    await executeReadyWorkflow(activeWorkflow, selected);
+    const complete = await readCompleteConversation(selected.conversationId);
+    if (complete) await executeReadyWorkflow(activeWorkflow, complete);
   }
 
   async function cancelActiveWorkflow() {
@@ -2391,10 +2833,11 @@ export function ChatPage({
     } finally {
       setBusy(false);
     }
-    if (resumed?.status === 'executing') {
-      await retryLocalOfficeDelivery(resumed, selected);
-    } else if (resumed) {
-      await executeReadyWorkflow(resumed, selected);
+    const complete = resumed ? await readCompleteConversation(selected.conversationId) : undefined;
+    if (resumed?.status === 'executing' && complete) {
+      await retryLocalOfficeDelivery(resumed, complete);
+    } else if (resumed && complete) {
+      await executeReadyWorkflow(resumed, complete);
     }
   }
 
@@ -3441,6 +3884,9 @@ export function ChatPage({
   function handleMessagesScroll() {
     const messages = messagesRef.current;
     if (!messages) return;
+    if (messages.scrollTop <= 48 && selected?.hasOlderItems && !threadItemsLoadingOlder) {
+      void loadOlderThreadItems();
+    }
     const distanceToBottom = messages.scrollHeight - messages.scrollTop - messages.clientHeight;
     const nearBottom = distanceToBottom <= 72;
     followOutputRef.current = nearBottom;
@@ -4056,23 +4502,34 @@ export function ChatPage({
           ref={messagesRef}
         >
           <div className="uc-chat-page__messages-inner">
-            {!selected && displayMessages.length === 0 ? (
+            {!selected && displayMessageIds.length === 0 ? (
               <div className="uc-chat-page__empty">
                 <strong>开始新的对话</strong>
                 <p>选择模型并发送第一条消息，名称将自动生成。</p>
               </div>
-            ) : displayMessages.length === 0 ? (
+            ) : displayMessageIds.length === 0 ? (
               <div className="uc-chat-page__empty">
-                <strong>开始这段对话</strong>
-                <p>在下方选择模型，然后发送第一条消息。</p>
+                {threadItemsLoading ? <strong>正在读取会话消息…</strong> : <strong>开始这段对话</strong>}
+                <p>{threadItemsLoading ? '历史消息正在按需加载。' : '在下方选择模型，然后发送第一条消息。'}</p>
               </div>
             ) : (
+              <>
+                {selected?.hasOlderItems ? (
+                  <div className="uc-chat-page__history-more" role="status">
+                    <Button disabled={threadItemsLoadingOlder} onClick={() => void loadOlderThreadItems()} variant="ghost">
+                      {threadItemsLoadingOlder ? '正在读取更早消息…' : '读取更早消息'}
+                    </Button>
+                  </div>
+                ) : null}
               <ol className="uc-chat-page__message-list">
-                {displayMessages.map((item) => {
+                {displayMessageIds.map((messageId) => {
+                  const item = messageId === streamingMessage?.messageId
+                    ? streamingMessage
+                    : projectedMessageById.get(messageId);
+                  if (!item) return null;
                   const isCurrentAssistant = item.role === 'assistant' &&
                     item.messageId === responseExecution?.assistantMessageId;
-                  const sourceIndex = selected?.messages.findIndex(message => message.messageId === item.messageId) ?? -1;
-                  const sourceMessage = sourceIndex >= 0 ? selected?.messages.slice(0, sourceIndex).reverse().find(message => message.role === 'user') : undefined;
+                  const sourceMessage = sourceUserByMessageId.get(item.messageId);
                   const parentRun = (isCurrentAssistant ? responseExecution?.parentRun : undefined) ?? selected?.parentRuns?.find(parent => parent.sourceMessageId === sourceMessage?.messageId);
                   const executionDuration = responseExecution
                     ? formatExecutionDuration(responseExecution.createdAt, responseExecution.updatedAt)
@@ -4129,8 +4586,23 @@ export function ChatPage({
                           : responseExecution?.state === 'cancelled'
                             ? '回复已停止'
                             : item.content ? '回复已中断' : '回复未完成';
+                  const rowRevision = [
+                    item.revision,
+                    item.updatedAt,
+                    isCurrentAssistant ? responseExecution?.streamSequence ?? 0 : '',
+                    isCurrentAssistant ? responseExecution?.state ?? '' : '',
+                    parentRun?.runRevision ?? '',
+                    parentRun?.state ?? '',
+                    parentRun?.acknowledged ? 'acknowledged' : '',
+                    traceEvents.at(-1)?.sequence ?? 0,
+                    productionIssues.includes(item.conversationId) ? 'trace-issue' : '',
+                    copiedMessageId === item.messageId ? 'copied' : '',
+                    canEditCancelledMessage ? 'editable' : '',
+                    reconciliationInspection?.parentRun.responseExecutionId === parentRun?.responseExecutionId ? 'inspect' : '',
+                    busy ? 'busy' : ''
+                  ].join('|');
                   return (
-                    <li className={`uc-chat-page__message-item uc-chat-page__message-item--${item.role}`} key={item.messageId}>
+                    <ThreadItemRow item={item} rowRevision={rowRevision} key={`message:${item.messageId}`}>
                       {isCurrentAssistant && !showProductionProgress ? (
                         <p className="uc-chat-page__response-status" aria-label="回复状态" role="status">
                           {responseLabel}
@@ -4184,10 +4656,17 @@ export function ChatPage({
                             />
                           ) : null}
                           {!isDocumentDraftMessage && !hideDocumentDraftContent && (item.content || !showProductionProgress) ? (
-                            <StreamingMarkdown
-                              streaming={item.state === 'streaming' && Boolean(item.content)}
-                              content={item.content || (item.state === 'failed' ? '' : item.state === 'streaming' || item.state === 'pending' ? '正在接收…' : '尚无内容')}
-                            />
+                            isCurrentAssistant ? (
+                              <StreamingItem
+                                streaming={item.state === 'streaming' && Boolean(item.content)}
+                                content={item.content || (item.state === 'failed' ? '' : item.state === 'streaming' || item.state === 'pending' ? '正在接收…' : '尚无内容')}
+                              />
+                            ) : (
+                              <StreamingMarkdown
+                                streaming={item.state === 'streaming' && Boolean(item.content)}
+                                content={item.content || (item.state === 'failed' ? '' : item.state === 'streaming' || item.state === 'pending' ? '正在接收…' : '尚无内容')}
+                              />
+                            )
                           ) : null}
                           {item.state === 'failed' ? (
                             <p aria-label="回复失败原因">
@@ -4267,10 +4746,11 @@ export function ChatPage({
                           ) : null}
                         </div>
                       ) : null}
-                    </li>
+                    </ThreadItemRow>
                   );
                 })}
               </ol>
+              </>
             )}
             <div className="uc-chat-page__message-item uc-chat-page__message-item--assistant" aria-label="助手任务回复">
           {activeAgentSession ? <AgentSessionNotice session={activeAgentSession}
@@ -4279,7 +4759,7 @@ export function ChatPage({
             onCancel={() => { void cancelWaitingAgentSession(); }}
             onCloseUnknown={() => { void cancelWaitingAgentSession(true); }}
             onNewTask={() => { setNewAgentTaskRequested(true); setNotice('请输入新的任务需求，新任务将使用独立预算。'); draftFieldRef.current.focus(); }} /> : null}
-          {activeWorkflow && !activeWorkflow.planningFailureCode && !selected?.messages.at(-1)?.workflowReply?.workflowId.startsWith('native-') && !['needs_clarification', 'needs_confirmation'].includes(activeWorkflow.status) ? (
+          {activeWorkflow && !activeWorkflow.planningFailureCode && !workflowViewConversation?.messages.at(-1)?.workflowReply?.workflowId.startsWith('native-') && !['needs_clarification', 'needs_confirmation'].includes(activeWorkflow.status) ? (
             <div className="uc-chat-page__workflow-status" role="status">
               <div className="uc-chat-page__workflow-copy">
                 <span>
@@ -4293,7 +4773,7 @@ export function ChatPage({
                         ? '正在按顺序完成文档，已交付的作品会保留。'
                         : activeWorkflow.status === 'failed'
                           ? activeWorkflow.plan.action === 'revise' && activeWorkflow.deliveries?.length === 1
-                            ? selected?.messages.some((message) => activeWorkflow.deliveries?.some((delivery) => delivery.resultMessageId === message.messageId) && message.documentGenerationStatus?.errorCode === 'result_sync_pending')
+                            ? workflowViewConversation?.messages.some((message) => activeWorkflow.deliveries?.some((delivery) => delivery.resultMessageId === message.messageId) && message.documentGenerationStatus?.errorCode === 'result_sync_pending')
                               ? '对话已保存，新版文档已保存，结果同步待恢复。'
                               : '对话已保存，原作品已保留，本次修改未交付。'
                             : '任务尚未全部完成，已交付的作品已保留。'
@@ -4317,7 +4797,7 @@ export function ChatPage({
                 ) : null}
                 {activeWorkflow.status === 'needs_confirmation' ? (
                   <div className="uc-chat-page__workflow-details" role="note">
-                    {workflowConfirmationDetails(activeWorkflow, selected).map((detail) => (
+                    {workflowConfirmationDetails(activeWorkflow, workflowViewConversation).map((detail) => (
                       <span key={detail}>{detail}</span>
                     ))}
                   </div>
@@ -4352,7 +4832,7 @@ export function ChatPage({
                   (delivery) => delivery.status === 'failed' && delivery.failureReason === 'execution_failed'
                 ) ? (
                   <Button disabled={busy || responseInProgress} onClick={() => void resumeFailedOfficeWorkflow()}>
-                    {selected?.messages.some((message) => activeWorkflow.deliveries?.some((delivery) => delivery.resultMessageId === message.messageId) && message.documentGenerationStatus?.errorCode === 'result_sync_pending') ? '重试同步' : '重试失败文档'}
+                    {workflowViewConversation?.messages.some((message) => activeWorkflow.deliveries?.some((delivery) => delivery.resultMessageId === message.messageId) && message.documentGenerationStatus?.errorCode === 'result_sync_pending') ? '重试同步' : '重试失败文档'}
                   </Button>
                 ) : null}
                 {activeWorkflow.status === 'failed' && activeWorkflow.deliveries?.some((delivery) => delivery.failureReason === 'input_required') ? (
@@ -4669,6 +5149,13 @@ export function ChatPage({
                       ) : null}
                     </div>
               ))}
+              {threadReadsEnabled && threadSummariesHaveMore ? (
+                <div className="uc-chat-page__history-more" role="status">
+                  <Button disabled={threadSummariesLoadingMore} onClick={() => void loadMoreThreadSummaries()} variant="ghost">
+                    {threadSummariesLoadingMore ? '正在读取更多会话…' : '读取更多会话'}
+                  </Button>
+                </div>
+              ) : null}
             </div>
           )}
         </Drawer.Body>

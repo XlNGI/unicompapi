@@ -1,5 +1,59 @@
 # UniComp 开发计划
 
+### 阶段 5 实施：Office Agent 受控迁移、Shadow Read 与 Cutover Readiness（2026-10-08；隔离副本工具/对账/门禁完成，未切换生产）
+
+负责人授权仅执行阶段 5。旧 Conversation 仍是权威，未迁移真实用户数据，未执行生产 authority switch。
+
+实际修改：[阶段 5 结果](docs/current/conversation-system-phase5-results.md)、`src/platform/repositories/thread-migration.ts`、迁移/Shadow/Cutover 合同测试。新增 Legacy scan、source checksum、幂等 Migration Ledger、Conversation→Thread/Turn/Item 隔离迁移、WorkId artifact projection、Shadow Comparator、active execution/backup/generation readiness gate、回滚条件和 `onlineDualWriteSupported=false` 声明。
+
+验证：阶段 5 迁移测试 3/3、`pnpm typecheck`、迁移文件 ESLint 通过；阶段 0～4 定向回归继续作为门禁。真实 Electron/Agent/Provider/Office E2E、用户目录迁移和生产 Cutover 未执行，不能把本阶段报告当作切换批准。阶段 5 已停止，等待单独 Cutover 批准。
+
+### 阶段 4 实施：Office Agent Thread 文件 Repository 与恢复协议（2026-10-08；新 Repository/故障注入通过，未切换权威）
+
+负责人授权仅执行阶段 4。没有迁移真实用户数据，没有接入默认 IPC/Runtime，没有修改旧 Conversation/ResponseExecution/Provider/Tool Gateway 权威。
+
+实际修改：[阶段 4 结果](docs/current/conversation-system-phase4-results.md)、`src/platform/repositories/thread-file-repository.ts`、Repository 导出、Thread Repository 故障注入与性能基线测试。实现 Thread metadata、summary index、Turn/Item/link JSONL、Commit Journal、Manifest、Snapshot、Projection Debt、generation/idempotency CAS、单 Thread 串行队列、Commit roll-forward、tail quarantine、degraded read-only、index rebuild 和 segment rotation。
+
+验证：Thread Repository 故障/一致性/rotation 11/11；`pnpm typecheck`、Repository ESLint 通过。1,000 Item 单次 durable commit 合成基线 append 1,267.80ms、read 20.92ms、Commit Journal 73,581 bytes；该值是新 Repository 独立基线，不是旧 JSON 的优化对比。跨进程 OS lease、Snapshot 增量加速、真实 Windows fsync 故障注入和生产 wiring 未完成。阶段 4 已停止。
+
+### 阶段 3 实施：Office Agent Thread / Turn / Item 领域模型与兼容适配（2026-10-08；领域合同/Shadow Projection/Model History 通过）
+
+负责人授权仅执行阶段 3。生产 Conversation、Agent Runtime、ResponseExecution、Provider Tool Calling、Canonical Tool Contract、Tool Gateway、持久化权威和用户数据保持不变。
+
+实际修改：[阶段 3 结果](docs/current/conversation-system-phase3-results.md)、`src/domain/ids.ts`、`src/domain/sha256.ts`、`src/domain/entities/conversation-thread.ts`、`src/application/conversation-thread-adapter.ts`、`src/application/model-history-reader.ts` 及对应导出和合同测试。新增 ThreadId/TurnId/ItemId/ToolCallId 品牌验证；ThreadV1/TurnV1/ItemV1/TurnExecutionLinkV1 生命周期；Conversation→Thread、Message→Item 兼容映射；工具/结果/Work artifact 展示投影稳定 source identity 去重；ModelHistoryReader 通过完整 Conversation 独立读取并逐字段比较旧 ContextBuilder/AgentContextAssembler 输出。Shadow projector 默认关闭，不切换生产权威。
+
+验证：`pnpm typecheck`、`pnpm build`、阶段 3 新增 Vitest 9/9、改动文件 ESLint 通过。未运行真实 Electron/Provider/Office、未迁移数据、未接入 Response Controller 写 link；这些明确留待后续阶段。阶段 3 已停止。
+
+### 阶段 2 实施：Office Agent React 会话渲染体系升级（2026-10-08；Renderer 合同/Store/合成基线/定向回归完成，真实 Electron Commit 未测）
+
+负责人授权仅执行阶段 2。保留阶段 0/1 的 Thread Summary、Item Page、旧完整 Conversation DTO 和 Runtime/Provider/存储边界；禁止修改 Agent Runtime、Provider Tool Calling、Canonical Tool Contract、Tool Bridge、持久化权威来源、数据迁移和存储 Schema。
+
+实际修改：[阶段 2 结果](docs/current/conversation-system-phase2-results.md)、`src/pages/chat/threadSummaryStore.ts`、`src/pages/chat/threadItemStore.ts`、`src/pages/chat/StreamingItem.tsx`、`src/pages/chat/ChatPage.tsx`、`src/components/MarkdownMessage.tsx`，新增 Store/性能/UI 合同测试。Renderer 使用 `summaryById/orderedThreadIds` 与 `itemById/orderedItemIds` 分离状态；流式 response 只生成当前 assistant 的 overlay；历史 Item 行使用稳定 key 和 memo；保留 SSE、sequence 去重、RAF 批处理、Replay/ACK/Backpressure、终态完整刷新、顶部分页 scroll anchor 和上翻不自动跳底。
+
+合成基线（Windows x64/Node Vitest）：100 Items、300 批 Delta 的旧全量数组工作量 30,000 vs 单 Item overlay 300，实测 0.39ms vs 0.02ms；1,000 Items 为 300,000 vs 300，2.45ms vs 0.02ms。长 Markdown 65,958 字符 SSR 201.99ms；Node heapUsed 23,076,336→66,878,416 bytes，仅作进程基线。报告明确这些不是 Chromium React Commit 或真实 Electron 内存指标。虚拟列表暂不引入，等待真实性能门槛。
+
+通过：`pnpm typecheck`、`pnpm build`、阶段 1 读链路/Response/Artifact/Context/Timeline 与阶段 2 Store/基准 Vitest 119/119、UI/Renderer 合同 14/14、改动文件 ESLint、`git diff --check`。已知缺口：`chat-composer-behavior.test.ts` 47 项中 1 项既有跨项目 deferred race 断言失败；真实 Electron/Chromium Commit、Provider/Office、迁移/Recovery 未运行。阶段 2 已停止，未进入阶段 3。
+
+### 阶段 1 实施：Office Agent Thread Summary 与按需加载 API（2026-10-08；本地合同/构建/定向回归通过，真实 Electron/Provider 未运行）
+
+负责人授权本轮只实施阶段 1。当前分支 `feature/conversation-phase0`；保留阶段 0 和第二轮架构文档。允许范围为 Thread Summary、Thread/Item/Turn read IPC、旧 Conversation read adapter、ChatPage feature flag/摘要与首屏/续页、合同测试和工程记录。禁止 Agent Runtime、Provider Tool Calling、Canonical Tool Contract、Tool Bridge、数据迁移、Repository 权威切换和用户数据修改。
+
+实际修改：新增 `ConversationThreadReadController`，新增 `listThreadSummaries/getThread/getThreadItemsPage/getTurn` shared DTO/parser、Electron IPC handler 和 preload API；旧 `getConversation/listConversations` 完整 Conversation DTO 语义不变。Summary cursor 使用 120 秒内存 snapshot；Item cursor 绑定 project scope、Thread、direction、readAtSequence 和 exclusive sequence anchor。ChatPage 默认走 `VITE_UNICOMP_THREAD_READ_PATH` 新链路，`legacy` 回退旧 list/get；历史摘要不带正文，选择后读取最新 Item 页，顶部可继续加载更早消息并保留 scroll anchor。需要完整消息的 workflow、artifact、编辑、重试、恢复和终态路径继续显式使用旧 `getConversation()`。
+
+验证：[阶段 1 结果](docs/current/conversation-system-phase1-results.md)。`pnpm typecheck`、`pnpm build`、本阶段 ESLint 通过；UI IPC/Page contract 9/9；Thread read + 旧 Controller/Response/Artifact/Context 定向 Vitest 80/80；分页独立测试 6/6。阶段 0 synthetic baseline 的 1000×100 场景记录旧完整 DTO 约 38.89 MB，摘要候选约 0.19 MB；阶段 1 仍通过旧 Repository 适配，因此底层约 56.23 MB JSON read/parse 未减少，不能把 IPC 优化称为物理 I/O 优化。真实 Electron/Chromium Commit、真实 Provider/Office、JSONL/Recovery/迁移未运行。
+
+阶段 1 已停止；阶段 2 React/Renderer 优化未授权。
+
+### 阶段 0 实施准备：Office Agent 会话系统 Thread/Turn/Item 合同与性能基线（2026-10-08；合同/合成基线交付，阶段 1 未授权）
+
+负责人授权仅执行阶段 0。当前分支 `feature/conversation-phase0`；保留此前未提交的架构提案，不覆盖第二轮方案原文。允许新增阶段结果 Markdown、隔离性能基准/TypeScript 引用审计和兼容性合同测试；禁止生产逻辑改造、Runtime/Provider/Tool Gateway 修改、数据迁移或 Repository 权威切换。
+
+新增 [阶段 0 结果与冻结合同](docs/current/conversation-system-phase0-results.md)、`tests/performance/conversation-phase0-baseline.test.ts`、`tests/performance/conversation-phase0-reference-audit.mjs`、既有 Controller 测试中的完整 get/list 合同，以及忽略目录 `outputs/conversation-phase0/` 下基准/引用报告。合同固定 ThreadId 保持 ConversationId 同值；Message Item 使用带 namespace 的原 MessageId；新 UI 投影 Item 使用来源 tuple 的稳定身份；ToolCallId、AgentRunId、ResponseExecutionId、WorkId 均不互相替代。旧 getConversation/listConversations 继续返回完整 DTO；模型上下文通过独立历史读取合同获得，不受 UI 分页影响。
+
+验证：TypeScript Compiler API 检查 tsconfig.test.json 与 electron/tsconfig.json，架构稿引用路径 36/36 存在，84 个选定合同方法的 production call sites、247 条方法/符号引用，覆盖 ChatPage、Application/Response/Artifact/Workflow/Continuation/Context 和 Document IPC 路径。兼容/执行链定向测试 21 files/313 tests 通过；`pnpm typecheck`、新增/修改文件 ESLint 通过。合成 benchmark 在 Windows x64 / Node v24.20.0：1000x100 当前单体 JSON 56.23 MB，list 454.91ms、单 Thread get 433.29ms、完整 DTO 序列化 92.56ms、完整 JSON 理论 payload 38.89 MB、摘要 projection payload 190,781 B；长 Markdown SSR 168,198 chars/771.38ms；2,000 条展示事件投影 0.98ms；15.74 秒合成流 1 MiB/129 batches。各项边界及 fixture 见结果文档与 `outputs/conversation-phase0/baseline.json`。
+
+未测 Electron main/Chromium React Commit/实际 IPC clone/syscall fsync/真实 Provider；未跑 100x1000 与 1000x1000 大型内存场景；未实现或故障注入 JSONL Commit/Manifest/Recovery。基线只说明现有合成 Node 路径，不是优化结果。阶段 0 合同和软件内合成基线已交付；真实 Electron/Renderer/I/O 作为后续性能结论的证据缺口保留。阶段 1 未启动、不在本次授权范围。
+
 ### 维护实施：内容组织计划与关系驱动布局（2026-10-06—07；本地主链路验收完成）
 
 负责人反馈样式改善仍未达到“按内容设计，每页有变化”的目标，并在明确下一步为“内容分组与关系 → 布局”后要求“继续”。当前为维护优化，保留既有内容、样式、Runtime 与恢复的全部授权改动。依据负责人最新决策、AGENTS.md、当前样式方案、合同与真实样例。

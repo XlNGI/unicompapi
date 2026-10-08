@@ -1,4 +1,4 @@
-import { memo } from 'react';
+import { memo, useMemo } from 'react';
 import ReactMarkdown from 'react-markdown';
 import type { Components } from 'react-markdown';
 import remarkGfm from 'remark-gfm';
@@ -28,12 +28,17 @@ export const MarkdownMessage = memo(function MarkdownMessage({
   allowImages = true
 }: MarkdownMessageProps) {
   const classes = ['uc-markdown-message', className].filter(Boolean).join(' ');
+  // Keep the parsed child element stable when only the surrounding row's
+  // class or layout state changes. Content changes still parse fully.
+  const renderedMarkdown = useMemo(() => (
+    <ReactMarkdown components={allowImages ? markdownComponents : textImageComponents} remarkPlugins={markdownRemarkPlugins}>
+      {content}
+    </ReactMarkdown>
+  ), [allowImages, content]);
 
   return (
     <div className={classes}>
-      <ReactMarkdown components={allowImages ? markdownComponents : textImageComponents} remarkPlugins={markdownRemarkPlugins}>
-        {content}
-      </ReactMarkdown>
+      {renderedMarkdown}
     </div>
   );
 });

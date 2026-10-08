@@ -19,3 +19,5 @@ export * from './json-file-index-repository';
 export * from './repository-data-error';
 export * from './video-export-plan-integrity';
 export * from './json-conversation-completion-journal';
+export * from './thread-file-repository';
+export * from './thread-migration';
