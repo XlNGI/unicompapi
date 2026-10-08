@@ -84,8 +84,10 @@ export class ConversationController {
       if (input.includeDeleted) statuses.push('deleted');
       const conversations = await this.dependencies.service.list({ statuses });
       return { ok: true, value: await Promise.all(conversations.map(async conversation => {
-        const agentSessions = await this.dependencies.readAgentSessions?.(conversation.id);
-        return { ...this.toDto(conversation), ...(agentSessions ? { agentSessions } : {}) };
+        const agentSessions = input.readMode === 'fast'
+          ? undefined
+          : await this.dependencies.readAgentSessions?.(conversation.id);
+        return { ...this.toDto(conversation, input.readMode !== 'fast'), ...(agentSessions ? { agentSessions } : {}) };
       })) };
     });
   }
@@ -248,11 +250,12 @@ export class ConversationController {
     return current;
   }
 
-  private toDto(conversation: Conversation): ConversationDto {
+  private toDto(conversation: Conversation, includeMessages = true): ConversationDto {
     return toConversationDto(
       conversation,
       this.dependencies.storageScope ?? 'current_project',
-      this.dependencies.readOnly ?? false
+      this.dependencies.readOnly ?? false,
+      includeMessages
     );
   }
 
@@ -267,7 +270,8 @@ export class ConversationController {
 export function toConversationDto(
   conversation: Conversation,
   storageScope: ConversationDto['storageScope'] = 'current_project',
-  readOnly = false
+  readOnly = false,
+  includeMessages = true
 ): ConversationDto {
   return {
     conversationId: conversation.id,
@@ -277,7 +281,7 @@ export function toConversationDto(
     status: conversation.status,
     storageScope,
     readOnly,
-    messages: conversation.messages.map(toMessageDto),
+    messages: includeMessages ? conversation.messages.map(toMessageDto) : [],
     createdAt: conversation.createdAt,
     updatedAt: conversation.updatedAt,
     ...(conversation.status === 'archived'

@@ -1179,15 +1179,18 @@ export function createChatContextRuntime(
         ...(input.includeDeleted ? ['deleted' as const] : [])
       ];
       const session = dependencies.getSession();
-      if (session) await getProjectRuntime(session).responses.ready;
+      const fastRead = input.readMode === 'fast';
+      if (session && !fastRead) await getProjectRuntime(session).responses.ready;
       const projectItems = session
         ? await getProjectRuntime(session).conversations.list(request)
         : { ok: true as const, value: [] };
       if (!projectItems.ok) return projectItems;
-      const verifiedItems = session ? await Promise.all(projectItems.value.map(item => verifyRetainedDocumentArtifacts(item, {
-        rootDirectory: session.rootDirectory, projectId: session.projectId,
-        isCurrent: () => { const current = dependencies.getSession(); return current?.projectId === session.projectId && current.rootDirectory === session.rootDirectory; }
-      }))) : projectItems.value;
+      const verifiedItems = session && !fastRead
+        ? await Promise.all(projectItems.value.map(item => verifyRetainedDocumentArtifacts(item, {
+          rootDirectory: session.rootDirectory, projectId: session.projectId,
+          isCurrent: () => { const current = dependencies.getSession(); return current?.projectId === session.projectId && current.rootDirectory === session.rootDirectory; }
+        })))
+        : projectItems.value;
       const projectIds = new Set(projectItems.value.map((item) => item.conversationId));
       const legacyItems = (await legacyService.list({ statuses }))
         .filter((item) =>
@@ -1197,7 +1200,8 @@ export function createChatContextRuntime(
         .map((item) => toConversationDto(
           item,
           item.projectId === null ? 'legacy_unbound' : 'legacy_project',
-          true
+          true,
+          !fastRead
         ));
       return {
         ok: true,

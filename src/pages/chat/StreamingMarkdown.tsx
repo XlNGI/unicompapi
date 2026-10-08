@@ -16,7 +16,7 @@ export const StreamingMarkdown = memo(function StreamingMarkdown({ content, stre
     let frame: number;
     let lastPaint = 0;
     const paint = (now: number) => {
-      if (now - lastPaint >= 30) {
+      if (now - lastPaint >= 60) {
         setDisplay(buffer.current.advance(now));
         lastPaint = now;
       }
@@ -25,5 +25,12 @@ export const StreamingMarkdown = memo(function StreamingMarkdown({ content, stre
     frame = requestAnimationFrame(paint);
     return () => cancelAnimationFrame(frame);
   }, [content, streaming]);
-  return <MarkdownMessage content={streaming ? display : content} allowImages={allowImages} />;
+  if (streaming) {
+    return (
+      <div className="uc-markdown-message">
+        <p className="uc-markdown-message__streaming">{display}</p>
+      </div>
+    );
+  }
+  return <MarkdownMessage content={content} allowImages={allowImages} />;
 });

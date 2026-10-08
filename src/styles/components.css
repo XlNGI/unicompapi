@@ -306,6 +306,10 @@
   white-space: normal;
 }
 
+.uc-markdown-message__streaming {
+  white-space: pre-wrap !important;
+}
+
 .uc-markdown-message h1,
 .uc-markdown-message h2,
 .uc-markdown-message h3,
