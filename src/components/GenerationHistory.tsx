@@ -117,6 +117,27 @@ const liveFailedPhases = new Set<SubmissionProgressPhase>([
   'submission_failed'
 ]);
 
+export const historyLiveStatusWindowMs = 60 * 60 * 1_000;
+
+const liveHistoryStatuses = new Set<HistoryStatus>([
+  'pending',
+  'awaiting_receipt',
+  'receiving'
+]);
+
+export function presentHistoryStatusKind(
+  kind: HistoryStatus,
+  occurredAt: string,
+  nowMs: number
+): HistoryStatus {
+  if (!liveHistoryStatuses.has(kind)) return kind;
+  const updatedAt = Date.parse(occurredAt);
+  if (!Number.isFinite(updatedAt) || nowMs - updatedAt > historyLiveStatusWindowMs) {
+    return 'uncertain';
+  }
+  return kind;
+}
+
 const liveUncertainPhases = new Set<SubmissionProgressPhase>([
   'uncertain',
   'submission_uncertain'
@@ -799,7 +820,11 @@ function buildHistoryStatusNodes(
       nodes.push({ id: `task-${task.taskId}`, taskId: task.taskId, kind: 'uncertain', occurredAt });
     }
   }
-  return nodes;
+  const nowMs = Date.now();
+  return nodes.map((node) => ({
+    ...node,
+    kind: presentHistoryStatusKind(node.kind, node.occurredAt, nowMs)
+  }));
 }
 
 function buildHistoryNodes(

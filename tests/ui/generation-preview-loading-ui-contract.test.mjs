@@ -72,6 +72,18 @@ test('accepted asynchronous work remains visible while the provider is processin
   }
 });
 
+test('quick generation keeps the current prompt after completion', async () => {
+  for (const path of [
+    'src/pages/creation/image/ImageQuickWorkspace.tsx',
+    'src/pages/creation/video/VideoQuickWorkspace.tsx',
+    'src/pages/creation/image/ImageWorkbenchPage.tsx',
+    'src/pages/creation/video/VideoWorkbenchPage.tsx'
+  ]) {
+    const source = await readFile(path, 'utf8');
+    assert.doesNotMatch(source, /onClearUi|clearUiAfterGeneration/);
+  }
+});
+
 test('the video submit panel exposes stages without coupling them to progress-step visibility', async () => {
   const source = await readFile(
     'src/pages/creation/video/VideoFeatureSubmissionPanel.tsx',

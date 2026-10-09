@@ -501,12 +501,24 @@
   resize: vertical;
 }
 
-.uc-image-quick__field textarea:focus-visible,
 .uc-image-quick__field input:focus-visible,
 .uc-image-quick__field select:focus-visible,
 .uc-image-quick__checkbox input:focus-visible {
   outline: 2px solid var(--uc-color-border-focus);
   outline-offset: 2px;
+}
+
+.uc-image-quick__field textarea:focus,
+.uc-image-quick__field textarea:focus-visible,
+.uc-image-quick__composer textarea:focus,
+.uc-image-quick__composer textarea:focus-visible,
+.uc-image-professional__prompt-textarea:focus,
+.uc-image-professional__prompt-textarea:focus-visible,
+.uc-image-professional__prompt-columns textarea:focus,
+.uc-image-professional__prompt-columns textarea:focus-visible {
+  outline: none;
+  border-color: var(--uc-color-border-default);
+  box-shadow: none;
 }
 
 .uc-image-quick__field small {
@@ -600,7 +612,6 @@
 
 .uc-image-quick__composer {
   grid-area: composer;
-  border-color: var(--uc-color-border-focus) !important;
 }
 
 .uc-image-quick__stage {
@@ -4307,11 +4318,6 @@ button.uc-generation-history__task-status { cursor: pointer; }
   background: var(--uc-color-surface-panel);
   font: inherit;
   resize: vertical;
-}
-
-.uc-image-professional__prompt-columns textarea:focus-visible {
-  outline: 2px solid var(--uc-color-border-focus);
-  outline-offset: 2px;
 }
 
 .uc-image-understanding__workspace {

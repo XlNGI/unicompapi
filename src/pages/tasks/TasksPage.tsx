@@ -9,6 +9,7 @@ import {
 } from 'react';
 import { Input } from 'rsuite';
 import { isTaskInDateRange, recentTaskDateRange } from './task-date-range';
+import { decideTaskSelection } from './task-selection';
 import { Button } from '../../components/Button';
 import { ExpandableText } from '../../components/ExpandableText';
 import { FailureDiagnostic } from './FailureDiagnostic';
@@ -161,14 +162,18 @@ export function TasksPage({ onNavigate, onReuseParameters, initialTaskId }: Task
     }
   }
 
+  const appliedInitialTaskId = useRef<string>();
+
   useEffect(() => {
-    if (tasks.length === 0) return;
-    if (!selectedTaskId || (initialTaskId && tasks.some((task) => task.taskId === initialTaskId))) {
-      setSelectedTaskId(
-        initialTaskId && tasks.some((task) => task.taskId === initialTaskId)
-          ? initialTaskId
-          : tasks[0]?.taskId
-      );
+    const decision = decideTaskSelection({
+      taskIds: tasks.map((task) => task.taskId),
+      selectedTaskId,
+      initialTaskId,
+      appliedInitialTaskId: appliedInitialTaskId.current,
+    });
+    appliedInitialTaskId.current = decision.appliedInitialTaskId;
+    if (decision.selectedTaskId !== selectedTaskId) {
+      setSelectedTaskId(decision.selectedTaskId);
     }
   }, [initialTaskId, selectedTaskId, tasks]);
 

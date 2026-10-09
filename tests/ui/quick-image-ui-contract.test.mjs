@@ -77,6 +77,25 @@ test('quick image uses the safe feature DTO and one business submission action',
   );
 });
 
+test('image and video prompt fields do not use a bright focus halo', () => {
+  assert.match(
+    pageStyles,
+    /\.uc-image-quick__field textarea:focus,[\s\S]*?\.uc-image-professional__prompt-textarea:focus-visible,[\s\S]*?outline: none;/
+  );
+  assert.match(
+    pageStyles,
+    /\.uc-image-professional__prompt-columns textarea:focus-visible \{[\s\S]{0,160}border-color: var\(--uc-color-border-default\);/
+  );
+  assert.doesNotMatch(
+    pageStyles,
+    /\.uc-image-quick__composer \{\s*grid-area: composer;\s*border-color: var\(--uc-color-border-focus\)/
+  );
+  assert.doesNotMatch(
+    pageStyles,
+    /\.uc-image-quick__field textarea:focus-visible,\s*\.uc-image-quick__field input/
+  );
+});
+
 test('quick image synchronously blocks duplicate one-shot submissions', () => {
   const start = featurePanelSource.indexOf('async function generateOneShot()');
   const end = featurePanelSource.indexOf('\n  return (', start);

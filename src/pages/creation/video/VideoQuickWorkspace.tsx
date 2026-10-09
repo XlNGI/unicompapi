@@ -19,7 +19,6 @@ type QuickVideoDraftDto = Extract<
 interface VideoQuickWorkspaceProps {
   readonly dirty: boolean;
   readonly draft: QuickVideoDraftDto;
-  readonly onClearUi?: () => void;
   readonly onDraftChange: (draft: QuickVideoDraftDto) => void;
   readonly onDraftPersisted: (draft: QuickVideoDraftDto) => void;
   readonly onFlushDraft?: () => Promise<boolean>;
@@ -46,7 +45,6 @@ function describeWorkspaceError(error: {
 export function VideoQuickWorkspace({
   dirty,
   draft,
-  onClearUi,
   onDraftChange,
   onDraftPersisted,
   onFlushDraft,
@@ -65,8 +63,6 @@ export function VideoQuickWorkspace({
   }>({ phase: 'idle' });
   const userTookOverRef = useRef(false);
   const lastProgressPhaseRef = useRef<SubmissionProgressPhase>('idle');
-  const currentDraftRef = useRef(draft);
-  currentDraftRef.current = draft;
   const handleProgressChange = useCallback((phase: SubmissionProgressPhase, failureMessage?: string) => {
     if ((phase === 'preparing' && lastProgressPhaseRef.current !== 'preparing') ||
       (phase === 'requesting' && lastProgressPhaseRef.current !== 'preparing' && lastProgressPhaseRef.current !== 'requesting')) {
@@ -214,10 +210,6 @@ export function VideoQuickWorkspace({
               setExpectedTaskId(submission.taskId);
               setExpectedWorkId(submission.status === 'completed' ? submission.workId : undefined);
               setHistoryRefreshKey((key) => key + 1);
-              if (submission.status === 'completed' &&
-                currentDraftRef.current.draftId === draft.draftId &&
-                currentDraftRef.current.prompt.originalInput === draft.prompt.originalInput &&
-                JSON.stringify(currentDraftRef.current.featureSelection) === JSON.stringify(draft.featureSelection)) onClearUi?.();
             }}
             showProgressSteps
           />

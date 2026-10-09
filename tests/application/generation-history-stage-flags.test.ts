@@ -1,5 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
+  historyLiveStatusWindowMs,
+  presentHistoryStatusKind,
   resolveHistorySelection,
   resolveHistoryStageFlags
 } from '../../src/components/GenerationHistory';
@@ -134,5 +136,31 @@ describe('generation history stage flags', () => {
     const result = flags({ livePhase: 'completed', previewWorkId: 'work-1' });
     expect(result.generationInFlight).toBe(false);
     expect(result.showLoadingPreview).toBe(false);
+  });
+});
+
+describe('stale generation history status', () => {
+  const now = Date.parse('2026-10-09T02:00:00.000Z');
+
+  it('keeps a live status inside the same one-hour window as the activity dock', () => {
+    expect(historyLiveStatusWindowMs).toBe(60 * 60 * 1000);
+    const occurredAt = new Date(now - historyLiveStatusWindowMs).toISOString();
+    expect(presentHistoryStatusKind('pending', occurredAt, now)).toBe('pending');
+    expect(presentHistoryStatusKind('receiving', occurredAt, now)).toBe('receiving');
+  });
+
+  it('shows an unchanged in-progress task as uncertain after one hour', () => {
+    const occurredAt = new Date(now - historyLiveStatusWindowMs - 1).toISOString();
+    expect(presentHistoryStatusKind('pending', occurredAt, now)).toBe('uncertain');
+    expect(presentHistoryStatusKind('awaiting_receipt', occurredAt, now)).toBe('uncertain');
+    expect(presentHistoryStatusKind('receiving', occurredAt, now)).toBe('uncertain');
+  });
+
+  it('does not relabel a finished or already uncertain task', () => {
+    const occurredAt = '2026-08-20T03:50:34.304Z';
+    expect(presentHistoryStatusKind('failed', occurredAt, now)).toBe('failed');
+    expect(presentHistoryStatusKind('completed', occurredAt, now)).toBe('completed');
+    expect(presentHistoryStatusKind('uncertain', occurredAt, now)).toBe('uncertain');
+    expect(presentHistoryStatusKind('pending', 'not-a-time', now)).toBe('uncertain');
   });
 });

@@ -51,7 +51,6 @@ window.unicomp = { storage, imageWorkspaces: workspaces, videoWorkspaces: worksp
 const root = createRoot(document.getElementById('root')!);
 function render() {
   const props = { dirty, onMessage: () => {}, onFlushDraft: async () => true,
-    onClearUi: () => { clears++; },
     onDraftChange: (next: typeof draft) => { draft = next; dirty = true; render(); },
     onDraftPersisted: (next: typeof draft) => { draft = next; dirty = false; persisted++; render(); } };
   flushSync(() => root.render(<ThemeProvider><RSuiteThemeBridge><GlobalNotificationProvider>

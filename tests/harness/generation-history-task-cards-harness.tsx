@@ -6,17 +6,17 @@ import '../../src/styles/tokens.css';
 import '../../src/styles/components.css';
 import '../../src/styles/pages.css';
 
-const createdAt = '2026-09-24T00:00:00Z';
+const createdAt = new Date().toISOString();
 const makeWork = (id: string) => ({
   workId: id, projectId: 'fixture', name: id, mediaKind: 'image' as const,
   createdAt, verifiedAt: createdAt
 });
 let items: StorageGenerationHistoryItemDto[] = [
   { kind: 'task', taskId: 'single', createdAt, works: [makeWork('single-1')] },
-  { kind: 'task', taskId: 'multi', createdAt: '2026-09-24T00:01:00Z', state: 'processing',
-    occurredAt: '2026-09-24T00:02:00Z', works: [makeWork('multi-1'), makeWork('multi-2')] },
-  { kind: 'task', taskId: 'empty', createdAt: '2026-09-24T00:02:00Z', state: 'processing',
-    occurredAt: '2026-09-24T00:02:00Z', works: [] }
+  { kind: 'task', taskId: 'multi', createdAt: new Date(Date.now() + 1000).toISOString(), state: 'processing',
+    occurredAt: new Date(Date.now() + 1000).toISOString(), works: [makeWork('multi-1'), makeWork('multi-2')] },
+  { kind: 'task', taskId: 'empty', createdAt: new Date(Date.now() + 2000).toISOString(), state: 'processing',
+    occurredAt: new Date(Date.now() + 2000).toISOString(), works: [] }
 ];
 const listeners = new Set<() => void>();
 let selectedWork: string | undefined;
@@ -86,7 +86,7 @@ Object.assign(window, { historyHarness: {
   selected: () => selectedWork,
   update: (state: string, addWork = false) => {
     items = items.map((item) => item.taskId === 'multi' ? {
-      ...item, state, occurredAt: '2026-09-24T01:00:00Z',
+      ...item, state, occurredAt: new Date().toISOString(),
       works: addWork ? [...item.works, makeWork('multi-3')] : item.works
     } : item);
     listeners.forEach((listener) => listener());
