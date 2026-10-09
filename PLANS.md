@@ -1,5 +1,11 @@
 # UniComp 开发计划
 
+### 维护立项：官方合同统一适配框架工程落地实施计划（2026-10-09；计划阶段，未实施）
+
+已基于当前 Electron + TypeScript 源码完成官方合同统一适配框架工程计划，文档见[官方合同统一适配框架——工程落地实施总计划](docs/current/official-contract-unified-adapter-implementation-plan.md)。计划采用原地演进：复用 `ProviderPackageRegistry`、`JsonProviderRegistryStore`、现有 Provider 实体、`ProviderExecutionRouteSnapshotV1` 和协议 Adapter，不建立第二套 Registry 或 Execution Runtime；按基线冻结、官方合同、兼容性绑定、有效能力、Route Snapshot V2、运行时双路径、网关目录治理、特判迁移和灰度退役分批实施。
+
+本次只完成计划文档和计划登记，没有修改源码、配置、数据库、注册数据、迁移脚本或运行时行为；没有调用真实模型、读取凭证、联网或产生收费请求。进入第一批编码前，需确认计划中的官方来源规则、网关模型候选规则、验证有效期、多协议路由优先级和旧快照兼容窗口。
+
 ### 维护立项：会话与 Agent 业务架构性能治理计划（2026-10-08；计划阶段，未实施）
 
 负责人同意先形成计划，再进入代码改造。已新增[会话与 Agent 业务架构性能治理计划](docs/current/conversation-agent-architecture-performance-plan.md)，将当前卡顿问题按主流 Agent 架构拆为 P0 基准与可观测性、P1 会话摘要读模型、P2 消息分页、P3 recovery 解耦、P4 事件追加与批量快照、P5 Renderer 渐进显示六个阶段，并拆成小 PR。
