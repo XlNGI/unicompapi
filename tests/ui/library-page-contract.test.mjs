@@ -51,6 +51,12 @@ test('work cards lazily show controlled image and video covers without opening d
   assert.match(source, /<video muted playsInline preload="metadata"/);
 });
 
+test('work library list and details reuse the shared thin scrollbar', () => {
+  assert.match(source, /className="uc-work-library__list uc-scrollbar"/);
+  assert.match(source, /className="uc-work-library__details-content uc-scrollbar"/);
+  assert.match(styles, /\.uc-model-select__popup \.rs-picker-select-menu-items::-webkit-scrollbar/);
+});
+
 test('work list keeps at least three columns and protects long names from status badges', () => {
   assert.match(styles, /\.uc-work-library__grid \{[\s\S]*?grid-template-columns: repeat\(3, minmax\(0, 1fr\)\)/);
   assert.match(styles, /@container work-library-list \(min-width: 760px\)[\s\S]*?repeat\(4/);

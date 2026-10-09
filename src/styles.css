@@ -763,12 +763,11 @@ button {
   padding-right: var(--uc-space-1);
   padding-bottom: var(--uc-space-3);
   scrollbar-color: color-mix(in srgb, var(--uc-color-text-tertiary) 42%, transparent) transparent;
-  scrollbar-gutter: stable;
   scrollbar-width: thin;
 }
 
 .nav-list::-webkit-scrollbar {
-  width: 8px;
+  width: 6px;
 }
 
 .nav-list::-webkit-scrollbar-track {

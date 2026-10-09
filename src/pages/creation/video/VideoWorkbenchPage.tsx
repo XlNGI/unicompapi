@@ -12,6 +12,7 @@ import type {
   VideoWorkspaceIpcResult
 } from '../../../shared/video-workspace-ipc';
 import '../../../styles/pages.css';
+import { PROJECT_SESSION_CHANGED_EVENT } from '../../../ui/project-session-events';
 import { useLatestSnapshotAutosave } from '../../../ui/use-latest-snapshot-autosave';
 import type { VideoCreationMode } from '../creationModes';
 import { persistVideoWorkspaceDraft } from './persistVideoWorkspaceDraft';
@@ -132,8 +133,11 @@ export function VideoWorkbenchPage({
 
   useEffect(() => {
     let active = true;
+    let requestId = 0;
 
     async function load() {
+      const request = ++requestId;
+      const current = () => active && request === requestId;
       setLoading(true);
       setMessage('');
       setSession(undefined);
@@ -149,7 +153,7 @@ export function VideoWorkbenchPage({
 
       try {
         const sessionResult = await storage.getProjectSession();
-        if (!active) return;
+        if (!current()) return;
         if (!sessionResult.ok) {
           setMessage('无法读取当前项目，请返回项目页面重试。');
           return;
@@ -163,7 +167,7 @@ export function VideoWorkbenchPage({
             return;
           }
           const draftResult = await videoWorkspaces.list();
-          if (!active) return;
+          if (!current()) return;
           if (!draftResult.ok) {
             setMessage(workspaceErrorMessages[draftResult.error.code]);
             return;
@@ -172,27 +176,29 @@ export function VideoWorkbenchPage({
             (draft) => draft.mode === workspaceMode
           );
           setDrafts(modeDrafts);
-          setSelectedDraftId((current) =>
+          setSelectedDraftId((currentSelection) =>
             preferredDraftId &&
             modeDrafts.some((draft) => draft.draftId === preferredDraftId)
               ? preferredDraftId
-              : current &&
-                  modeDrafts.some((draft) => draft.draftId === current)
-                ? current
+              : currentSelection &&
+                  modeDrafts.some((draft) => draft.draftId === currentSelection)
+                ? currentSelection
                 : modeDrafts[modeDrafts.length - 1]?.draftId
           );
         }
 
       } catch {
-        if (active) setMessage('读取本地视频工作区失败，请重试。');
+        if (current()) setMessage('读取本地视频工作区失败，请重试。');
       } finally {
-        if (active) setLoading(false);
+        if (current()) setLoading(false);
       }
     }
 
     void load();
+    window.addEventListener(PROJECT_SESSION_CHANGED_EVENT, load);
     return () => {
       active = false;
+      window.removeEventListener(PROJECT_SESSION_CHANGED_EVENT, load);
     };
   }, [preferredDraftId, storage, videoWorkspaces, workspaceMode]);
 
@@ -326,7 +332,7 @@ export function VideoWorkbenchPage({
     <section
       className={`uc-image-workbench uc-video-workbench${
         usesFlowAutosave ? ' uc-image-workbench--generation' : ''
-      }`}
+      }${currentDraft ? '' : ' uc-image-workbench--offline'}`}
       aria-labelledby={`${mode.id}-title`}
     >
       <header className="uc-image-workbench__header">
