@@ -9,6 +9,7 @@ import {
 } from 'electron';
 import { appendFile, mkdir } from 'node:fs/promises';
 import path from 'node:path';
+import { monitorEventLoopDelay } from 'node:perf_hooks';
 import { registerStorageIpcHandlers } from './ipc/storage-ipc';
 import { registerProviderIpcHandlers } from './ipc/provider-ipc';
 import { registerSettingsIpcHandlers } from './ipc/settings-ipc';
@@ -63,6 +64,26 @@ import {
 } from '../src/shared/parameter-input-performance';
 
 const isDev = Boolean(process.env.VITE_DEV_SERVER_URL);
+if (process.env.UNICOMP_TEST_USER_DATA) {
+  app.setPath('userData', path.resolve(process.env.UNICOMP_TEST_USER_DATA));
+}
+if (process.env.UNICOMP_E2E === '1') {
+  const reactCommits: unknown[] = [];
+  ipcMain.on('__unicomp_e2e_react_commit', (_event, value: unknown) => {
+    if (!value || typeof value !== 'object') return;
+    const record = value as Record<string, unknown>;
+    if (typeof record.id === 'string' && typeof record.phase === 'string' && typeof record.actualDuration === 'number') reactCommits.push(record);
+  });
+  ipcMain.handle('__unicomp_e2e_react_metrics', () => reactCommits.slice());
+  ipcMain.handle('__unicomp_e2e_main_loop_sample', async (_event, durationMs: unknown) => {
+    const duration = typeof durationMs === 'number' && Number.isFinite(durationMs) ? Math.max(10, Math.min(5000, durationMs)) : 250;
+    const delay = monitorEventLoopDelay({ resolution: 10 });
+    delay.enable();
+    await new Promise(resolve => setTimeout(resolve, duration));
+    delay.disable();
+    return { durationMs: duration, maxMs: delay.max / 1e6, meanMs: delay.mean / 1e6, p95Ms: delay.percentile(95) / 1e6 };
+  });
+}
 const isMac = process.platform === 'darwin';
 const rendererTraceEnabled = isDev || process.env.UNICOMP_RENDERER_TRACE === '1';
 

@@ -750,6 +750,30 @@ interface ResponseSubscription {
 
 const responseSubscriptions = new Map<string, ResponseSubscription>();
 
+type E2eIpcMetric = {
+  readonly method: string;
+  readonly durationMs: number;
+  readonly ok: boolean;
+};
+
+const e2eIpcMetrics: E2eIpcMetric[] = [];
+
+function invokeChatContext<T>(method: string, channel: string, request?: unknown): Promise<T> {
+  const startedAt = performance.now();
+  const result = ipcRenderer.invoke(channel, request) as Promise<T>;
+  if (process.env.UNICOMP_E2E !== '1') return result;
+  return result.then(
+    value => {
+      e2eIpcMetrics.push({ method, durationMs: performance.now() - startedAt, ok: true });
+      return value;
+    },
+    error => {
+      e2eIpcMetrics.push({ method, durationMs: performance.now() - startedAt, ok: false });
+      throw error;
+    }
+  );
+}
+
 function subscriptionTrace(message: string, detail?: unknown): void {
   if (
     process.env.UNICOMP_RENDERER_TRACE !== '1' &&
@@ -808,24 +832,24 @@ const chatContexts: ChatContextApi = {
       bindToCurrentProject
     }),
   getConversation: (conversationId) =>
-    ipcRenderer.invoke(chatContextIpcChannels.getConversation, { conversationId }),
+    invokeChatContext('getConversation', chatContextIpcChannels.getConversation, { conversationId }),
   listConversations: (includeArchived, includeDeleted) =>
-    ipcRenderer.invoke(chatContextIpcChannels.listConversations, {
+    invokeChatContext('listConversations', chatContextIpcChannels.listConversations, {
       includeArchived,
       includeDeleted
     }),
   listThreadSummaries: ({ includeArchived, includeDeleted, limit, cursor }) =>
-    ipcRenderer.invoke(chatContextIpcChannels.listThreadSummaries, {
+    invokeChatContext('listThreadSummaries', chatContextIpcChannels.listThreadSummaries, {
       includeArchived, includeDeleted, limit, cursor: cursor ?? null
     }),
   getThread: (threadId) =>
-    ipcRenderer.invoke(chatContextIpcChannels.getThread, { threadId }),
+    invokeChatContext('getThread', chatContextIpcChannels.getThread, { threadId }),
   getThreadItemsPage: ({ threadId, limit, direction, cursor }) =>
-    ipcRenderer.invoke(chatContextIpcChannels.getThreadItemsPage, {
+    invokeChatContext('getThreadItemsPage', chatContextIpcChannels.getThreadItemsPage, {
       threadId, limit, direction: direction ?? 'older', cursor: cursor ?? null
     }),
   getTurn: (turnId) =>
-    ipcRenderer.invoke(chatContextIpcChannels.getTurn, { turnId }),
+    invokeChatContext('getTurn', chatContextIpcChannels.getTurn, { turnId }),
   listConversationCandidates: () =>
     ipcRenderer.invoke(chatContextIpcChannels.listConversationCandidates),
   renameConversation: (conversationId, expectedRevision, title) =>
@@ -1116,6 +1140,7 @@ contextBridge.exposeInMainWorld('unicomp', {
   providers,
   settings,
   storage,
+  ...(process.env.UNICOMP_E2E === '1' ? { e2e: { sampleMainEventLoop: (durationMs?: number) => ipcRenderer.invoke('__unicomp_e2e_main_loop_sample', durationMs), recordReactCommit: (value: unknown) => ipcRenderer.send('__unicomp_e2e_react_commit', value), getReactMetrics: () => ipcRenderer.invoke('__unicomp_e2e_react_metrics'), getIpcMetrics: () => e2eIpcMetrics.slice() } } : {}),
   windowControls: {
     minimize: () => ipcRenderer.send('window:minimize'),
     toggleMaximize: () => ipcRenderer.send('window:toggle-maximize'),

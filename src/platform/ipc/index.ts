@@ -17,6 +17,7 @@ export * from './video-reference-media-controller';
 export * from './settings-controller';
 export * from './conversation-controller';
 export * from './conversation-thread-read-controller';
+export * from './thread-file-read-adapter';
 export * from './conversation-workflow-controller';
 export * from './conversation-web-research-controller';
 export * from './conversation-response-controller';

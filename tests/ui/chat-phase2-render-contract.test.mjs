@@ -23,9 +23,9 @@ test('phase 2 uses a single streaming overlay and stable Item row identity', () 
   assert.match(stream, /StreamingMarkdown/);
 });
 
-test('phase 2 retains scroll compensation and does not opt into an unmeasured virtual list', () => {
+test('phase 6 retains scroll compensation and uses the measured virtual list', () => {
   assert.match(page, /prependScrollAnchorRef/);
   assert.match(page, /scrollHeight/);
   assert.match(page, /followOutputRef/);
-  assert.doesNotMatch(page, /react-window|react-virtuoso|VirtualList/);
+  assert.match(page, /VirtualMessageList/);
 });

@@ -45,7 +45,13 @@ function find(node: ReactNode, predicate: (element: Element) => boolean): Elemen
   if (Array.isArray(node)) return node.map((child) => find(child, predicate)).find(Boolean);
   if (!node || typeof node !== 'object' || !('props' in node)) return undefined;
   const element = node as Element;
-  return predicate(element) ? element : find(element.props.children as ReactNode, predicate);
+  if (predicate(element)) return element;
+  const virtualList = element.type as { name?: string } | undefined;
+  const renderItem = element.props.renderItem as ((itemId: string) => ReactNode) | undefined;
+  if (virtualList?.name === 'VirtualMessageList' && Array.isArray(element.props.itemIds) && renderItem) {
+    return find(element.props.itemIds.map((itemId: string) => renderItem(itemId)), predicate);
+  }
+  return find(element.props.children as ReactNode, predicate);
 }
 
 function deferred<T>() {

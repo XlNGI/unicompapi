@@ -129,6 +129,7 @@ test('chat page uses project conversations and composer-first streaming workflow
   assert.match(source, /displayMessageIds/);
   assert.match(source, /ThreadItemRow/);
   assert.match(source, /StreamingItem/);
+  assert.match(source, /VirtualMessageList/);
   assert.match(source, /<StreamingMarkdown/);
   assert.match(source, /className="uc-chat-page__message-bubble"/);
   assert.match(styles, /\.uc-chat-page__message-item--user > \.uc-chat-page__message-bubble \{[\s\S]*padding: 8px 12px;[\s\S]*background: var\(--uc-color-surface-subtle\);/);

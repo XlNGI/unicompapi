@@ -33,6 +33,7 @@ export function registerChatContextIpcHandlers(options: {
 }): ChatContextIpcLifecycle {
   const runtime = createChatContextRuntime({
     userDataDirectory: app.getPath('userData'),
+    threadFileReadEnabled: process.env.UNICOMP_THREAD_FILE_READ_PATH === '1',
     getSession: options.getSession,
     providerRegistry: options.providerRegistry,
     providerPackages: options.providerPackages,

@@ -1,4 +1,4 @@
-import { Children, cloneElement, isValidElement, memo, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import { Children, cloneElement, isValidElement, memo, Profiler, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import type { ClipboardEvent, FormEvent, ReactNode, SetStateAction } from 'react';
 import {
   LuArchive,
@@ -30,6 +30,7 @@ import { Card } from '../../components/Card';
 import { EmptyState } from '../../components/EmptyState';
 import { StreamingMarkdown } from './StreamingMarkdown';
 import { StreamingItem } from './StreamingItem';
+import { VirtualMessageList } from './VirtualMessageList';
 import { ChatAttachment } from './ChatAttachment';
 import { DocumentProgress } from './DocumentProgress';
 import { RetainedDocumentCard } from './RetainedDocumentCard';
@@ -624,7 +625,10 @@ function mergeThreadSummaries(
 
 function threadReadPathEnabled(chat: ChatContextApi | undefined): boolean {
   if (!chat?.listThreadSummaries || !chat.getThread || !chat.getThreadItemsPage || !chat.getTurn) return false;
-  return import.meta.env.VITE_UNICOMP_THREAD_READ_PATH !== 'legacy';
+  // The legacy adapter remains the default. The physical Thread Repository
+  // path is enabled only by an explicit isolated-build flag.
+  return import.meta.env.VITE_UNICOMP_THREAD_FILE_READ_PATH === '1' &&
+    import.meta.env.VITE_UNICOMP_THREAD_READ_PATH !== 'legacy';
 }
 
 function retainProjectOrder(
@@ -1217,11 +1221,20 @@ export function ChatPage({
         return;
       }
       try {
-        const projectListPromise = typeof storage.listProjects === 'function'
-          ? storage.listProjects()
-          : Promise.resolve({ ok: true as const, value: [] as readonly StorageProjectSummaryDto[] });
-        const [sessionResult, projectsResult] = await Promise.all([
-          storage.getProjectSession(), projectListPromise
+      const projectListPromise = typeof storage.listProjects === 'function'
+        ? storage.listProjects()
+        : Promise.resolve({ ok: true as const, value: [] as readonly StorageProjectSummaryDto[] });
+        // Start the legacy full conversation read with the session read. A
+        // project switch can supersede both operations; the generation fence
+        // below still prevents the older result from committing. Starting the
+        // reads together keeps the old API's observable read contract and
+        // avoids a race where the superseded load never issues its conversation
+        // read at all.
+        const legacyConversationsPromise = !threadReadsEnabled
+          ? chat.listConversations(true, false)
+          : Promise.resolve(undefined);
+        const [sessionResult, projectsResult, legacyConversationsResult] = await Promise.all([
+          storage.getProjectSession(), projectListPromise, legacyConversationsPromise
         ]);
         if (!isCurrentLoad()) return;
         if (sessionResult.ok) {
@@ -1280,7 +1293,7 @@ export function ChatPage({
           setThreadSummaryCursor(nextSummaryCursor);
           setThreadSummariesHaveMore(hasMoreSummaries);
         } else {
-          const result = await chat.listConversations(true, false);
+          const result = legacyConversationsResult ?? await chat.listConversations(true, false);
           if (!result.ok) {
             setNotice(errorMessages[result.error.code]);
             return;
@@ -1475,16 +1488,26 @@ export function ChatPage({
     let active = true;
     let timer: ReturnType<typeof setTimeout>;
     let reads = 0;
+    let delayMs = 750;
+    let legacyRevision = -1;
     const refresh = async () => {
+      let changed = false;
       try {
         if (threadReadsEnabled && chat.getThreadItemsPage) {
-          await refreshThreadItems(selectedId);
+          changed = await refreshThreadItems(selectedId);
         } else {
           const result = await chat.getConversation(selectedId);
-          if (active && result.ok) replaceConversation(result.value);
+          if (active && result.ok) {
+            changed = result.value.revision !== legacyRevision;
+            legacyRevision = result.value.revision;
+            if (changed) replaceConversation(result.value);
+          }
         }
       } finally {
-        if (active && ++reads < 600) timer = setTimeout(() => { void refresh().catch(() => undefined); }, 750);
+        if (active && ++reads < 600) {
+          delayMs = changed ? 750 : Math.min(5000, delayMs * 2);
+          timer = setTimeout(() => { void refresh().catch(() => undefined); }, delayMs);
+        }
       }
     };
     void refresh().catch(() => undefined);
@@ -2096,6 +2119,12 @@ export function ChatPage({
     }
     const result = await chat.getThreadItemsPage({ threadId, limit: threadItemPageSize, direction: 'older' });
     if (!result.ok) return false;
+    const existing = threadItemPages[threadId];
+    const changed = !existing || existing.readAtSequence !== result.value.readAtSequence || result.value.items.some(item => {
+      const previous = existing.itemById.get(threadItemKey(item));
+      return !previous || previous.updatedAt !== item.updatedAt || previous.message?.revision !== item.message?.revision || previous.status !== item.status;
+    });
+    if (!changed) return false;
     setConversations(current => current.map(summary => summary.conversationId === threadId && summary.revision <= result.value.revision
       ? { ...summary, revision: result.value.revision, updatedAt: result.value.updatedAt }
       : summary));
@@ -4521,8 +4550,13 @@ export function ChatPage({
                     </Button>
                   </div>
                 ) : null}
-              <ol className="uc-chat-page__message-list">
-                {displayMessageIds.map((messageId) => {
+              <Profiler id="ChatMessageList" onRender={(id, phase, actualDuration, baseDuration, startTime, commitTime) => {
+                if (import.meta.env.VITE_UNICOMP_E2E === '1') window.unicomp?.e2e?.recordReactCommit({ id, phase, actualDuration, baseDuration, startTime, commitTime });
+              }}>
+              <VirtualMessageList
+                itemIds={displayMessageIds}
+                containerRef={messagesRef}
+                renderItem={(messageId) => {
                   const item = messageId === streamingMessage?.messageId
                     ? streamingMessage
                     : projectedMessageById.get(messageId);
@@ -4748,8 +4782,9 @@ export function ChatPage({
                       ) : null}
                     </ThreadItemRow>
                   );
-                })}
-              </ol>
+                }}
+              />
+              </Profiler>
               </>
             )}
             <div className="uc-chat-page__message-item uc-chat-page__message-item--assistant" aria-label="助手任务回复">

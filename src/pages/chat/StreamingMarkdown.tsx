@@ -25,5 +25,5 @@ export const StreamingMarkdown = memo(function StreamingMarkdown({ content, stre
     frame = requestAnimationFrame(paint);
     return () => cancelAnimationFrame(frame);
   }, [content, streaming]);
-  return <MarkdownMessage content={streaming ? display : content} allowImages={allowImages} />;
+  return <MarkdownMessage content={streaming ? display : content} allowImages={allowImages} cache={!streaming} />;
 });

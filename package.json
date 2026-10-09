@@ -34,6 +34,8 @@
     "test:platform": "vitest run tests/platform",
     "test:application": "vitest run tests/application",
     "test:read-model-performance": "vitest run tests/platform/read-model-performance-baseline.test.ts",
+    "test:electron-conversation": "pnpm build && node tests/electron/conversation-phase6-e2e.mjs && cross-env UNICOMP_E2E_THREAD_FILE=0 node tests/electron/conversation-phase6-e2e.mjs",
+    "test:electron-agent-mock": "pnpm build && electron scripts/verify-agent-provider-mock-electron.cjs",
     "test:vidu-e2e": "vitest run tests/platform/vidu-e2e-validation.test.ts",
     "typecheck": "tsc --noEmit && tsc --noEmit -p tsconfig.test.json",
     "lint": "eslint .",

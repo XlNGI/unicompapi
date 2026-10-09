@@ -1,4 +1,4 @@
-import { mkdtemp, readFile, rm } from 'node:fs/promises';
+import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { describe, expect, it } from 'vitest';
@@ -12,7 +12,7 @@ import {
   toProjectId,
   toThreadId
 } from '../../src/domain';
-import { LegacyThreadMigration } from '../../src/platform/repositories/thread-migration';
+import { LegacyFileMigrationRunner, LegacyThreadMigration } from '../../src/platform/repositories/thread-migration';
 import { ThreadFileRepository } from '../../src/platform/repositories/thread-file-repository';
 
 const t0 = toIsoTimestamp('2026-10-08T00:00:00.000Z');
@@ -48,6 +48,29 @@ describe('Legacy Thread migration and Shadow Read', () => {
       expect(ledger.entries).toHaveLength(1);
       expect(ledger.entries[0]!.status).toBe('migrated');
       expect(ledger.entries[0]!.sourceChecksum).toMatch(/^[a-f0-9]{64}$/);
+    } finally { await rm(root, { recursive: true, force: true }); }
+  });
+
+  it('reads a real legacy conversations.json primary or backup without modifying either file', async () => {
+    const root = await mkdtemp(path.join(os.tmpdir(), 'unicomp-thread-real-file-migration-'));
+    try {
+      const legacyPath = path.join(root, 'entities', 'conversations.json');
+      const targetRoot = path.join(root, 'thread-target');
+      const conversation = legacyConversation();
+      const document = { schemaVersion: 1, revision: 1, updatedAt: conversation.updatedAt, conversations: [conversation] };
+      await (await import('node:fs/promises')).mkdir(path.dirname(legacyPath), { recursive: true });
+      await writeFile(legacyPath, `${JSON.stringify(document)}\n`, 'utf8');
+      const before = await readFile(legacyPath, 'utf8');
+      const repository = new ThreadFileRepository(targetRoot);
+      const migration = new LegacyThreadMigration(targetRoot, repository, { migrationId: 'real-file-test' });
+      const report = await new LegacyFileMigrationRunner(legacyPath, migration).run();
+      expect(report.sourceKind).toBe('primary');
+      expect(report.sourceFileChecksum).toMatch(/^[a-f0-9]{64}$/);
+      expect(await readFile(legacyPath, 'utf8')).toBe(before);
+      await writeFile(legacyPath, '{invalid');
+      await writeFile(`${legacyPath}.bak`, before);
+      const backupReport = await new LegacyFileMigrationRunner(legacyPath, migration).run();
+      expect(backupReport.sourceKind).toBe('backup');
     } finally { await rm(root, { recursive: true, force: true }); }
   });
 

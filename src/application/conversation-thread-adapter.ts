@@ -109,6 +109,7 @@ export function conversationToThreadProjection(
       createdAt: message.createdAt,
       updatedAt: message.updatedAt,
       messageSource: { messageId: message.id, messageRevision: message.revision },
+      legacyMessageSnapshot: message as unknown as Readonly<Record<string, unknown>>,
       content: message.content
     });
     items.push(item);

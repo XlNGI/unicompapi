@@ -42,6 +42,14 @@ const reading = registry.get('read_document_structure')!;
 const markers = ['GENERATED-PHYSICAL-731', 'GENERATED-CONTINUATION-862'];
 const content = ['# 合成生成读取闭环', '## 状态验证', markers[0], '## 交接验证', markers[1]].join('\n\n');
 
+// These are production-loop integration tests with real PPTX writing,
+// rendering, read-back and durable recovery. The slowest individual case is
+// ~6.5s under the full Vitest worker pool (and ~3.4s in isolation), so the
+// project-wide 5s default expires after the assertions are still progressing.
+// Keep the suite bounded while giving the real workflow a deterministic 15s
+// per-test budget; this does not change any runtime timeout or retry policy.
+vi.setConfig({ testTimeout: 15_000 });
+
 afterEach(async () => {
   await Promise.allSettled(cleanups.splice(0).map(cleanup => cleanup()));
   vi.restoreAllMocks();

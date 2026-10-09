@@ -1,10 +1,11 @@
-import { mkdir, readFile } from 'node:fs/promises';
+import { mkdir, readFile, stat } from 'node:fs/promises';
 import path from 'node:path';
 import type { Conversation, ConversationAgentRunId, ConversationId, ConversationResponseExecutionId, IsoTimestamp, MessageId, ThreadId } from '../../domain';
 import { appendDisplayItems, conversationToThreadProjection, projectArtifactItem } from '../../application/conversation-thread-adapter';
 import type { ConversationExecutionLinkInput } from '../../application/conversation-thread-adapter';
 import { sha256Hex, toIsoTimestamp, toWorkId } from '../../domain';
 import type { ThreadFileRepository } from './thread-file-repository';
+import { migrateConversationDocument, type ConversationDocumentV1 } from './json-conversation-repository';
 
 export interface LegacyExecutionReference {
   readonly conversationId: ConversationId;
@@ -192,7 +193,14 @@ export class LegacyThreadMigration {
       if (!summaryIds.has(String(conversation.id))) { differences.push({ conversationId: conversation.id, kind: 'missing_thread', detail: 'target summary missing' }); continue; }
       const thread = await this.target.getThread(conversation.id as unknown as ThreadId);
       const items = await this.target.readItems(conversation.id as unknown as ThreadId);
-      const expected = conversationToThreadProjection(conversation);
+      const expectedBase = conversationToThreadProjection(conversation);
+      let shadowArtifactOrdinal = 0;
+      const expected = appendDisplayItems(expectedBase, conversation.messages.flatMap(message => {
+        const artifact = message.documentResult ?? message.retainedDocumentResult;
+        if (!artifact) return [];
+        shadowArtifactOrdinal += 1;
+        return [projectArtifactItem({ threadId: expectedBase.thread.threadId, sequence: expectedBase.items.length + shadowArtifactOrdinal, status: message.state, content: artifact.fileName, createdAt: message.createdAt, updatedAt: message.updatedAt, sourceIdentity: `legacy-artifact:${message.id}:${artifact.workId}`, workId: toWorkId(artifact.workId) })];
+      }));
       if (!thread || thread.title !== expected.thread.title || thread.status !== expected.thread.status || thread.itemCount !== expected.items.length || thread.turnCount !== expected.turns.length) differences.push({ conversationId: conversation.id, kind: 'summary_mismatch', detail: 'Thread metadata differs from legacy projection' });
       if (items.length !== expected.items.length) differences.push({ conversationId: conversation.id, kind: 'item_count_mismatch', detail: `${items.length} target items vs ${expected.items.length} legacy items` });
       const sourceContentHash = sha256Hex(canonicalJson(expected.items.map(item => [item.itemId, item.content, item.status])));
@@ -234,6 +242,35 @@ export class ShadowComparator {
   compare(source: readonly LegacyConversationSnapshot[]): Promise<ShadowComparisonReport> { return this.migration.shadowCompare(source); }
 }
 
+export interface LegacyFileMigrationReport extends MigrationRunReport {
+  readonly sourcePath: string;
+  readonly sourceKind: 'primary' | 'backup';
+  readonly sourceFileChecksum: string;
+}
+
+/** Reads an actual legacy conversations.json copy and never writes to it. */
+export class LegacyFileMigrationRunner {
+  constructor(private readonly legacyPrimaryPath: string, private readonly migration: LegacyThreadMigration) {}
+
+  async run(): Promise<LegacyFileMigrationReport> {
+    const primaryPath = path.resolve(this.legacyPrimaryPath);
+    const backupPath = `${primaryPath}.bak`;
+    const primary = await readLegacyText(primaryPath);
+    let selected = primary;
+    let document: ConversationDocumentV1;
+    try {
+      if (!selected) throw new Error('primary_missing');
+      document = migrateConversationDocument(JSON.parse(selected.text) as ConversationDocumentV1);
+    } catch (primaryError) {
+      selected = await readLegacyText(backupPath);
+      if (!selected) throw primaryError;
+      document = migrateConversationDocument(JSON.parse(selected.text) as ConversationDocumentV1);
+    }
+    const report = await this.migration.migrate(document.conversations.map(conversation => ({ conversation })));
+    return { ...report, sourcePath: selected.path, sourceKind: selected.path === primaryPath ? 'primary' : 'backup', sourceFileChecksum: sha256Hex(selected.text) };
+  }
+}
+
 function toExecutionLinks(references: readonly LegacyExecutionReference[], conversationId: ConversationId): readonly ConversationExecutionLinkInput[] {
   return references.filter(reference => reference.conversationId === conversationId && reference.agentRunId).map(reference => ({ agentRunId: reference.agentRunId!, ...(reference.responseExecutionId ? { responseExecutionId: reference.responseExecutionId } : {}), sourceMessageId: reference.sourceMessageId, createdAt: toIsoTimestamp(new Date(0).toISOString()) }));
 }
@@ -244,3 +281,4 @@ function canonicalJson(value: unknown): string { return JSON.stringify(sortValue
 function sortValue(value: unknown): unknown { if (Array.isArray(value)) return value.map(sortValue); if (value && typeof value === 'object') return Object.fromEntries(Object.entries(value as Record<string, unknown>).filter(([, entry]) => entry !== undefined).sort(([left], [right]) => left.localeCompare(right)).map(([key, entry]) => [key, sortValue(entry)])); return value; }
 async function readJson<T>(file: string): Promise<T | undefined> { try { return JSON.parse(await readFile(file, 'utf8')) as T; } catch (error) { if ((error as NodeJS.ErrnoException).code === 'ENOENT') return undefined; throw error; } }
 async function atomicWrite(file: string, value: unknown): Promise<void> { await mkdir(path.dirname(file), { recursive: true }); const { writeFile, rename } = await import('node:fs/promises'); const temp = `${file}.tmp-${process.pid}-${Date.now()}`; await writeFile(temp, `${canonicalJson(value)}\n`, 'utf8'); await rename(temp, file); }
+async function readLegacyText(file: string): Promise<{ readonly path: string; readonly text: string } | undefined> { try { const text = await readFile(file, 'utf8'); await stat(file); return { path: file, text }; } catch (error) { if ((error as NodeJS.ErrnoException).code === 'ENOENT') return undefined; throw error; } }

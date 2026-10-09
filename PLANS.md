@@ -1,5 +1,19 @@
 # UniComp 开发计划
 
+### 第二批实施：数据完整性、隔离 Electron 接入与 Renderer 性能（2026-10-09；隔离代码/测试完成，真实 Electron 读取诊断已完成）
+
+实际修改：[第二批结果](docs/current/conversation-system-phase6-results.md)、`legacyMessageSnapshot` 完整字段映射、ThreadFile Read Adapter、runtime 双开关、VirtualMessageList、Markdown 有界缓存、文档轮询退避、隔离性能和字段测试。
+
+验证：ThreadFile/迁移/Adapter/性能 17/17；虚拟列表/Markdown 2/2；阶段 0～4 相关回归 132/132；UI 14/14；typecheck、build、ESLint、diff check 通过。真实 Electron 已在隔离项目运行 3 Threads × 100/1000/5000 Items、100/1000 Threads × 100 Items，覆盖 ThreadFile/Legacy、历史切换、顶部分页、重启恢复、真实 preload/IPC、React Profiler、Chromium Trace、DOM/heap 和主进程 event-loop 采样；诊断见 [electron-real-performance-diagnosis.md](docs/current/electron-real-performance-diagnosis.md)。本轮已修复 Chat Composer 4 项稳定失败与 Legacy 读取竞态，文档生成集成测试设置有实测依据的 15 秒测试预算；最终 `pnpm test` 为 328 files、3347/3347 通过。受控 Provider + 真实 Electron smoke 已通过普通响应、执行身份和取消起始边界；真实 Agent Tool Calling、真实 Provider 网络请求和 Provider 驱动 Office E2E 因隔离凭据/授权阻塞或缺少可执行 Tool Gateway fixture，未宣称通过。默认生产路径和旧权威不变，未执行 Cutover。完整验收见 [conversation-e2e-completion-results.md](docs/current/conversation-e2e-completion-results.md)。
+
+### 第一批真实读取链路接入（2026-10-09；隔离文件迁移/ThreadFile Read Adapter/性能基线完成，未生产切换）
+
+负责人授权本批只接入隔离读取链路。默认仍使用旧 JsonProjectConversationRepository；不迁移真实用户目录，不切换 authority，不改 Runtime/Provider/Office 执行链。
+
+实际修改：[第一批结果](docs/current/conversation-system-phase5-read-integration-results.md)、`LegacyFileMigrationRunner`、`ThreadFileReadAdapter`、runtime 双 feature flag、隔离测试和新旧 Node 文件基线。真实 primary/backup 文件读取、Migration Ledger 续迁、ThreadFile summary/page/turn、cursor 分页和 runtime 显式开关均已验证。
+
+验证：新增迁移/Adapter/性能测试 17/17；虚拟列表/Markdown 2/2；既有阶段 0～4 定向回归 135/135；UI 合同 14/14；typecheck、ESLint、build 通过。真实 Electron legacy/ThreadFile 读取矩阵已自动运行并写入 `outputs/conversation-phase6/electron-e2e-*.json`；Provider/Agent/Office E2E 和 production Cutover 未完成。
+
 ### 阶段 5 实施：Office Agent 受控迁移、Shadow Read 与 Cutover Readiness（2026-10-08；隔离副本工具/对账/门禁完成，未切换生产）
 
 负责人授权仅执行阶段 5。旧 Conversation 仍是权威，未迁移真实用户数据，未执行生产 authority switch。

@@ -82,6 +82,9 @@ import { featureCandidateId } from '../providers/provider-registry-feature-candi
 import { ConversationController } from './conversation-controller';
 import { toConversationDto } from './conversation-controller';
 import { ConversationThreadReadController } from './conversation-thread-read-controller';
+import { ThreadFileReadAdapter } from './thread-file-read-adapter';
+import { ThreadFileRepository } from '../repositories/thread-file-repository';
+import type { ThreadReadApi } from './thread-file-read-adapter';
 import { verifyRetainedDocumentArtifacts } from './retained-document-artifact-projection';
 import {
   ConversationWorkflowController,
@@ -150,6 +153,7 @@ import {
 
 export interface ChatContextRuntimeDependencies {
   readonly userDataDirectory: string;
+  readonly threadFileReadEnabled?: boolean;
   getSession(): StorageProjectSession | undefined;
   readonly providerRegistry?: JsonProviderRegistryStore;
   readonly providerPackages?: ProviderPackageRegistry;
@@ -173,7 +177,7 @@ export interface ChatContextRuntimeDependencies {
 
 export interface ChatContextRuntime {
   readonly conversations: ConversationControllerPort;
-  readonly threadReads: ConversationThreadReadController;
+  readonly threadReads: ThreadReadApi;
   readonly responses: ConversationResponseController;
   readonly projectContexts: ProjectContextController;
   readonly workflows: ConversationWorkflowController;
@@ -1251,10 +1255,25 @@ export function createChatContextRuntime(
       ));
     }
   };
-  const threadReads = new ConversationThreadReadController(
+  const legacyThreadReads = new ConversationThreadReadController(
     conversations,
     () => dependencies.getSession()?.projectId ?? 'legacy-unbound'
   );
+  const threadFileRepositories = new Map<string, ThreadFileRepository>();
+  const threadReads: ThreadReadApi = dependencies.threadFileReadEnabled
+    ? new ThreadFileReadAdapter({
+      projectId: () => dependencies.getSession()?.projectId,
+      getRepository: () => {
+        const session = dependencies.getSession();
+        if (!session) return undefined;
+        const existing = threadFileRepositories.get(session.rootDirectory);
+        if (existing) return existing;
+        const repository = new ThreadFileRepository(session.rootDirectory);
+        threadFileRepositories.set(session.rootDirectory, repository);
+        return repository;
+      }
+    })
+    : legacyThreadReads;
   const projectContexts = new ProjectContextController({
     getSession: dependencies.getSession,
     onError: dependencies.onError,

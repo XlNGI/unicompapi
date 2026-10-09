@@ -76,6 +76,9 @@ export interface ItemProjectionSourceV1 {
   readonly workId?: WorkId;
 }
 
+/** Exact legacy Message payload retained as an opaque, versioned snapshot. */
+export type LegacyMessageSnapshotV1 = Readonly<Record<string, unknown>>;
+
 export interface ItemV1 {
   readonly schemaVersion: 1;
   readonly itemId: ItemId;
@@ -87,6 +90,7 @@ export interface ItemV1 {
   readonly createdAt: IsoTimestamp;
   readonly updatedAt: IsoTimestamp;
   readonly messageSource?: { readonly messageId: MessageId; readonly messageRevision: number };
+  readonly legacyMessageSnapshot?: LegacyMessageSnapshotV1;
   readonly content?: string;
   readonly bodyRef?: ItemBodyRefV1;
   readonly projectionSource?: ItemProjectionSourceV1;
@@ -178,11 +182,12 @@ export function parseTurnV1(value: unknown): TurnV1 {
 }
 
 export function parseItemV1(value: unknown): ItemV1 {
-  const item = exactRecord(value, ['schemaVersion', 'itemId', 'threadId', 'sequence', 'type', 'status', 'createdAt', 'updatedAt'], ['turnId', 'messageSource', 'content', 'bodyRef', 'projectionSource']);
+  const item = exactRecord(value, ['schemaVersion', 'itemId', 'threadId', 'sequence', 'type', 'status', 'createdAt', 'updatedAt'], ['turnId', 'messageSource', 'legacyMessageSnapshot', 'content', 'bodyRef', 'projectionSource']);
   if (item.schemaVersion !== 1) throw new TypeError('Unsupported Item schema');
   const messageSource = item.messageSource === undefined ? undefined : parseMessageSource(item.messageSource);
   const projectionSource = item.projectionSource === undefined ? undefined : parseProjectionSource(item.projectionSource);
-  return createItemV1({ itemId: toItemId(item.itemId), threadId: toThreadId(stringValue(item.threadId, 'threadId')), ...(item.turnId !== undefined ? { turnId: toTurnId(stringValue(item.turnId, 'turnId')) } : {}), sequence: positiveInteger(item.sequence, 'item sequence'), type: choice(item.type, itemTypes), status: choice(item.status, itemStatuses), createdAt: timestamp(item.createdAt), updatedAt: timestamp(item.updatedAt), ...(messageSource ? { messageSource } : {}), ...(item.content !== undefined ? { content: stringValue(item.content, 'content') } : {}), ...(item.bodyRef !== undefined ? { bodyRef: parseBodyRef(item.bodyRef) } : {}), ...(projectionSource ? { projectionSource } : {}) });
+  const legacyMessageSnapshot = item.legacyMessageSnapshot === undefined ? undefined : record(item.legacyMessageSnapshot, 'legacyMessageSnapshot');
+  return createItemV1({ itemId: toItemId(item.itemId), threadId: toThreadId(stringValue(item.threadId, 'threadId')), ...(item.turnId !== undefined ? { turnId: toTurnId(stringValue(item.turnId, 'turnId')) } : {}), sequence: positiveInteger(item.sequence, 'item sequence'), type: choice(item.type, itemTypes), status: choice(item.status, itemStatuses), createdAt: timestamp(item.createdAt), updatedAt: timestamp(item.updatedAt), ...(messageSource ? { messageSource } : {}), ...(legacyMessageSnapshot ? { legacyMessageSnapshot } : {}), ...(item.content !== undefined ? { content: stringValue(item.content, 'content') } : {}), ...(item.bodyRef !== undefined ? { bodyRef: parseBodyRef(item.bodyRef) } : {}), ...(projectionSource ? { projectionSource } : {}) });
 }
 
 export function parseTurnExecutionLinkV1(value: unknown): TurnExecutionLinkV1 {
@@ -195,6 +200,7 @@ function parseMessageSource(value: unknown): ItemV1['messageSource'] {
   const item = exactRecord(value, ['messageId', 'messageRevision']);
   return { messageId: toMessageId(stringValue(item.messageId, 'messageId')), messageRevision: positiveOrZero(item.messageRevision, 'messageRevision') };
 }
+function record(value: unknown, label: string): Readonly<Record<string, unknown>> { if (typeof value !== 'object' || value === null || Array.isArray(value)) throw new TypeError(`${label} is invalid`); return value as Readonly<Record<string, unknown>>; }
 function parseProjectionSource(value: unknown): ItemProjectionSourceV1 {
   const item = exactRecord(value, ['eventSystem', 'sourceIdentity'], ['responseExecutionId', 'agentRunId', 'toolCallId', 'workId']);
   return { eventSystem: choice(item.eventSystem, ['response_execution', 'agent_runtime', 'production_trace', 'work_repository'] as const), sourceIdentity: nonEmpty(item.sourceIdentity, 'sourceIdentity'), ...(item.responseExecutionId !== undefined ? { responseExecutionId: toConversationResponseExecutionId(stringValue(item.responseExecutionId, 'responseExecutionId')) } : {}), ...(item.agentRunId !== undefined ? { agentRunId: toConversationAgentRunId(stringValue(item.agentRunId, 'agentRunId')) } : {}), ...(item.toolCallId !== undefined ? { toolCallId: toToolCallId(stringValue(item.toolCallId, 'toolCallId')) } : {}), ...(item.workId !== undefined ? { workId: toWorkId(stringValue(item.workId, 'workId')) } : {}) };

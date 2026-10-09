@@ -41,6 +41,7 @@ declare global {
       providers: ProviderApi;
       settings: SettingsApi;
       storage: StorageApi;
+      e2e?: { sampleMainEventLoop: (durationMs?: number) => Promise<{ readonly durationMs: number; readonly maxMs: number; readonly meanMs: number; readonly p95Ms: number }>; recordReactCommit: (value: unknown) => void; getReactMetrics: () => Promise<readonly unknown[]>; getIpcMetrics: () => readonly { readonly method: string; readonly durationMs: number; readonly ok: boolean }[] };
       windowControls: {
         minimize: () => void;
         toggleMaximize: () => void;
