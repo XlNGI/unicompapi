@@ -12,7 +12,6 @@ import { ImageFeatureSubmissionPanel } from './ImageFeatureSubmissionPanel';
 interface ImageQuickWorkspaceProps {
   readonly dirty: boolean;
   readonly draft: GenerationImageDraftDto;
-  readonly onClearUi?: () => void;
   readonly onDraftChange: (draft: GenerationImageDraftDto) => void;
   readonly onDraftPersisted?: (draft: GenerationImageDraftDto) => void;
   readonly onFlushDraft?: () => Promise<boolean>;
@@ -24,7 +23,6 @@ interface ImageQuickWorkspaceProps {
 export function ImageQuickWorkspace({
   dirty,
   draft,
-  onClearUi,
   onDraftChange,
   onDraftPersisted,
   onFlushDraft,
@@ -47,8 +45,6 @@ export function ImageQuickWorkspace({
   }>({ phase: 'idle' });
   const userTookOverRef = useRef(false);
   const lastProgressPhaseRef = useRef<SubmissionProgressPhase>('idle');
-  const currentDraftRef = useRef(draft);
-  currentDraftRef.current = draft;
   const handleProgressChange = useCallback((phase: SubmissionProgressPhase, failureMessage?: string) => {
     if ((phase === 'preparing' && lastProgressPhaseRef.current !== 'preparing') ||
       (phase === 'requesting' && lastProgressPhaseRef.current !== 'preparing' && lastProgressPhaseRef.current !== 'requesting')) {
@@ -218,10 +214,6 @@ export function ImageQuickWorkspace({
               setExpectedTaskId(submission.taskId);
               setExpectedWorkId(submission.status === 'completed' ? submission.workId : undefined);
               setHistoryRefreshKey((key) => key + 1);
-              if (submission.status === 'completed' &&
-                currentDraftRef.current.draftId === draft.draftId &&
-                currentDraftRef.current.prompt.originalInput === draft.prompt.originalInput &&
-                JSON.stringify(currentDraftRef.current.featureSelection) === JSON.stringify(draft.featureSelection)) onClearUi?.();
             }}
             oneShot
           />

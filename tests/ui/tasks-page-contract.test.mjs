@@ -138,3 +138,11 @@ test('task center reuses the original draft parameters within the same project',
   assert.match(appSource, /preferredDraftId=\{openedImageDraftId\}/);
   assert.match(appSource, /preferredDraftId=\{openedVideoDraftId\}/);
 });
+
+test('task center applies a dock target once and then keeps list clicks', () => {
+  assert.match(source, /decideTaskSelection\(/);
+  assert.doesNotMatch(
+    source,
+    /initialTaskId && tasks\.some\(\(task\) => task\.taskId === initialTaskId\)/
+  );
+});

@@ -271,29 +271,6 @@ export function ImageWorkbenchPage({
     }
   }
 
-  async function clearUiAfterGeneration() {
-    if (!imageWorkspaces || !session || busy) return;
-    if (isGenerationImage && !(await autosave.flush())) return;
-    setBusy(true);
-    setMessage('');
-    try {
-      const result = await imageWorkspaces.create(mode.workspaceMode);
-      if (!result.ok) {
-        setMessage(workspaceErrorMessages[result.error.code]);
-        return;
-      }
-      setDrafts((items) => [...items, result.value]);
-      setSelectedDraftId(result.value.draftId);
-      setDirty(false);
-      autosave.reset();
-      setMessage('生成已完成；当前输入已清空，原草稿和结果已保留。');
-    } catch {
-      setMessage('生成后创建新草稿失败，请重试。');
-    } finally {
-      setBusy(false);
-    }
-  }
-
   async function saveDraft() {
     if (!imageWorkspaces || !currentDraft || busy) return;
     setBusy(true);
@@ -487,7 +464,6 @@ export function ImageWorkbenchPage({
           onNavigateToProviders={onNavigateToProviders}
           dirty={dirty}
           draft={currentDraft}
-          onClearUi={() => void clearUiAfterGeneration()}
           onDraftChange={(draft) => replaceCurrentDraft(draft, true)}
           onDraftPersisted={(draft) => replaceCurrentDraft(draft, false)}
           onFlushDraft={() => autosave.flush()}

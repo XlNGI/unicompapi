@@ -134,3 +134,9 @@ test('shared history maps wheel gestures to horizontal overflow without trapping
   assert.match(history, /event\.preventDefault\(\)/);
   assert.match(styles, /\.uc-generation-history__timeline-scroll\s*{[\s\S]*overflow-x: auto;/);
 });
+
+test('history uses the one-hour activity window before calling a task generating', () => {
+  assert.match(history, /historyLiveStatusWindowMs = 60 \* 60 \* 1_000/);
+  assert.match(history, /export function presentHistoryStatusKind/);
+  assert.match(history, /return 'uncertain'/);
+});
