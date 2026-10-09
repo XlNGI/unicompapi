@@ -4,7 +4,7 @@
 
 ## 结论
 
-完整测试套件已全绿：328 个测试文件、3347/3347 个测试通过。真实 Electron 读取、重启恢复、100/1000 Threads、Chromium Trace 和受控 Provider 的普通响应/取消起始边界均已自动执行。真实外部 Provider、真实 Office Provider 驱动链路和真实 Tool Gateway 调用仍属于环境阻塞或未执行项，未使用生产凭据绕过。
+完整测试套件已全绿：328 个测试文件、3347/3347 个测试通过。真实 Electron 读取、重启恢复、100/1000 Threads、Chromium Trace、受控 Provider Tool Calling 和隔离 Office 文件生成均已自动执行。真实外部 Provider 仍受授权阻塞，未使用生产凭据绕过。
 
 ## 本轮修改
 
@@ -52,10 +52,13 @@ ThreadFile/Legacy 3 Threads × 100 Items 重启后，ThreadId、ItemId、Message
 - 普通 Agent 响应。
 - ResponseExecution 身份创建和读取。
 - 取消起始边界。
+- Provider `generate_pptx` ToolCall 经过真实 Runtime/Tool Gateway，Tool Observation 回传后继续模型响应。
+- PPT Work 注册和物理 PPTX 文件生成。
+- 通过真实 `documentGeneration` IPC 生成隔离 Word `.docx` 和 Excel `.xlsx` 文件。
 - 隔离 userData、项目目录和 Provider Registry。
 - 测试命令退出码为 0。
 
-当前替身没有可执行 Office Tool Gateway 目标，因此 Tool Calling、连续工具调用、ToolCallId/WorkId 关联未在该脚本中宣称通过。
+当前脚本验证了单次 Provider ToolCall 和 Work 注册；连续多次 Tool Calling、工具失败/超时后的恢复仍未执行。
 
 ## 真实 Provider E2E
 
@@ -70,14 +73,17 @@ ThreadFile/Legacy 3 Threads × 100 Items 重启后，ThreadId、ItemId、Message
 | 合成 PPT 本地生成、渲染、结构读回 | 已通过 | `verify-ppt-style-compiled.cjs`、`verify-ppt-organization-compiled.cjs` |
 | 隔离 PPT dry-run 注册/读回 | 已通过 | `verify-production-document-read.cjs --dry-run` |
 | PPT add/delete、add-slide、update dry-run | 已通过 | 对应 `verify-production-document-*.cjs --dry-run` |
+| Mock Provider + 真实 Electron/IPC 驱动 PPT 创建 | 已通过 | `pnpm test:electron-agent-mock`，ToolCall → Office 工具 → Observation → Work |
+| Mock Provider + 真实 Electron/IPC 驱动 Word 创建 | 已通过 | 同一隔离脚本，返回 `.docx` 物理文件和 WorkId |
+| Mock Provider + 真实 Electron/IPC 驱动 Excel 创建 | 已通过 | 同一隔离脚本，返回 `.xlsx` 物理文件和 WorkId |
 | 真实 Provider 驱动 PPT 创建/修改 | 环境阻塞 | 无授权 Provider 请求 |
-| 真实 Provider 驱动 Word 创建/修改 | 尚未执行 | 无授权 Provider 请求 |
-| 真实 Provider 驱动 Excel 创建/修改 | 尚未执行 | 无授权 Provider 请求 |
+| 真实 Provider 驱动 Word 创建/修改 | 环境阻塞 | 无授权 Provider 请求 |
+| 真实 Provider 驱动 Excel 创建/修改 | 环境阻塞 | 无授权 Provider 请求 |
 | 真实 Electron 文档进度/历史卡片 UI | 已通过 | `verify-chat-production-progress-electron.cjs --strict-mode`、`verify-generation-history-cards-electron.cjs`；存储边界为合成 harness |
 
 ## Cancel / Resume / Timeout / Crash Recovery
 
-- Cancel：受控 Electron Agent smoke 已通过取消起始边界；完整 Provider 执行中取消未在真实网络 Provider 上执行。
+- Cancel：受控 Electron Agent smoke 已通过取消起始边界；真实 Provider 执行中取消未执行。
 - Resume：Node/集成 Runtime 回归已通过；真实 Electron + Provider Resume 未执行。
 - Timeout：文档生成 Runtime 测试通过；真实 Provider Timeout 未执行。
 - Crash/Restart：只读会话 ThreadFile/Legacy Electron 重启读取和语义签名对账通过；运行中 AgentRun 的真实 Provider 崩溃恢复未执行。
@@ -86,13 +92,13 @@ ThreadFile/Legacy 3 Threads × 100 Items 重启后，ThreadId、ItemId、Message
 
 已对账的读取样本包含 ThreadId、ItemId、MessageId、sequence、role、content 和 revision，未发现重复 Thread 或重复 Item。展示读取和重启恢复没有调用 Provider 或 Office 工具。
 
-真实 ToolCallId、AgentRunId、ResponseExecutionId、WorkId 的完整 Electron Provider/Office 运行对账尚未通过，因为没有执行授权 Provider Tool Calling；不能把只读 fixture 的一致性扩大解释为工具执行一致性。
+受控 Electron ToolCall 已产生稳定 ToolCall 记录、ResponseExecution 和 Work 注册；真实外部 Provider 下的完整 ToolCallId、AgentRunId、ResponseExecutionId、WorkId 对账仍因授权阻塞。
 
 ## 未完成项
 
 - 真实外部 Provider 流式响应、Tool Calling、连续工具调用、取消、恢复和超时。
 - 真实 Provider 驱动的 Word/PPT/Excel 创建、修改、失败恢复和异常退出恢复。
-- 受控 Mock Provider 的可执行 Office Tool Gateway Tool Calling 场景仍需独立 fixture。
+- 受控 Mock Provider 连续多次 Tool Calling、工具失败/超时后的 Office 恢复仍需扩展 fixture。
 - 生产数据迁移、存储权威切换和 Cutover 均未执行。
 
 本报告不把 dry-run、Node/Vitest、合成 IPC 或本地 PPT 渲染结果描述为真实 Provider E2E。
