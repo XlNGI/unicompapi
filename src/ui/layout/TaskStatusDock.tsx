@@ -194,7 +194,7 @@ export function TaskStatusDock({ fallbackStatus, onNavigate }: TaskStatusDockPro
             </Whisper>
             </div>
           </header>
-          <div className="uc-task-status-panel__list">
+          <div className="uc-task-status-panel__list uc-scrollbar">
             {panelMessage ? <p className="uc-task-status-panel__message" role="status">{panelMessage}</p> : null}
             {!loading && !error && summary.visibleTasks.map((task) => (
               <TaskStatusRow key={task.taskId} onNavigate={navigateFromDock} task={task} />

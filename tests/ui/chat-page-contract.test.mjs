@@ -204,7 +204,9 @@ test('chat workspace uses a quiet project list and search dialog', () => {
   assert.match(source, /retainProjectOrder\(current, projectsResult\.value\)/);
   assert.match(source, /aria-expanded=\{expanded\}/);
   assert.doesNotMatch(source, /isCurrent && projectChatsExpanded/);
-  assert.match(styles, /\.uc-chat-page__workspace-scroll\s*\{[\s\S]*scrollbar-width: thin/);
+  assert.match(source, /className="uc-chat-page__workspace-scroll uc-scrollbar"/);
+  assert.doesNotMatch(styles, /\.uc-chat-page__workspace-scroll::-webkit-scrollbar/);
+  assert.doesNotMatch(styles, /\.uc-chat-page__history-list::-webkit-scrollbar/);
   assert.match(styles, /\.uc-chat-page__project-item\s*\{[\s\S]*min-height: 28px/);
   assert.doesNotMatch(styles, /\.uc-chat-page__workspace-conversations\s*\{[^}]*max-height:/);
   assert.match(layoutSource, /activeItemId === 'chat' \|\| activeItemId === 'projects' \? ' workspace--chat'/);

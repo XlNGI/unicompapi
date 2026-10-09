@@ -194,7 +194,7 @@ export function TitleBar({
           {menuOpen ? (
             <div
               aria-label="所属项目"
-              className="title-bar__project-menu"
+              className="title-bar__project-menu uc-scrollbar"
               id="title-bar-project-menu"
               onKeyDown={handleMenuKeyDown}
               ref={menuRef}

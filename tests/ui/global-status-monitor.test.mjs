@@ -74,11 +74,7 @@ test('sidebar keeps the status cards in a fixed dock while only navigation scrol
   assert.match(styles, /\.sidebar__status-dock::before/);
 });
 
-test('sidebar navigation uses a compact theme-aware scrollbar', () => {
-  assert.match(styles, /\.nav-list::\-webkit-scrollbar \{/);
-  assert.match(styles, /\.nav-list::\-webkit-scrollbar-thumb \{/);
-  assert.match(styles, /\.nav-list::\-webkit-scrollbar-thumb:hover \{/);
-  assert.match(styles, /\.nav-list::\-webkit-scrollbar-button \{/);
-  assert.match(styles, /scrollbar-width: thin;/);
-  assert.match(styles, /scrollbar-color:/);
+test('sidebar navigation reuses the shared thin scrollbar', () => {
+  assert.match(sidebar, /className="nav-list uc-scrollbar"/);
+  assert.doesNotMatch(styles, /\.nav-list::-webkit-scrollbar/);
 });

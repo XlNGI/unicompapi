@@ -3959,7 +3959,7 @@ export function ChatPage({
           <LuSearch aria-hidden="true" />
           搜索项目或对话
         </button>
-        <div className="uc-chat-page__workspace-scroll">
+        <div className="uc-chat-page__workspace-scroll uc-scrollbar">
           <section className="uc-chat-page__project-list" aria-labelledby="chat-project-list-title">
             <h3 id="chat-project-list-title">项目</h3>
             {loading && projects.length === 0 ? (
@@ -3994,7 +3994,7 @@ export function ChatPage({
                       {expanded ? <LuChevronDown aria-hidden="true" /> : <LuChevronRight aria-hidden="true" />}
                     </button>
                     {expanded ? (
-                      <div className="uc-chat-page__workspace-conversations">
+                      <div className="uc-chat-page__workspace-conversations uc-scrollbar">
                         {projectChats.length === 0 ? (
                           <p className="uc-chat-page__workspace-hint">
                             {conversationsMatchProject || project.projectId in chatsByProject
@@ -4145,7 +4145,7 @@ export function ChatPage({
         </div>
 
         <div
-          className="uc-chat-page__messages"
+          className="uc-chat-page__messages uc-scrollbar"
           onScroll={handleMessagesScroll}
           ref={messagesRef}
         >
@@ -4682,7 +4682,7 @@ export function ChatPage({
           ) : conversations.length === 0 ? (
             <EmptyState description="发送第一条消息后，对话会自动保存在这里。" icon="对" title="暂无历史对话" />
           ) : (
-            <div className="uc-chat-page__history-list">
+            <div className="uc-chat-page__history-list uc-scrollbar">
               {visibleConversations.map((conversation) => (
                     <div
                       aria-current={conversation.conversationId === selectedId ? 'true' : undefined}
@@ -4763,7 +4763,7 @@ export function ChatPage({
           <div
             aria-label="搜索聊天"
             aria-modal="true"
-            className="uc-chat-search__dialog"
+            className="uc-chat-search__dialog uc-scrollbar"
             onMouseDown={(event) => event.stopPropagation()}
             role="dialog"
           >
@@ -4916,7 +4916,7 @@ export function ChatPage({
           <span className="uc-chat-page__drawer-subtitle">{session?.projectName ?? '尚未打开项目'}</span>
         </Drawer.Header>
         <Drawer.Body>
-          <div className="uc-chat-page__context">
+          <div className="uc-chat-page__context uc-scrollbar">
             <Card className="uc-chat-page__context-target">
               <small>目标项目</small>
               <strong>{session?.projectName ?? '尚未打开项目'}</strong>
@@ -5038,7 +5038,7 @@ export function ChatPage({
                         >
                           <span className="uc-chat-page__selection-copy">
                             <strong>{item.role === 'user' ? '用户' : '助手'}</strong>
-                            <span className="uc-chat-page__selection-content">{item.content}</span>
+                            <span className="uc-chat-page__selection-content uc-scrollbar">{item.content}</span>
                           </span>
                         </Checkbox>
                       ))}
@@ -5046,7 +5046,7 @@ export function ChatPage({
                   )}
                   {contextDraft ? (
                     <>
-                      <Card className="uc-chat-page__context-preview">
+                      <Card className="uc-chat-page__context-preview uc-scrollbar">
                         <small>草稿预览</small>
                         <p>{contextDraft.contentPreview || '尚未选择内容'}</p>
                       </Card>

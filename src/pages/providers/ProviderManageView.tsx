@@ -262,7 +262,7 @@ export function ProviderManageView({
               </div>
             </div>
 
-            <nav className="uc-provider-page__tabs" aria-label="连接详情区域">
+            <nav className="uc-provider-page__tabs uc-scrollbar" aria-label="连接详情区域">
               {(Object.keys(tabLabels) as DetailTab[]).map((tab) => (
                 <button aria-current={activeTab === tab ? 'page' : undefined} key={tab} onClick={() => onSelectTab(tab)} type="button">{tabLabels[tab]}</button>
               ))}

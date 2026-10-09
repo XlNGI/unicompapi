@@ -281,7 +281,7 @@ export function WorkspaceContextSelector({
               title="暂无候选"
             />
           ) : (
-            <div className="uc-context-selector__list">
+            <div className="uc-context-selector__list uc-scrollbar">
               {openKind === 'project_context'
                 ? contexts.map((candidate) => (
                     <Checkbox

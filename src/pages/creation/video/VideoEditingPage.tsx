@@ -2463,7 +2463,7 @@ export function VideoEditingPage({
             description="素材只通过受控接口登记，界面不会读取本地绝对路径。"
             title="素材与片段"
           />
-          <div className="uc-video-editor__tabs" role="tablist">
+          <div className="uc-video-editor__tabs uc-scrollbar" role="tablist">
             <button
               aria-selected={mediaTab === 'timeline'}
               onClick={() => setMediaTab('timeline')}
@@ -2988,7 +2988,7 @@ export function VideoEditingPage({
             </div>
             <div
               aria-label="时间线，按住 Ctrl 滚动鼠标滚轮可缩放"
-              className="uc-video-editor__timeline-viewport"
+              className="uc-video-editor__timeline-viewport uc-scrollbar"
               onScroll={(event) => {
                 timelinePendingScrollLeftRef.current =
                   event.currentTarget.scrollLeft;
@@ -3124,10 +3124,10 @@ export function VideoEditingPage({
             </button>
           </div>
           <div
-            className="uc-video-editor__inspector-body"
+            className="uc-video-editor__inspector-body uc-scrollbar"
             id="uc-video-editor-inspector-body"
           >
-            <div className="uc-video-editor__tabs" role="tablist">
+            <div className="uc-video-editor__tabs uc-scrollbar" role="tablist">
             <button
               aria-selected={inspectorTab === 'clip'}
               onClick={() => setInspectorTab('clip')}
@@ -3413,7 +3413,7 @@ function MediaList({
     );
   }
   return (
-    <ul className="uc-video-editor__media-list">
+    <ul className="uc-video-editor__media-list uc-scrollbar">
       {draft.videoTrack.map((clip, index) => {
         const status = statuses[clip.clipId];
         const display = sourceStatusDisplay(status);
@@ -3686,7 +3686,7 @@ function VideoTimelineTrack({
     : [];
   return segments.length ? (
         <div
-          className="uc-video-editor__lane uc-video-editor__lane--video"
+          className="uc-video-editor__lane uc-video-editor__lane--video uc-scrollbar"
           onClick={(event) => {
             if (!laneRef.current) return;
             const target = event.target as HTMLElement;
@@ -3911,7 +3911,7 @@ function VideoTimelineTrack({
           ) : null}
         </div>
       ) : (
-        <div className="uc-video-editor__lane uc-video-editor__lane--video">
+        <div className="uc-video-editor__lane uc-video-editor__lane--video uc-scrollbar">
           <small>暂无内容</small>
         </div>
   );
@@ -4068,7 +4068,7 @@ function TimelineTrack({
   readonly totalDurationUs: number;
 }) {
   return (
-      <div className="uc-video-editor__lane uc-video-editor__lane--slim">
+      <div className="uc-video-editor__lane uc-video-editor__lane--slim uc-scrollbar">
         {items.length ? (
           items.map((item) =>
             onSelect ? (
