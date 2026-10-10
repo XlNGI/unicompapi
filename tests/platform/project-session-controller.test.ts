@@ -52,6 +52,80 @@ async function createValidProjectRoot() {
 }
 
 describe('ProjectSessionController', () => {
+  it('finishes history maintenance before exposing the opened project to submissions', async () => {
+    const { root } = await createValidProjectRoot();
+    const registry = new StorageProjectSessionRegistry();
+    const order: string[] = [];
+    const controller = new ProjectSessionController({
+      registry,
+      chooseProjectDirectory: async () => root,
+      beforeSessionChange: async () => { order.push('drained'); },
+      prepareProjectStorage: async (directory) => {
+        expect(directory).toBe(root);
+        expect(registry.get()).toBeUndefined();
+        order.push('prepared');
+      },
+      afterSessionChange: async () => { order.push('opened'); }
+    });
+    expect((await controller.openProject()).ok).toBe(true);
+    expect(order).toEqual(['prepared', 'drained', 'opened']);
+  });
+
+  it('keeps legacy projects accessible when optional history maintenance fails', async () => {
+    const { root } = await createValidProjectRoot();
+    const registry = new StorageProjectSessionRegistry();
+    const failures: unknown[] = [];
+    const failure = new Error('disk full');
+    const controller = new ProjectSessionController({
+      registry,
+      chooseProjectDirectory: async () => root,
+      prepareProjectStorage: async () => { throw failure; },
+      onError: (error) => { failures.push(error); }
+    });
+    expect((await controller.openProject()).ok).toBe(true);
+    expect(registry.get()?.rootDirectory).toBe(root);
+    expect(failures).toEqual([failure]);
+  });
+
+  it('drains operations started on the old project during maintenance and serializes a later close', async () => {
+    const { root, projectId } = await createValidProjectRoot();
+    const registry = new StorageProjectSessionRegistry();
+    const oldSession = { projectId: toProjectId('old-project'), projectName: 'Old project', rootDirectory: await createRoot() };
+    registry.set(oldSession);
+    const order: string[] = [];
+    let finishOldOperation!: () => void;
+    let markDraining!: () => void;
+    let oldOperation: Promise<void> | undefined;
+    const draining = new Promise<void>((resolve) => { markDraining = resolve; });
+    const controller = new ProjectSessionController({
+      registry,
+      chooseProjectDirectory: async () => root,
+      prepareProjectStorage: async () => {
+        expect(registry.get()).toBe(oldSession);
+        oldOperation = new Promise<void>((resolve) => { finishOldOperation = resolve; });
+        order.push('old-operation-started');
+      },
+      beforeSessionChange: async () => {
+        markDraining();
+        await oldOperation;
+        order.push('drained');
+      },
+      afterSessionChange: async () => {
+        expect(registry.get()?.projectId).toBe(projectId);
+        order.push('opened');
+      }
+    });
+    const opening = controller.openProject();
+    const closing = controller.closeProject();
+    await draining;
+    expect(registry.get()).toBe(oldSession);
+    expect(order).toEqual(['old-operation-started']);
+    finishOldOperation();
+    expect((await opening).ok).toBe(true);
+    await closing;
+    expect(order).toEqual(['old-operation-started', 'drained', 'opened', 'drained']);
+    expect(registry.get()).toBeUndefined();
+  });
   it('keeps the session empty when native directory selection is cancelled', async () => {
     const registry = new StorageProjectSessionRegistry();
     const controller = new ProjectSessionController({
