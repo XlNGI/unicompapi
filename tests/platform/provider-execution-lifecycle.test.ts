@@ -131,15 +131,8 @@ describe('provider execution lifecycle', () => {
       automaticRetryCount: 0,
       outcome: {
         kind: 'completed_sync',
-        results: [{ kind: 'stored_base64', mimeType: 'image/png' }]
+        results: [{ kind: 'base64', mimeType: 'image/png' }]
       }
-    });
-    const restored = await restarted.getByExecution(submitting.id);
-    const result = restored?.outcome.kind === 'completed_sync' ? restored.outcome.results[0] : undefined;
-    expect(result?.kind).toBe('stored_base64');
-    if (result?.kind !== 'stored_base64') throw new Error('Missing stored result reference');
-    await expect(restarted.resolveResult(result)).resolves.toEqual({
-      kind: 'base64', value: 'c3ludGhldGljLWltYWdl', mimeType: 'image/png'
     });
   });
 

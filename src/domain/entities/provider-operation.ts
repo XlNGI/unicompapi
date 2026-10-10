@@ -100,13 +100,6 @@ function validateProviderSubmitOutcome(outcome: ProviderSubmitOutcome): void {
 function cloneImmediateResult(
   result: ProviderImmediateResultReference
 ): ProviderImmediateResultReference {
-  if (result.kind === 'stored_base64') {
-    if (typeof result.value !== 'string' || result.value.length !== 64 || !/^[a-f0-9]{64}$/.test(result.value)) {
-      throw new TypeError('stored provider result requires a SHA-256 hex digest');
-    }
-    requireNonBlank(result.mimeType, 'provider result MIME type');
-    return { kind: result.kind, value: result.value, mimeType: result.mimeType };
-  }
   const value = requireNonBlank(result.value, 'provider result reference');
   if (result.kind === 'base64') {
     return {

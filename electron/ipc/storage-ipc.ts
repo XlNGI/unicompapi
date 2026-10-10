@@ -2,7 +2,6 @@ import { app, BrowserWindow, dialog, ipcMain, shell } from 'electron';
 import { appendFile, mkdir, stat } from 'node:fs/promises';
 import { watch, type FSWatcher } from 'node:fs';
 import path from 'node:path';
-import { prepareProviderResultHistory } from '../../src/platform/storage/provider-result-history-maintenance';
 import {
   StorageIpcController,
   JsonProjectCatalogStore,
@@ -471,8 +470,6 @@ export function registerStorageIpcHandlers(options: {
   });
   const projectController = new ProjectSessionController({
     registry: sessionRegistry,
-    prepareProjectStorage: prepareProviderResultHistory,
-    onError: () => console.error('Project result history maintenance failed; original records remain readable'),
     chooseProjectDirectory: () => choosePath(['openDirectory']),
     beforeSessionChange: async () => {
       await Promise.all([

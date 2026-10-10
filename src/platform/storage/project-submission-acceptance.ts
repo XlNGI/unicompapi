@@ -24,7 +24,6 @@ import {
   type JsonValue
 } from './json-document';
 import type { ProjectMetadataUnitOfWork } from './project-metadata-unit-of-work';
-import { ProviderResultPayloadStore } from './provider-result-payload-store';
 
 const acceptanceMetadataKey = 'provider.submission.acceptances.v1';
 
@@ -58,45 +57,13 @@ export class ProjectSubmissionAcceptanceError extends Error {
 }
 
 export class ProjectSubmissionAcceptanceStore {
-  private readonly payloads: ProviderResultPayloadStore;
-
-  constructor(private readonly metadata: ProjectMetadataUnitOfWork) {
-    this.payloads = new ProviderResultPayloadStore(metadata.storage);
-  }
+  constructor(private readonly metadata: ProjectMetadataUnitOfWork) {}
 
   async list(): Promise<readonly ProjectSubmissionAcceptanceV1[]> {
     const loaded = await this.metadata.load();
     return parseAcceptanceList(
       loaded.document.entries.find((entry) => entry.key === acceptanceMetadataKey)?.value
     );
-  }
-
-  async compactResultHistory(): Promise<void> {
-    for (let attempt = 0; attempt < 5; attempt += 1) {
-      const loaded = await this.metadata.load();
-      if (loaded.source !== 'primary') return;
-      const current = parseAcceptanceList(
-        loaded.document.entries.find((entry) => entry.key === acceptanceMetadataKey)?.value
-      );
-      const next: ProjectSubmissionAcceptanceV1[] = [];
-      let changed = false;
-      for (const acceptance of current) {
-        const compact = await this.externalize(acceptance);
-        changed ||= compact !== acceptance;
-        next.push(compact);
-      }
-      if (!changed) return;
-      try {
-        await this.metadata.transact(loaded.document.revision, (draft) => {
-          draft.set(acceptanceMetadataKey, toJsonValue(next));
-        });
-        return;
-      } catch (error) {
-        if (error instanceof JsonRevisionConflictError && attempt < 4) continue;
-        throw error;
-      }
-    }
-    throw new ProjectSubmissionAcceptanceError('Submission history compaction did not finish');
   }
 
   async get(intentId: SubmissionIntentId): Promise<ProjectSubmissionAcceptanceV1 | undefined> {
@@ -153,7 +120,7 @@ export class ProjectSubmissionAcceptanceStore {
   }
 
   async accept(acceptance: ProjectSubmissionAcceptanceV1): Promise<void> {
-    const validated = parseProjectSubmissionAcceptance(await this.externalize(acceptance));
+    const validated = parseProjectSubmissionAcceptance(acceptance);
     await this.transact((current) => {
       const sameIntent = current.find((item) => item.intent.id === validated.intent.id);
       const sameIdempotency = current.find(
@@ -182,9 +149,6 @@ export class ProjectSubmissionAcceptanceStore {
     readonly providerOperationRecord?: ProviderOperationRecord;
   }): Promise<ProjectSubmissionAcceptanceV1> {
     const intent = parseSubmissionIntent(input.intent);
-    const providerOperationRecord = input.providerOperationRecord
-      ? await this.payloads.externalize(input.providerOperationRecord)
-      : undefined;
     let result: ProjectSubmissionAcceptanceV1 | undefined;
     await this.transact((current) => {
       const index = current.findIndex((item) => item.intent.id === intent.id);
@@ -237,8 +201,8 @@ export class ProjectSubmissionAcceptanceStore {
         intent,
         invocationAttempt,
         invocationEvents,
-        ...(providerOperationRecord
-          ? { providerOperationRecord }
+        ...(input.providerOperationRecord
+          ? { providerOperationRecord: input.providerOperationRecord }
           : {})
       });
       const next = [...current];
@@ -247,13 +211,6 @@ export class ProjectSubmissionAcceptanceStore {
       return next;
     });
     return result!;
-  }
-
-  private async externalize(acceptance: ProjectSubmissionAcceptanceV1): Promise<ProjectSubmissionAcceptanceV1> {
-    const record = acceptance.providerOperationRecord;
-    if (!record) return acceptance;
-    const compact = await this.payloads.externalize(record);
-    return compact === record ? acceptance : { ...acceptance, providerOperationRecord: compact };
   }
 
   private async transact(

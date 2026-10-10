@@ -1,5 +1,5 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
-import type { DragEvent, MutableRefObject } from 'react';
+import type { DragEvent, MutableRefObject, RefObject } from 'react';
 import {
   LuCircleAlert,
   LuCircleX,
@@ -138,37 +138,10 @@ export function presentHistoryStatusKind(
   return kind;
 }
 
-export function classifyHistoryTaskStatus(
-  state: string,
-  occurredAt: string,
-  nowMs: number
-): HistoryStatus | undefined {
-  let kind: HistoryStatus | undefined;
-  if (pendingExecutionStates.has(state)) kind = 'pending';
-  else if (awaitingReceiptExecutionStates.has(state)) kind = 'awaiting_receipt';
-  else if (receivingExecutionStates.has(state)) kind = 'receiving';
-  else if (state === 'failed' || state === 'expired') kind = 'failed';
-  else if (state === 'completed' || state === 'cancelled') kind = state;
-  else if (uncertainExecutionStates.has(state)) kind = 'uncertain';
-  if (!kind) return undefined;
-  return presentHistoryStatusKind(kind, occurredAt, nowMs);
-}
-
 const liveUncertainPhases = new Set<SubmissionProgressPhase>([
   'uncertain',
   'submission_uncertain'
 ]);
-
-export function compensateHistoryScroll(
-  scrollLeft: number,
-  cardX: number,
-  scrollLeftAtSnapshot: number,
-  cardXAtSnapshot: number
-): number {
-  const layoutShift = (scrollLeft + cardX) - (scrollLeftAtSnapshot + cardXAtSnapshot);
-  if (Math.abs(layoutShift) < 0.5) return scrollLeft;
-  return scrollLeft + layoutShift;
-}
 
 export function GenerationHistory({
   draftId,
@@ -200,11 +173,7 @@ export function GenerationHistory({
   const timelineRef = useRef<HTMLDivElement>(null);
   const scrollLeftRef = useRef(0);
   const followLatestScrollRef = useRef(true);
-  const scrollAnchorRef = useRef<{ id: string; x: number; scrollLeft: number }>();
-  const cardSignatureRef = useRef('');
-  const scrollScopeRef = useRef('');
-  const timelineScrollTimerRef = useRef<number>();
-  const [timelineScrollSettled, setTimelineScrollSettled] = useState(true);
+  const scrollAnchorRef = useRef<{ id: string; x: number }>();
   const viewScope = `${projectId}:${workspaceMode}:${mediaKind}`;
 
   useEffect(() => {
@@ -302,13 +271,7 @@ export function GenerationHistory({
         const timeline = timelineRef.current;
         const visible = timeline && Array.from(timeline.querySelectorAll<HTMLElement>('[data-task-id]'))
           .find(element => element.getBoundingClientRect().right > timeline.getBoundingClientRect().left);
-        if (timeline && visible) {
-          scrollAnchorRef.current = {
-            id: visible.dataset.taskId!,
-            x: visible.getBoundingClientRect().x,
-            scrollLeft: timeline.scrollLeft
-          };
-        }
+        if (visible) scrollAnchorRef.current = { id: visible.dataset.taskId!, x: visible.getBoundingClientRect().x };
         setWorks(history.works);
         setTasks(history.tasks);
         selectedWorkIdRef.current = selection.selectedWorkId;
@@ -364,36 +327,13 @@ export function GenerationHistory({
   const cards = useMemo(() => groupHistoryNodes(nodes, tasks), [nodes, tasks]);
   useLayoutEffect(() => {
     const timeline = timelineRef.current;
-    const scopeChanged = scrollScopeRef.current !== viewScope;
-    if (scopeChanged) {
-      scrollScopeRef.current = viewScope;
-      cardSignatureRef.current = '';
-      scrollAnchorRef.current = undefined;
-      if (timeline && historyViews.has(viewScope)) {
-        timeline.scrollLeft = historyViews.get(viewScope)!.scroll;
-        scrollLeftRef.current = timeline.scrollLeft;
-      }
-    }
     if (!timeline || !cards.length) return;
-    const signature = cards.map((card) =>
-      `${card.id}:${card.status?.kind ?? 'work'}:${card.works.map((work) => work.workId).join(',')}`
-    ).join('|');
-    const signatureChanged = signature !== cardSignatureRef.current;
-    cardSignatureRef.current = signature;
     const anchor = scrollAnchorRef.current;
+    const element = anchor && Array.from(timeline.querySelectorAll<HTMLElement>('[data-task-id]'))
+      .find(item => item.dataset.taskId === anchor.id);
+    if (element && anchor) timeline.scrollLeft += element.getBoundingClientRect().x - anchor.x;
+    else if (historyViews.has(viewScope)) timeline.scrollLeft = historyViews.get(viewScope)!.scroll;
     scrollAnchorRef.current = undefined;
-    if (!signatureChanged || scopeChanged || !anchor) return;
-    const element = Array.from(timeline.querySelectorAll<HTMLElement>('[data-task-id]'))
-      .find((item) => item.dataset.taskId === anchor.id);
-    if (!element) return;
-    const nextScrollLeft = compensateHistoryScroll(
-      timeline.scrollLeft,
-      element.getBoundingClientRect().x,
-      anchor.scrollLeft,
-      anchor.x
-    );
-    if (nextScrollLeft === timeline.scrollLeft) return;
-    timeline.scrollLeft = nextScrollLeft;
   }, [cards, viewScope]);
   const historySummaryText = formatHistorySummary(summarizeHistoryNodes(
     cards.map((card) => ({ kind: card.status?.kind ?? 'work' }))
@@ -408,20 +348,6 @@ export function GenerationHistory({
   useEffect(() => {
     const timeline = timelineRef.current;
     if (!timeline) return;
-    let pendingDelta = 0;
-    let frame = 0;
-    const flushTimelineWheel = () => {
-      frame = 0;
-      const delta = pendingDelta;
-      pendingDelta = 0;
-      const maxScrollLeft = timeline.scrollWidth - timeline.clientWidth;
-      const nextScrollLeft = Math.min(
-        maxScrollLeft,
-        Math.max(0, timeline.scrollLeft + delta)
-      );
-      if (nextScrollLeft === timeline.scrollLeft) return;
-      timeline.scrollLeft = nextScrollLeft;
-    };
     const handleTimelineWheel = (event: WheelEvent) => {
       followLatestScrollRef.current = false;
       if (timeline.scrollWidth <= timeline.clientWidth) return;
@@ -439,33 +365,16 @@ export function GenerationHistory({
       const maxScrollLeft = timeline.scrollWidth - timeline.clientWidth;
       const nextScrollLeft = Math.min(
         maxScrollLeft,
-        Math.max(0, timeline.scrollLeft + pendingDelta + delta)
+        Math.max(0, timeline.scrollLeft + delta)
       );
-      if (nextScrollLeft === timeline.scrollLeft) {
-        pendingDelta = 0;
-        if (frame !== 0) {
-          window.cancelAnimationFrame(frame);
-          frame = 0;
-        }
-        return;
-      }
+      if (nextScrollLeft === timeline.scrollLeft) return;
 
       event.preventDefault();
-      pendingDelta += delta;
-      if (frame === 0) frame = window.requestAnimationFrame(flushTimelineWheel);
+      timeline.scrollLeft = nextScrollLeft;
     };
     // React's delegated wheel listener is passive and cannot cancel page scroll.
     timeline.addEventListener('wheel', handleTimelineWheel, { passive: false });
-    return () => {
-      timeline.removeEventListener('wheel', handleTimelineWheel);
-      if (frame !== 0) window.cancelAnimationFrame(frame);
-    };
-  }, []);
-
-  useEffect(() => () => {
-    if (timelineScrollTimerRef.current !== undefined) {
-      window.clearTimeout(timelineScrollTimerRef.current);
-    }
+    return () => timeline.removeEventListener('wheel', handleTimelineWheel);
   }, []);
 
   const selectedStatusNode = selectedStatusId
@@ -656,23 +565,12 @@ export function GenerationHistory({
           ref={timelineRef}
           onPointerDown={() => { followLatestScrollRef.current = false; }}
           onKeyDown={() => { followLatestScrollRef.current = false; }}
-          onScroll={(event) => {
-            scrollLeftRef.current = event.currentTarget.scrollLeft;
-            if (timelineScrollTimerRef.current !== undefined) {
-              window.clearTimeout(timelineScrollTimerRef.current);
-            } else {
-              setTimelineScrollSettled(false);
-            }
-            timelineScrollTimerRef.current = window.setTimeout(() => {
-              timelineScrollTimerRef.current = undefined;
-              setTimelineScrollSettled(true);
-            }, 150);
-          }}
+          onScroll={(event) => { scrollLeftRef.current = event.currentTarget.scrollLeft; }}
         >
           {nodes.length > 0 ? (
             <ol className="uc-generation-history__nodes">
               {cards.map((card) => (
-                <HistoryTaskCard key={card.id} card={card} scrollSettled={timelineScrollSettled}
+                <HistoryTaskCard key={card.id} card={card}
                   selectedWorkId={selectedWorkId} selectedStatusId={selectedStatusId}
                   onWorkSelection={handleWorkSelection} onStatusSelection={handleStatusSelection} />
               ))}
@@ -893,17 +791,40 @@ function sortHistoryWorks(works: readonly HistoryWork[]): readonly HistoryWork[]
 function buildHistoryStatusNodes(
   tasks: readonly HistoryTask[]
 ): readonly HistoryStatusNode[] {
-  const nowMs = Date.now();
   const nodes: HistoryStatusNode[] = [];
   for (const task of tasks) {
     const state = task.latestExecutionState;
-    if (!state) continue;
     const occurredAt = task.latestExecutionUpdatedAt ?? task.createdAt;
-    const kind = classifyHistoryTaskStatus(state, occurredAt, nowMs);
-    if (!kind) continue;
-    nodes.push({ id: `task-${task.taskId}`, taskId: task.taskId, kind, occurredAt });
+    if (!state) continue;
+    if (pendingExecutionStates.has(state)) {
+      nodes.push({ id: `task-${task.taskId}`, taskId: task.taskId, kind: 'pending', occurredAt });
+    } else if (awaitingReceiptExecutionStates.has(state)) {
+      nodes.push({
+        id: `task-${task.taskId}`,
+        taskId: task.taskId,
+        kind: 'awaiting_receipt',
+        occurredAt
+      });
+    } else if (receivingExecutionStates.has(state)) {
+      nodes.push({
+        id: `task-${task.taskId}`,
+        taskId: task.taskId,
+        kind: 'receiving',
+        occurredAt
+      });
+    } else if (state === 'failed' || state === 'expired') {
+      nodes.push({ id: `task-${task.taskId}`, taskId: task.taskId, kind: 'failed', occurredAt });
+    } else if (state === 'completed' || state === 'cancelled') {
+      nodes.push({ id: `task-${task.taskId}`, taskId: task.taskId, kind: state, occurredAt });
+    } else if (uncertainExecutionStates.has(state)) {
+      nodes.push({ id: `task-${task.taskId}`, taskId: task.taskId, kind: 'uncertain', occurredAt });
+    }
   }
-  return nodes;
+  const nowMs = Date.now();
+  return nodes.map((node) => ({
+    ...node,
+    kind: presentHistoryStatusKind(node.kind, node.occurredAt, nowMs)
+  }));
 }
 
 function buildHistoryNodes(
@@ -984,9 +905,8 @@ const historyStatusLabels: Record<HistoryStatus, string> = {
   failed: '失败', uncertain: '待确认', completed: '已完成', cancelled: '已取消'
 };
 
-function HistoryTaskCard({ card, scrollSettled, selectedWorkId, selectedStatusId, onWorkSelection, onStatusSelection }: {
+function HistoryTaskCard({ card, selectedWorkId, selectedStatusId, onWorkSelection, onStatusSelection }: {
   readonly card: HistoryTaskCardData;
-  readonly scrollSettled: boolean;
   readonly selectedWorkId?: string;
   readonly selectedStatusId?: string;
   readonly onWorkSelection: (workId: string) => void;
@@ -1015,7 +935,7 @@ function HistoryTaskCard({ card, scrollSettled, selectedWorkId, selectedStatusId
           <button type="button" className="uc-generation-history__work"
             aria-label={`查看作品 ${work.name}`} aria-pressed={selectedWorkId === work.workId}
             onClick={() => selectWork(work)}>
-            <HistoryMediaThumbnail key={work.workId} scrollSettled={scrollSettled} work={work} selected={selectedWorkId === work.workId} />
+            <HistoryMediaThumbnail key={work.workId} work={work} selected={selectedWorkId === work.workId} />
           </button>
         ) : status ? (
           <button type="button" className="uc-generation-history__status-button"
@@ -1062,19 +982,16 @@ function assignImageWorkDragData(
 }
 
 function HistoryMediaThumbnail({
-  scrollSettled,
   selected,
   work
 }: {
-  readonly scrollSettled: boolean;
   readonly selected: boolean;
   readonly work: HistoryWork;
 }) {
   const storage = window.unicomp?.storage;
-  const elementRef = useRef<HTMLDivElement>(null);
+  const elementRef = useRef<HTMLImageElement | HTMLVideoElement>(null);
   const [visible, setVisible] = useState(selected);
   const [localUrl, setLocalUrl] = useState<string>();
-  const [videoSourceReady, setVideoSourceReady] = useState(false);
 
   useEffect(() => {
     if (selected) setVisible(true);
@@ -1087,13 +1004,12 @@ function HistoryMediaThumbnail({
       setVisible(true);
       return;
     }
-    const root = element.closest('.uc-generation-history__timeline-scroll');
     const observer = new IntersectionObserver((entries) => {
       if (entries.some((entry) => entry.isIntersecting)) {
         setVisible(true);
         observer.disconnect();
       }
-    }, { root: root instanceof HTMLElement ? root : null, rootMargin: '120px' });
+    }, { rootMargin: '120px' });
     observer.observe(element);
     return () => observer.disconnect();
   }, [visible]);
@@ -1111,35 +1027,28 @@ function HistoryMediaThumbnail({
     };
   }, [storage, visible, work.mediaKind, work.projectId, work.workId]);
 
-  useEffect(() => {
-    if (visible && scrollSettled) setVideoSourceReady(true);
-  }, [scrollSettled, visible]);
-
-  return (
-    <div className="uc-generation-history__thumbnail" ref={elementRef}>
-      {work.mediaKind === 'image' ? (
-        localUrl ? (
-          <img
-            alt=""
-            decoding="async"
-            draggable
-            onDragStart={(event) => assignImageWorkDragData(event, work.workId)}
-            src={localUrl}
-          />
-        ) : null
-      ) : (
-        <video
-          aria-label={`${work.name} 视频缩略图`}
-          key={work.workId}
-          muted
-          playsInline
-          poster=""
-          preload="metadata"
-          src={videoSourceReady ? localUrl : undefined}
-          style={{ backgroundColor: 'transparent' }}
-        />
-      )}
-    </div>
+  return work.mediaKind === 'image' ? (
+    <img
+      alt={`${work.name} 缩略图`}
+      decoding="async"
+      draggable
+      loading="lazy"
+      onDragStart={(event) => assignImageWorkDragData(event, work.workId)}
+      ref={elementRef as RefObject<HTMLImageElement>}
+      src={localUrl}
+    />
+  ) : (
+    <video
+      aria-label={`${work.name} 视频缩略图`}
+      key={work.workId}
+      muted
+      playsInline
+      poster=""
+      preload="metadata"
+      ref={elementRef as RefObject<HTMLVideoElement>}
+      src={visible ? localUrl : undefined}
+      style={{ backgroundColor: 'transparent' }}
+    />
   );
 }
 

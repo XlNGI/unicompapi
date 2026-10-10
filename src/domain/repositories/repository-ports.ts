@@ -5,7 +5,6 @@ import type { FileReference } from '../entities/file-reference';
 import type { ImageWorkspaceDraft } from '../entities/image-workspace';
 import type { Project } from '../entities/project';
 import type { ProviderOperationRecord } from '../entities/provider-operation';
-import type { ProviderImmediateResultReference } from '../entities/provider';
 import type {
   ProjectContextDraftV1,
   ProjectContextV1,
@@ -277,7 +276,6 @@ export interface ExecutionRepository {
 }
 
 export interface ProviderOperationRepository {
-  resolveResult?(result: Extract<ProviderImmediateResultReference, { kind: 'stored_base64' }>): Promise<Extract<ProviderImmediateResultReference, { kind: 'base64' }>>;
   get(id: ProviderOperationRecordId): Promise<ProviderOperationRecord | undefined>;
   getByExecution(executionId: ExecutionId): Promise<ProviderOperationRecord | undefined>;
   list(taskId?: TaskId): Promise<readonly ProviderOperationRecord[]>;

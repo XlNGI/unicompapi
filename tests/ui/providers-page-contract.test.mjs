@@ -230,8 +230,7 @@ test('manage view keeps page chrome fixed and scrolls long catalogs internally',
   assert.match(pageStyles, /\.workspace:has\(\.uc-provider-page--manage\) \{[^}]*overflow: hidden;/);
   assert.match(pageStyles, /\.uc-provider-page--manage \{[^}]*height: 100%;[^}]*overflow: hidden;/);
   assert.match(pageStyles, /\.uc-provider-page--manage \.uc-provider-page__workspace \{[^}]*min-height: 0;[^}]*grid-template-rows: minmax\(0, 1fr\);/);
-  assert.match(pageStyles, /\.uc-provider-page--manage \.uc-provider-page__connection-list \{[^}]*overflow-y: auto;/);
-  assert.match(pageStyles, /\.uc-provider-page--manage \.uc-provider-page__tab-panel\[aria-labelledby="models-heading"\] \{[^}]*overflow-y: auto;/);
-  assert.match(pageStyles, /\.uc-provider-page--manage \.uc-provider-page__model-list \{[^}]*flex: 0 0 auto;[^}]*overflow: visible;/);
+  assert.match(pageStyles, /\.uc-provider-page--manage \.uc-provider-page__connection-list,[^}]*overflow-y: auto;/);
+  assert.match(pageStyles, /\.uc-provider-page--manage \.uc-provider-page__model-list \{[^}]*overflow-y: auto;/);
   assert.match(pageStyles, /\.uc-provider-page--manage \.uc-provider-page__tabs,[^}]*flex: 0 0 auto;/);
 });

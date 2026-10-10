@@ -60,9 +60,7 @@ test('shared history supports image and video previews with stable selection', (
   assert.match(history, /<img/);
   assert.match(history, /<video/);
   assert.match(history, /preload="metadata"/);
-  assert.doesNotMatch(history, /loading="lazy"/);
-  assert.match(history, /alt=""/);
-  assert.doesNotMatch(history, /\$\{work\.name\} 缩略图/);
+  assert.match(history, /loading="lazy"/);
   assert.match(history, /decoding="async"/);
   assert.match(history, /IntersectionObserver/);
   assert.match(history, /resolveHistorySelection\(/);
@@ -134,12 +132,7 @@ test('shared history maps wheel gestures to horizontal overflow without trapping
   assert.match(history, /timeline\.scrollWidth <= timeline\.clientWidth/);
   assert.match(history, /nextScrollLeft === timeline\.scrollLeft/);
   assert.match(history, /event\.preventDefault\(\)/);
-  assert.match(history, /requestAnimationFrame/);
-  assert.match(history, /cancelAnimationFrame/);
-  assert.match(history, /compensateHistoryScroll\(/);
   assert.match(styles, /\.uc-generation-history__timeline-scroll\s*{[\s\S]*overflow-x: auto;/);
-  assert.match(styles, /\.uc-generation-history__timeline-scroll\s*{[\s\S]*overflow-anchor: none;/);
-  assert.match(styles, /\.uc-generation-history__thumbnail\s*{[\s\S]*width: 100%;[\s\S]*height: 100%;/);
 });
 
 test('history uses the one-hour activity window before calling a task generating', () => {
