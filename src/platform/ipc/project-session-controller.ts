@@ -44,16 +44,19 @@ export interface ProjectSessionControllerDependencies {
   catalog?: ProjectCatalogService;
   beforeSessionChange?(): Promise<void>;
   afterSessionChange?(): Promise<void>;
+  prepareProjectStorage?(rootDirectory: string): Promise<void>;
   onError?(error: unknown): void;
 }
 
 export class ProjectSessionController {
+  private sessionChange: Promise<unknown> = Promise.resolve();
+
   constructor(
     private readonly dependencies: ProjectSessionControllerDependencies
   ) {}
 
   openProject(): Promise<StorageIpcResult<StorageOpenProjectDto>> {
-    return this.execute(async () => {
+    return this.enqueueSessionChange(() => this.execute(async () => {
       const rootDirectory = await this.dependencies.chooseProjectDirectory();
 
       if (!rootDirectory) {
@@ -64,13 +67,13 @@ export class ProjectSessionController {
         cancelled: false,
         session: await this.openProjectDirectory(rootDirectory)
       };
-    });
+    }));
   }
 
   openRecentProject(
     request: unknown
   ): Promise<StorageIpcResult<StorageOpenProjectDto>> {
-    return this.execute(async () => {
+    return this.enqueueSessionChange(() => this.execute(async () => {
       const projectId = parseRecentProjectId(request);
       const entries = await this.dependencies.catalog?.getEntries();
       const entry = entries?.find((candidate) => candidate.projectId === projectId);
@@ -86,13 +89,13 @@ export class ProjectSessionController {
         cancelled: false,
         session: await this.openProjectDirectory(entry.rootDirectory, projectId)
       };
-    });
+    }));
   }
 
   createProject(
     request: unknown
   ): Promise<StorageIpcResult<StorageCreateProjectDto>> {
-    return this.executeCreate(async () => {
+    return this.enqueueSessionChange(() => this.executeCreate(async () => {
       const name = parseProjectName(request);
       const rootDirectory = await this.dependencies.chooseProjectDirectory();
 
@@ -149,7 +152,7 @@ export class ProjectSessionController {
         cancelled: false,
         session: toSessionDto(session)
       };
-    });
+    }));
   }
 
   async listProjectConversationSummaries(
@@ -209,9 +212,17 @@ export class ProjectSessionController {
   }
 
   async closeProject(): Promise<StorageIpcResult<{ readonly closed: true }>> {
-    await this.dependencies.beforeSessionChange?.();
-    this.dependencies.registry.clear();
-    return { ok: true, value: { closed: true } };
+    return this.enqueueSessionChange(async () => {
+      await this.dependencies.beforeSessionChange?.();
+      this.dependencies.registry.clear();
+      return { ok: true, value: { closed: true } };
+    });
+  }
+
+  private enqueueSessionChange<T>(operation: () => Promise<T>): Promise<T> {
+    const pending = this.sessionChange.then(operation, operation);
+    this.sessionChange = pending;
+    return pending;
   }
 
   async getProjectSession(): Promise<
@@ -264,6 +275,11 @@ export class ProjectSessionController {
       projectName: session.projectName,
       rootDirectory: session.rootDirectory
     });
+    try {
+      await this.dependencies.prepareProjectStorage?.(session.rootDirectory);
+    } catch (error) {
+      this.dependencies.onError?.(error);
+    }
     await this.dependencies.beforeSessionChange?.();
     this.dependencies.registry.set(session);
     await this.dependencies.afterSessionChange?.();

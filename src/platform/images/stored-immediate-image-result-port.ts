@@ -110,7 +110,14 @@ export class StoredImmediateImageResultPort implements ImageResultPort {
   ): Promise<ProviderImmediateResultReference | undefined> {
     if (operation.kind !== 'provider_operation_record') return undefined;
     const record = await this.dependencies.operations.get(operation.id);
-    return resultFromRecord(record, operation.id);
+    const result = resultFromRecord(record, operation.id);
+    if (result?.kind !== 'stored_base64') return result;
+    try {
+      if (!this.dependencies.operations.resolveResult) throw new Error('Result resolver unavailable');
+      return await this.dependencies.operations.resolveResult(result);
+    } catch {
+      throw new ImageResultPortError('not_retryable', 'The stored image result is missing or damaged');
+    }
   }
 }
 
@@ -120,6 +127,9 @@ export async function readStoredImmediateImageResult(
   maximumResultBytes = 20 * 1024 * 1024,
   signal?: AbortSignal
 ): Promise<Uint8Array> {
+  if (result.kind === 'stored_base64') {
+    throw new ImageResultPortError('not_retryable', 'The stored image result must be resolved before reading');
+  }
   if (!Number.isSafeInteger(maximumResultBytes) || maximumResultBytes < 1) {
     throw new TypeError('maximum image result bytes must be a positive integer');
   }

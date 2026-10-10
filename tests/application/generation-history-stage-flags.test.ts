@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
+  compensateHistoryScroll,
   historyLiveStatusWindowMs,
   presentHistoryStatusKind,
   resolveHistorySelection,
@@ -162,5 +163,23 @@ describe('stale generation history status', () => {
     expect(presentHistoryStatusKind('completed', occurredAt, now)).toBe('completed');
     expect(presentHistoryStatusKind('uncertain', occurredAt, now)).toBe('uncertain');
     expect(presentHistoryStatusKind('pending', 'not-a-time', now)).toBe('uncertain');
+  });
+});
+
+describe('generation history scroll compensation', () => {
+  it('keeps a user wheel movement when the card only moved because of that scroll', () => {
+    expect(compensateHistoryScroll(640, -260, 280, 100)).toBe(640);
+  });
+
+  it('follows a real layout shift when the user has not scrolled', () => {
+    expect(compensateHistoryScroll(280, 140, 280, 100)).toBe(320);
+  });
+
+  it('keeps the user wheel movement and still corrects an independent layout shift', () => {
+    expect(compensateHistoryScroll(400, 20, 280, 100)).toBe(440);
+  });
+
+  it('ignores a subpixel layout shift', () => {
+    expect(compensateHistoryScroll(280, 100.2, 280, 100)).toBe(280);
   });
 });

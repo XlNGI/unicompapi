@@ -1,4 +1,4 @@
-import { useEffect, useLayoutEffect, useRef, useState } from 'react';
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { LuSend } from 'react-icons/lu';
 import { Button } from '../../../components/Button';
@@ -15,6 +15,7 @@ import {
   isVisibleModelUnavailableReason,
   ModelSelect
 } from '../../../components/ModelSelect';
+import { classifyHistoryTaskStatus } from '../../../components/GenerationHistory';
 import {
   SubmissionProgressSteps,
   type SubmissionProgressPhase
@@ -38,6 +39,86 @@ import {
 } from '../../../ui/notifications/generation-failure-reasons';
 import { CreationAdvancedSection } from '../CreationAdvancedSection';
 import { registerPendingEditor } from '../../../ui/autosave-flush-registry';
+
+export interface VideoSubmissionProgressRecord {
+  readonly phase: Exclude<SubmissionProgressPhase, 'idle'>;
+  readonly failureMessage?: string;
+  readonly taskId?: string;
+}
+
+const videoSubmissionProgress = new Map<string, VideoSubmissionProgressRecord>();
+const videoSubmissionProgressListeners = new Set<() => void>();
+
+export function readVideoSubmissionProgress(
+  draftId: string
+): VideoSubmissionProgressRecord | undefined {
+  return videoSubmissionProgress.get(draftId);
+}
+
+export function publishVideoSubmissionProgress(
+  draftId: string,
+  record: VideoSubmissionProgressRecord | undefined
+): void {
+  if (!record) videoSubmissionProgress.delete(draftId);
+  else videoSubmissionProgress.set(draftId, record);
+  for (const listener of videoSubmissionProgressListeners) listener();
+}
+
+export function subscribeVideoSubmissionProgress(listener: () => void): () => void {
+  videoSubmissionProgressListeners.add(listener);
+  return () => {
+    videoSubmissionProgressListeners.delete(listener);
+  };
+}
+
+export function resetVideoSubmissionProgressForTests(): void {
+  videoSubmissionProgress.clear();
+  videoSubmissionProgressListeners.clear();
+}
+
+export function resolveWatchedVideoProgress(input: {
+  readonly taskId: string;
+  readonly items: readonly {
+    readonly taskId: string;
+    readonly createdAt: string;
+    readonly state?: string;
+    readonly occurredAt?: string;
+    readonly works: readonly { readonly mediaKind: 'image' | 'video' }[];
+  }[];
+  readonly nowMs: number;
+}): { readonly phase: 'waiting' | 'completed' | 'failed' | 'uncertain' } {
+  const matches = input.items.filter((item) => item.taskId === input.taskId);
+  if (matches.length === 0) return { phase: 'waiting' };
+  const item = matches.reduce((best, next) =>
+    videoWorkCount(next) > videoWorkCount(best) ? next : best
+  );
+  if (videoWorkCount(item) > 0) return { phase: 'completed' };
+  const state = item.state ?? '';
+  if (!state) return { phase: 'waiting' };
+  const kind = classifyHistoryTaskStatus(
+    state,
+    item.occurredAt ?? item.createdAt,
+    input.nowMs
+  );
+  if (kind === 'failed' || kind === 'cancelled') return { phase: 'failed' };
+  if (kind === 'uncertain') return { phase: 'uncertain' };
+  if (kind === 'completed') return { phase: 'completed' };
+  return { phase: 'waiting' };
+}
+
+function videoWorkCount(item: {
+  readonly works: readonly { readonly mediaKind: 'image' | 'video' }[];
+}): number {
+  return item.works.filter((work) => work.mediaKind === 'video').length;
+}
+
+function useVideoSubmissionProgressVersion(): number {
+  const [version, setVersion] = useState(0);
+  useEffect(() => subscribeVideoSubmissionProgress(() => {
+    setVersion((current) => current + 1);
+  }), []);
+  return version;
+}
 
 interface VideoFeatureSubmissionPanelProps {
   readonly className?: string;
@@ -142,10 +223,15 @@ export function VideoFeatureSubmissionPanel({
   const [candidates, setCandidates] = useState<readonly VideoFeatureCandidateDto[]>([]);
   const [busy, setBusy] = useState(false);
   const [loadState, setLoadState] = useState<'idle' | 'loading' | 'loaded'>('idle');
-  const [progressPhase, setProgressPhase] = useState<SubmissionProgressPhase>('idle');
-  const [progressFailure, setProgressFailure] = useState<string>();
   const [parameterInputErrors, setParameterInputErrors] = useState<Readonly<Record<string, string>>>({});
   const trackProgress = showProgressSteps || Boolean(onProgressChange);
+  const progressVersion = useVideoSubmissionProgressVersion();
+  const progressRecord = useMemo(
+    () => (trackProgress ? readVideoSubmissionProgress(draft.draftId) : undefined),
+    [draft.draftId, progressVersion, trackProgress]
+  );
+  const progressPhase = progressRecord?.phase ?? 'idle';
+  const progressFailure = progressRecord?.failureMessage;
   const featureSelection = draft.featureSelection ?? {
     productFeature: draft.mode === 'image_to_video'
       ? 'image_to_video' as const
@@ -157,6 +243,9 @@ export function VideoFeatureSubmissionPanel({
   );
   const busyRef = useRef(false);
   const mountedRef = useRef(true);
+  const progressFailureRef = useRef<string | undefined>(undefined);
+  const progressTaskIdRef = useRef<string | undefined>(undefined);
+  const progressOwnerDraftIdRef = useRef(draft.draftId);
   useEffect(() => {
     mountedRef.current = true;
     return () => { mountedRef.current = false; };
@@ -225,9 +314,31 @@ export function VideoFeatureSubmissionPanel({
       ? '至少一张参考图片。'
       : undefined;
 
-  function silentlyFinishRuntimeGate() {
-    onMessage('');
+  function setProgressFailure(message?: string) {
+    progressFailureRef.current = message;
+  }
+
+  function setProgressPhase(phase: SubmissionProgressPhase) {
+    if (!trackProgress) return;
+    const failureMessage = progressFailureRef.current;
+    const taskId = progressTaskIdRef.current;
+    publishVideoSubmissionProgress(
+      progressOwnerDraftIdRef.current,
+      phase === 'idle'
+        ? undefined
+        : {
+            phase,
+            ...(failureMessage ? { failureMessage } : {}),
+            ...(taskId ? { taskId } : {})
+          }
+    );
+  }
+
+  function silentlyFinishRuntimeGate(ownerDraftId = draftRef.current.draftId) {
+    if (mountedRef.current && draftRef.current.draftId === ownerDraftId) onMessage('');
     if (trackProgress) {
+      progressOwnerDraftIdRef.current = ownerDraftId;
+      progressTaskIdRef.current = undefined;
       setProgressFailure(undefined);
       setProgressPhase('idle');
     }
@@ -235,12 +346,57 @@ export function VideoFeatureSubmissionPanel({
 
   useEffect(() => {
     onProgressChange?.(progressPhase, progressFailure);
+    const timer = window.setTimeout(() => {
+      onProgressChange?.(progressPhase, progressFailure);
+    }, 0);
+    return () => window.clearTimeout(timer);
   }, [onProgressChange, progressFailure, progressPhase]);
 
   useEffect(() => {
-    setProgressPhase('idle');
-    setProgressFailure(undefined);
-  }, [draft.draftId]);
+    if (!trackProgress || progressPhase !== 'waiting') return;
+    const taskId = progressRecord?.taskId;
+    if (!taskId) return;
+    const storage = window.unicomp?.storage;
+    if (!storage) return;
+    const draftId = draft.draftId;
+    const projectId = draft.projectId;
+    const workspaceMode = draft.mode;
+    let active = true;
+    const applyHistory = () => {
+      void storage.listGenerationHistory({
+        projectId,
+        draftId,
+        mediaKind: 'video',
+        workspaceMode,
+        limit: 30
+      }).then((result) => {
+        if (!active || !result.ok || result.value.issues.length > 0) return;
+        const resolved = resolveWatchedVideoProgress({
+          taskId,
+          items: [...result.value.activeItems, ...result.value.items],
+          nowMs: Date.now()
+        });
+        if (resolved.phase === 'waiting') return;
+        progressOwnerDraftIdRef.current = draftId;
+        progressTaskIdRef.current = taskId;
+        setProgressFailure(undefined);
+        setProgressPhase(resolved.phase);
+      }).catch(() => undefined);
+    };
+    applyHistory();
+    const unsubscribe = storage.onLocalStorageChanged(applyHistory);
+    return () => {
+      active = false;
+      unsubscribe();
+    };
+  }, [
+    draft.draftId,
+    draft.mode,
+    draft.projectId,
+    progressPhase,
+    progressRecord?.taskId,
+    trackProgress
+  ]);
 
   function clearGenerationMessage() {
     onMessage('');
@@ -473,17 +629,24 @@ export function VideoFeatureSubmissionPanel({
       showSubmissionError(submittedValidation.firstError ?? '请先修正动态参数。');
       return;
     }
+    const ownerDraftId = draft.draftId;
     setBusy(true);
     busyRef.current = true;
     clearGenerationMessage();
     if (trackProgress) {
+      progressOwnerDraftIdRef.current = ownerDraftId;
+      progressTaskIdRef.current = undefined;
       setProgressFailure(undefined);
       setProgressPhase('preparing');
     }
     try {
       let saved = await ensureSavedDraft();
       if (!saved) {
-        if (trackProgress) setProgressPhase('submission_failed');
+        if (trackProgress) {
+          progressOwnerDraftIdRef.current = ownerDraftId;
+          progressTaskIdRef.current = undefined;
+          setProgressPhase('submission_failed');
+        }
         return;
       }
       const savedImageReferenceCount = saved.mode === 'image_to_video'
@@ -496,7 +659,11 @@ export function VideoFeatureSubmissionPanel({
           : undefined;
       if (savedInputError) {
         showSubmissionError(savedInputError);
-        if (trackProgress) setProgressPhase('submission_failed');
+        if (trackProgress) {
+          progressOwnerDraftIdRef.current = ownerDraftId;
+          progressTaskIdRef.current = undefined;
+          setProgressPhase('submission_failed');
+        }
         return;
       }
       clearGenerationMessage();
@@ -519,12 +686,14 @@ export function VideoFeatureSubmissionPanel({
       }
       if (!result.ok) {
         if (result.error.code === 'runtime_not_allowed') {
-          silentlyFinishRuntimeGate();
+          silentlyFinishRuntimeGate(ownerDraftId);
           return;
         }
         const message = describeVideoFeatureError(result.error);
         showSubmissionError(message);
         if (trackProgress) {
+          progressOwnerDraftIdRef.current = ownerDraftId;
+          progressTaskIdRef.current = undefined;
           setProgressFailure(message);
           setProgressPhase('submission_failed');
         }
@@ -535,6 +704,8 @@ export function VideoFeatureSubmissionPanel({
     } catch {
       showSubmissionError('准备视频提交失败，请重试。');
       if (trackProgress) {
+        progressOwnerDraftIdRef.current = ownerDraftId;
+        progressTaskIdRef.current = undefined;
         setProgressFailure('准备视频提交失败，请重试。');
         setProgressPhase('submission_failed');
       }
@@ -551,6 +722,7 @@ export function VideoFeatureSubmissionPanel({
     if (!api) return;
     clearGenerationMessage();
     if (trackProgress) {
+      progressOwnerDraftIdRef.current = saved.draftId;
       setProgressFailure(undefined);
       setProgressPhase('requesting');
     }
@@ -561,20 +733,24 @@ export function VideoFeatureSubmissionPanel({
       prepared.confirmation.confirmationId,
       true
     );
-    if (!mountedRef.current || draftRef.current.draftId !== saved.draftId) return;
+    const stillViewing = mountedRef.current && draftRef.current.draftId === saved.draftId;
     if (!result.ok) {
       if (result.error.code === 'runtime_not_allowed') {
-        silentlyFinishRuntimeGate();
+        silentlyFinishRuntimeGate(saved.draftId);
         return;
       }
       const message = describeVideoFeatureError(result.error);
       const uncertain = result.error.code === 'submission_outcome_unknown';
-      if (uncertain) {
-        showGenerationUncertain(describeUnconfirmedGenerationOutcome());
-      } else {
-        showSubmissionError(message);
+      if (stillViewing) {
+        if (uncertain) {
+          showGenerationUncertain(describeUnconfirmedGenerationOutcome());
+        } else {
+          showSubmissionError(message);
+        }
       }
       if (trackProgress) {
+        progressOwnerDraftIdRef.current = saved.draftId;
+        progressTaskIdRef.current = undefined;
         setProgressFailure(uncertain ? describeUnconfirmedGenerationOutcome() : message);
         setProgressPhase(uncertain ? 'submission_uncertain' : 'submission_failed');
       }
@@ -588,8 +764,10 @@ export function VideoFeatureSubmissionPanel({
     const feedback = rawFeedback && !/[A-Za-z_]/u.test(rawFeedback)
       ? rawFeedback
       : `提交状态：${submissionStatusLabel(result.value.status)}`;
-    showSubmissionOutcome(result.value);
+    if (stillViewing) showSubmissionOutcome(result.value);
     if (trackProgress) {
+      progressOwnerDraftIdRef.current = saved.draftId;
+      progressTaskIdRef.current = result.value.taskId;
       if (uncertain) {
         setProgressFailure(describeUnconfirmedGenerationOutcome(result.value.safeCode));
         setProgressPhase('uncertain');
@@ -606,7 +784,7 @@ export function VideoFeatureSubmissionPanel({
         );
       }
     }
-    onSubmissionComplete?.(result.value);
+    if (stillViewing) onSubmissionComplete?.(result.value);
   }
 
   return (
