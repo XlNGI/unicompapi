@@ -181,7 +181,7 @@ export class LegacyThreadMigration {
           if (!artifact) return [];
           const turn = baseProjection.turns.find(candidate => candidate.userItemId?.value === message.id || candidate.assistantItemIds.some(item => item.value === message.id));
           artifactOrdinal += 1;
-          return [projectArtifactItem({ threadId: baseProjection.thread.threadId, ...(turn ? { turnId: turn.turnId } : {}), sequence: baseProjection.items.length + artifactOrdinal, status: message.state, content: artifact.fileName, createdAt: message.createdAt, updatedAt: message.updatedAt, sourceIdentity: `legacy-artifact:${message.id}:${artifact.workId}`, responseExecutionId: snapshot.executionReferences?.find(reference => reference.sourceMessageId === message.id)?.responseExecutionId, workId: toWorkId(artifact.workId) })];
+          return [projectArtifactItem({ threadId: baseProjection.thread.threadId, ...(turn ? { turnId: turn.turnId } : {}), sequence: baseProjection.items.length + artifactOrdinal, status: message.state, content: artifact.fileName, createdAt: message.createdAt, updatedAt: message.updatedAt, sourceIdentity: `legacy-artifact:${message.id}:${artifact.workId}`, responseExecutionId: snapshot.executionReferences?.find(reference => reference.sourceMessageId === message.id)?.responseExecutionId, workId: toWorkId(artifact.workId), legacyMessageSnapshot: { documentResult: artifact } })];
         }));
         if (!(await this.target.getThread(projection.thread.threadId))) {
           await this.target.createThread({ threadId: projection.thread.threadId, projectId: projection.thread.projectId, title: projection.thread.title, createdAt: projection.thread.createdAt });

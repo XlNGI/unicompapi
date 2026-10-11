@@ -4,6 +4,7 @@ import path from 'node:path';
 import { describe, expect, it } from 'vitest';
 import {
   addCompletedAssistantMessage,
+  attachDocumentResultToMessage,
   addUserMessage,
   createProjectConversation,
   createItemV1,
@@ -12,7 +13,8 @@ import {
   toMessageId,
   toMessageItemId,
   toProjectId,
-  toThreadId
+  toThreadId,
+  toWorkId
 } from '../../src/domain';
 import { LegacyFileMigrationRunner, LegacyThreadMigration } from '../../src/platform/repositories/thread-migration';
 import { ThreadFileRepository } from '../../src/platform/repositories/thread-file-repository';
@@ -147,6 +149,23 @@ describe('Legacy Thread migration and Shadow Read', () => {
       await repository.append({ threadId: toThreadId(conversation.id), idempotencyKey: 'thread-ahead', occurredAt: t1, items: [ahead] });
       const report = await migration.shadowCompare([{ conversation }]);
       expect(report.differences).toEqual([]);
+    } finally { await rm(root, { recursive: true, force: true }); }
+  });
+
+  it('carries migrated Artifact metadata in the Thread projection', async () => {
+    const root = await mkdtemp(path.join(os.tmpdir(), 'unicomp-thread-migration-artifact-'));
+    try {
+      let conversation = legacyConversation();
+      const assistant = conversation.messages.find(message => message.role === 'assistant');
+      if (!assistant) throw new Error('assistant fixture missing');
+      conversation = attachDocumentResultToMessage(conversation, assistant.id, {
+        workId: toWorkId('work-migration-artifact'), fileName: 'migrated.pptx', kind: 'ppt', sizeBytes: 42
+      }, t1);
+      const repository = new ThreadFileRepository(root);
+      const migration = new LegacyThreadMigration(root, repository, { migrationId: 'migration-artifact-test' });
+      await migration.migrate([{ conversation }]);
+      const artifact = (await repository.readItems(toThreadId(conversation.id))).find(item => item.type === 'document_artifact_projection');
+      expect(artifact?.legacyMessageSnapshot?.documentResult).toEqual({ workId: 'work-migration-artifact', fileName: 'migrated.pptx', kind: 'ppt', sizeBytes: 42 });
     } finally { await rm(root, { recursive: true, force: true }); }
   });
 
