@@ -803,11 +803,23 @@ export class ConversationResponseController {
     if (workflow?.plan.kind === 'document' && !prepareNativeSearch) {
       // Persist source disclosure before pinning the conversation revision for
       // execution. This local reply is excluded from the model's history.
-      conversation = await step(() => runtime.conversationService.ensureLocalReply(conversation.id,
-        `sources-${workflow!.id}-${workflow!.revision}`,
-        localSources
-          ? '已检索到本地资料，本次优先使用本地资料制作，不联网搜索；最新公开信息未联网核实。'
-          : '本次制作不联网搜索，将依据当前需求、可用资料和模型已有知识生成内容；最新数据、政策等信息未联网核实。'));
+      const disclosure = localSources
+        ? '已检索到本地资料，本次优先使用本地资料制作，不联网搜索；最新公开信息未联网核实。'
+        : '本次制作不联网搜索，将依据当前需求、可用资料和模型已有知识生成内容；最新数据、政策等信息未联网核实。';
+      conversation = await step(() => runtime.turnCoordinator && runtime.legacyProjection ? runtime.conversationService.ensureLocalReply(conversation.id,
+        `sources-${workflow!.id}-${workflow!.revision}`, disclosure, { beforeSave: async message => {
+          await runtime.turnCoordinator!.projectAssistantMessage({
+            threadId: conversation.id,
+            sourceMessageId: userMessage.id,
+            assistantMessageId: message.id,
+            messageRevision: message.revision,
+            status: 'completed',
+            content: message.content,
+            createdAt: message.createdAt,
+            updatedAt: message.updatedAt,
+            legacyMessageSnapshot: message as unknown as Readonly<Record<string, unknown>>
+          });
+        } }) : runtime.conversationService.ensureLocalReply(conversation.id, `sources-${workflow!.id}-${workflow!.revision}`, disclosure));
     }
     let draft = createConversationResponseDraft({
       id: toConversationResponseDraftId(this.dependencies.nextResponseDraftId()),
