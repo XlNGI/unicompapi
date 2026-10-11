@@ -466,7 +466,10 @@ export function createConversationLinkedLifecycle(
   conversations: ProjectConversationRepository,
   now: () => string
 ): DeepSeekConversationLifecyclePort & NewApiConversationLifecyclePort {
-  const projectionFlushDelayMs = 120;
+  // The response lifecycle already batches deltas. A shorter compatibility
+  // projection window keeps streaming text responsive without turning every
+  // provider token into a Legacy JSON write.
+  const projectionFlushDelayMs = 60;
   const queues = new Map<string, Promise<void>>();
   const deltaBatches = new Map<string, ConversationStreamDeltaBatcher>();
   const projections = new Map<string, {

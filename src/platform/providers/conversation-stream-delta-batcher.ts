@@ -14,7 +14,9 @@ export interface ConversationStreamDeltaBatcherOptions {
   readonly maximumOutstandingBytes?: number;
 }
 
-const defaultFlushDelayMs = 120;
+// Keep persistence batched, but bound visible stream latency to one
+// 60ms frame budget instead of making the UI wait 120ms for every batch.
+const defaultFlushDelayMs = 60;
 const defaultFlushByteThreshold = 8 * 1024;
 const defaultMaximumOutstandingBytes = 256 * 1024;
 const textEncoder = new TextEncoder();

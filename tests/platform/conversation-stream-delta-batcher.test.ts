@@ -64,13 +64,13 @@ describe('conversation stream delta batcher', () => {
     expect(batcher.pendingByteCount).toBe(0);
   });
 
-  it('flushes the default batch after 120ms', async () => {
+  it('flushes the default batch after 60ms', async () => {
     vi.useFakeTimers();
     const persist = vi.fn(async () => undefined);
     const batcher = new ConversationStreamDeltaBatcher({ persist });
 
     await batcher.append('content', 'small delta');
-    await vi.advanceTimersByTimeAsync(119);
+    await vi.advanceTimersByTimeAsync(59);
     expect(persist).not.toHaveBeenCalled();
 
     await vi.advanceTimersByTimeAsync(1);
@@ -150,7 +150,7 @@ describe('conversation stream delta batcher', () => {
     });
 
     await expect(batcher.append('content', 'small delta')).resolves.toBeUndefined();
-    await vi.advanceTimersByTimeAsync(120);
+    await vi.advanceTimersByTimeAsync(60);
 
     await expect(batcher.append('content', 'next delta')).rejects.toBe(failure);
     await expect(batcher.sealAndDrain()).rejects.toBe(failure);
