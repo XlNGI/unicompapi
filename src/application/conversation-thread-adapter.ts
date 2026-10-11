@@ -78,6 +78,7 @@ export interface ArtifactDisplayProjectionInput {
   readonly responseExecutionId?: ConversationResponseExecutionId | string;
   readonly agentRunId?: ConversationAgentRunId | string;
   readonly workId: WorkId | string;
+  readonly legacyMessageSnapshot?: Readonly<Record<string, unknown>>;
 }
 
 export function conversationToThreadProjection(
@@ -215,9 +216,10 @@ function createProjectionItem(input: {
   readonly agentRunId?: ConversationAgentRunId | string;
   readonly toolCallId?: ToolCallId | string;
   readonly workId?: WorkId | string;
+  readonly legacyMessageSnapshot?: Readonly<Record<string, unknown>>;
 }): ItemV1 {
   const identity = `item-projection-v1:${sha256Hex(JSON.stringify([input.threadId, input.type, input.eventSystem, input.sourceIdentity]))}`;
-  return createItemV1({ itemId: toProjectionItemId(identity), threadId: input.threadId, ...(input.turnId ? { turnId: input.turnId } : {}), sequence: input.sequence, type: input.type, status: input.status, createdAt: input.createdAt, updatedAt: input.updatedAt, ...(input.content !== undefined ? { content: input.content } : {}), projectionSource: { eventSystem: input.eventSystem, sourceIdentity: input.sourceIdentity, ...(input.responseExecutionId ? { responseExecutionId: toConversationResponseExecutionId(String(input.responseExecutionId)) } : {}), ...(input.agentRunId ? { agentRunId: toConversationAgentRunId(String(input.agentRunId)) } : {}), ...(input.toolCallId ? { toolCallId: toToolCallId(String(input.toolCallId)) } : {}), ...(input.workId ? { workId: toWorkId(String(input.workId)) } : {}) } });
+  return createItemV1({ itemId: toProjectionItemId(identity), threadId: input.threadId, ...(input.turnId ? { turnId: input.turnId } : {}), sequence: input.sequence, type: input.type, status: input.status, createdAt: input.createdAt, updatedAt: input.updatedAt, ...(input.content !== undefined ? { content: input.content } : {}), ...(input.legacyMessageSnapshot ? { legacyMessageSnapshot: input.legacyMessageSnapshot } : {}), projectionSource: { eventSystem: input.eventSystem, sourceIdentity: input.sourceIdentity, ...(input.responseExecutionId ? { responseExecutionId: toConversationResponseExecutionId(String(input.responseExecutionId)) } : {}), ...(input.agentRunId ? { agentRunId: toConversationAgentRunId(String(input.agentRunId)) } : {}), ...(input.toolCallId ? { toolCallId: toToolCallId(String(input.toolCallId)) } : {}), ...(input.workId ? { workId: toWorkId(String(input.workId)) } : {}) } });
 }
 
 function updateTurnWithAssistant(turn: TurnV1, itemId: ItemId, messageState: string, completedAt?: IsoTimestamp): TurnV1 {

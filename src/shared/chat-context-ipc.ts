@@ -258,6 +258,7 @@ export interface ThreadItemDto {
   readonly updatedAt: string;
   readonly messageId?: string;
   readonly message?: MessageDto;
+  readonly artifact?: NonNullable<MessageDto['documentResult']>;
   readonly projectionSource?: {
     readonly eventSystem: 'response_execution' | 'agent_runtime' | 'production_trace' | 'work_repository';
     readonly sourceIdentity: string;

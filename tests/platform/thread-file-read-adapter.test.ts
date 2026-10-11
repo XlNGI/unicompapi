@@ -5,10 +5,12 @@ import { describe, expect, it } from 'vitest';
 import { createItemV1, createTurnV1, toMessageItemId, toProjectId, toThreadId, toTurnId, toIsoTimestamp } from '../../src/domain';
 import { ThreadFileRepository } from '../../src/platform/repositories/thread-file-repository';
 import { ThreadFileReadAdapter } from '../../src/platform/ipc/thread-file-read-adapter';
+import { projectArtifactItem } from '../../src/application/conversation-thread-adapter';
 import { createChatContextRuntime } from '../../src/platform/ipc/chat-context-runtime';
 import type { StorageProjectSession } from '../../src/platform/ipc/storage-ipc-controller';
 
 const t0 = toIsoTimestamp('2026-10-08T00:00:00.000Z');
+const t1 = toIsoTimestamp('2026-10-08T00:00:01.000Z');
 const threadId = toThreadId('thread-file-adapter');
 
 describe('ThreadFileReadAdapter', () => {
@@ -66,6 +68,22 @@ describe('ThreadFileReadAdapter', () => {
         expect(result.value.items[0]?.message?.attachments).toHaveLength(1);
         expect(result.value.items[0]?.message?.documentResult?.workId).toBe('work-1');
       }
+    } finally { await rm(root, { recursive: true, force: true }); }
+  });
+
+  it('exposes Thread-native document Artifact metadata for history rendering', async () => {
+    const root = await mkdtemp(path.join(os.tmpdir(), 'unicomp-thread-artifact-read-'));
+    try {
+      const repository = new ThreadFileRepository(root);
+      await repository.createThread({ threadId, projectId: toProjectId('project-adapter'), title: 'Artifact', createdAt: t0 });
+      const user = createItemV1({ itemId: toMessageItemId('artifact-user'), threadId, turnId: toTurnId('turn-artifact'), sequence: 1, type: 'user_message', status: 'completed', createdAt: t0, updatedAt: t0, messageSource: { messageId: 'artifact-user' as never, messageRevision: 0 }, content: '生成 PPT' });
+      const turn = createTurnV1({ turnId: toTurnId('turn-artifact'), threadId, turnSequence: 1, createdAt: t0, userItemId: user.itemId, provenance: 'native' });
+      const artifact = projectArtifactItem({ threadId, turnId: turn.turnId, sequence: 2, status: 'completed', content: 'artifact.pptx (ppt)', createdAt: t0, updatedAt: t1, sourceIdentity: 'work:artifact-work', workId: 'artifact-work', legacyMessageSnapshot: { documentResult: { workId: 'artifact-work', fileName: 'artifact.pptx', kind: 'ppt', sizeBytes: 42 } } });
+      await repository.append({ threadId, idempotencyKey: 'artifact-read', occurredAt: t1, turns: [turn], items: [user, artifact] });
+      const adapter = new ThreadFileReadAdapter({ getRepository: () => repository, projectId: () => 'project-adapter' });
+      const result = await adapter.getThreadItemsPage({ threadId, limit: 10, direction: 'older' });
+      expect(result.ok).toBe(true);
+      if (result.ok) expect(result.value.items.find(item => item.itemType === 'document_artifact_projection')?.artifact).toEqual({ workId: 'artifact-work', fileName: 'artifact.pptx', kind: 'ppt', sizeBytes: 42 });
     } finally { await rm(root, { recursive: true, force: true }); }
   });
 });

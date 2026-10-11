@@ -547,12 +547,15 @@ function messagesFromThreadItems(
   fallbackMessages: readonly MessageDto[] = []
 ): readonly MessageDto[] {
   const fallbackById = new Map(fallbackMessages.map(message => [message.messageId, message]));
+  const artifactsByTurnId = new Map(items.flatMap(item => item.turnId && item.artifact ? [[item.turnId, item.artifact] as const] : []));
   return items.flatMap(item => {
     if (!item.message) return [];
     const fallback = fallbackById.get(item.message.messageId);
+    const artifact = item.message.documentResult ?? (item.turnId ? artifactsByTurnId.get(item.turnId) : undefined);
     return [{
       ...fallback,
-      ...item.message
+      ...item.message,
+      ...(artifact && !item.message.documentResult ? { documentResult: artifact } : {})
     }];
   });
 }

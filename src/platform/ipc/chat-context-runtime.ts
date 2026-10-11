@@ -580,7 +580,8 @@ export function createChatContextRuntime(
                 : responseExecution.state === 'interrupted' ? 'interrupted' : 'failed',
             content: `${result.fileName} (${result.kind})`,
             createdAt: responseExecution.createdAt,
-            updatedAt: toIsoTimestamp(now())
+            updatedAt: toIsoTimestamp(now()),
+            legacyMessageSnapshot: { documentResult: result }
           });
         } catch (error) {
           // A projection debt must be recoverable without replaying a paid

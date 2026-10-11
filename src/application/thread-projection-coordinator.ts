@@ -82,6 +82,7 @@ export interface ProjectDocumentArtifactInput {
   readonly content?: string;
   readonly createdAt: IsoTimestamp;
   readonly updatedAt: IsoTimestamp;
+  readonly legacyMessageSnapshot?: Readonly<Record<string, unknown>>;
 }
 
 export interface ProjectToolProjectionInput {
@@ -232,6 +233,7 @@ export class ThreadProjectionCoordinator {
       sourceIdentity: `work:${input.workId}`,
       ...(input.responseExecutionId ? { responseExecutionId: input.responseExecutionId } : {}),
       ...(input.agentRunId ? { agentRunId: input.agentRunId } : {}),
+      ...(input.legacyMessageSnapshot ? { legacyMessageSnapshot: input.legacyMessageSnapshot } : {}),
       workId: input.workId
     });
     const result = await this.repository.append({
