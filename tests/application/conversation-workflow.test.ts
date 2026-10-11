@@ -171,6 +171,28 @@ describe('Conversation workflow', () => {
     expect(await service.getPending(conversationId)).toBeUndefined();
   });
 
+  it('settles a ready document workflow from an already verified Agent result without a new execution', async () => {
+    const service = await regressionService();
+    const created = await service.create({
+      projectId,
+      conversationId,
+      sourceMessageId: toMessageId('message-native-document'),
+      rawText: '写一份关于龙的 PPT'
+    });
+    expect(created.status).toBe('ready');
+    const settled = await service.settleExistingDocumentResult({
+      workflowId: created.id,
+      expectedRevision: created.revision,
+      messageId: 'message-native-result',
+      workId: 'work-native-result'
+    });
+    expect(settled).toMatchObject({
+      status: 'completed',
+      deliveries: [{ kind: 'ppt', status: 'completed', resultMessageId: 'message-native-result', workId: 'work-native-result' }]
+    });
+    expect((await service.getPending(conversationId))).toBeUndefined();
+  });
+
   it('keeps completed Work when a later delivery fails and retries only a known failed step', async () => {
     const service = await regressionService();
     const initial = await service.create({ projectId, conversationId, sourceMessageId: toMessageId('message-partial'), rawText: '做 Excel 和 PPT' });

@@ -6,6 +6,8 @@
 
 但同一会话没有新增 user message，恢复后又登记了第二个 Work `work-document-200bdf34-79a1-467f-a420-cddf380e55b6`，对应不同文件 `document-file-8a3db82b-a054-4416-a909-408b5faca4c5`，大小 435,369 bytes、Hash `fbd8538d26b01865a41d6c7d1c1c6a82c4d9b4ea1e0885ef0e2090e54859869d`。因此恢复最终状态虽为 `completed`，但产生了重复副作用；“崩溃恢复幂等/未知结果不得自动重发”判定 `FAIL`。后续必须在恢复接线中先核对已有 Document Task/Work/Execution，已有 Work 时只做验证、读回或结算，不得再次调用 `generate_pptx`。本次仅修改隔离测试数据，未影响真实项目、ThreadFile 写权威或生产 Cutover。
 
+后续代码审计确认：第二个 Work 的直接来源是同一 source message 上 Agent native `generate_pptx` 结果与 Legacy `executeReadyWorkflow` 路径重叠；它不是单纯的恢复器重放，但对用户仍表现为重复正式交付。已增加 Workflow 查询层门禁：发现同一 source message 后已有校验通过的 `documentResult` 时，只创建本地完成 receipt，不再启动 Provider 或本地文档生成。原验收结论中的重复副作用仍然有效，修复后需重新执行同类隔离验收。
+
 ### 真实会话日志复核：PPT 生成与登记通过（2026-10-11）
 
 负责人确认按日志证据记录本次真实会话。隔离项目 `project-4b9f0e90-8f16-4ca1-81f9-22d66a4a7e33` 的会话 `conversation-6aec886f-08a2-4f78-90d6-6bd4596b3ed6` 在 2026-10-11 04:37 UTC（00:37 EDT）完成真实 Provider PPT 生成。最新 `chat_stream` 返回 HTTP 200，耗时约 1.7 秒；最新 Response Execution `response-execution-2721db30-d7c4-4891-b58a-0c8c9365a977`、Document Runtime `runtime-document-66e3b40b-2b50-4a09-98d5-c9de5a353860` 和 Document Execution `execution-document-7a9b458b-f884-4dc0-9b2a-3f078ab6393f` 均为 `completed`。

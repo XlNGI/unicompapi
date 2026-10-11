@@ -5,12 +5,18 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { ConversationApplicationService, ConversationIntentOrchestrator, ConversationWorkflowService, type ConversationIdFactory } from '../../src/application';
 import { ConversationSemanticResponseError } from '../../src/application/conversation-intent-orchestrator';
 import {
+  attachDocumentResultToMessage,
+  appendAssistantMessageChunk,
+  beginAssistantMessage,
+  completeAssistantMessage,
+  startAssistantMessageStreaming,
   toConversationId,
   toConversationWorkflowId,
   createConversationWorkflow,
   toIsoTimestamp,
   toMessageId,
-  toProjectId
+  toProjectId,
+  toWorkId
 } from '../../src/domain';
 import {
   createChatContextRuntime,
@@ -207,6 +213,51 @@ describe('ConversationWorkflowController', () => {
     expect((await service.get(conversation.id)).revision).toBe(restored.revision);
     await controller.getPending({ conversationId: conversation.id });
     expect((await service.get(conversation.id)).revision).toBe(restored.revision);
+  });
+
+  it('settles a ready workflow from an existing Agent document result instead of starting a second delivery', async () => {
+    const root = await mkdtemp(path.join(os.tmpdir(), 'unicomp-native-document-settlement-'));
+    roots.push(root);
+    const projectId = toProjectId('project-native-document-settlement');
+    const now = () => '2026-09-22T00:00:00.000Z';
+    const storage = new NodeProjectStorage(root);
+    const conversations = new JsonProjectConversationRepository(storage, projectId, now);
+    const workflowRepository = new JsonConversationWorkflowRepository(storage, projectId, now);
+    const ids: ConversationIdFactory = {
+      nextConversationId: () => toConversationId('conversation-native-document-settlement'),
+      nextMessageId: (() => { let index = 0; return () => toMessageId(`message-native-document-${++index}`); })()
+    };
+    const conversationService = new ConversationApplicationService(conversations, ids, now);
+    const workflowService = new ConversationWorkflowService(workflowRepository, new ConversationIntentOrchestrator(), now,
+      () => toConversationWorkflowId('workflow-native-document-settlement'));
+    const conversation = await conversationService.create({ title: 'Native document', projectId });
+    const withUser = await conversationService.addUserMessage({ conversationId: conversation.id, expectedRevision: 0, content: '写一份关于龙的 PPT' });
+    const workflow = await workflowService.create({ projectId, conversationId: conversation.id, sourceMessageId: withUser.messages[0].id, rawText: '写一份关于龙的 PPT' });
+    expect(workflow.status).toBe('ready');
+    let current = await conversations.get(conversation.id);
+    if (!current) throw new Error('conversation missing');
+    current = beginAssistantMessage(current, { id: toMessageId('message-native-document-result'), createdAt: toIsoTimestamp(now()) });
+    await conversations.save(current, current.revision - 1);
+    current = startAssistantMessageStreaming(current, toMessageId('message-native-document-result'), toIsoTimestamp(now()));
+    await conversations.save(current, current.revision - 1);
+    current = appendAssistantMessageChunk(current, toMessageId('message-native-document-result'), '已生成 PPT。', toIsoTimestamp(now()));
+    await conversations.save(current, current.revision - 1);
+    current = completeAssistantMessage(current, toMessageId('message-native-document-result'), toIsoTimestamp(now()));
+    await conversations.save(current, current.revision - 1);
+    current = attachDocumentResultToMessage(current, toMessageId('message-native-document-result'), {
+      kind: 'ppt', workId: toWorkId('work-native-document-result'), fileName: 'native-result.pptx', sizeBytes: 10,
+      validatedContent: 'validated'
+    }, toIsoTimestamp(now()));
+    await conversations.save(current, current.revision - 1);
+
+    const controller = new ConversationWorkflowController({
+      getSession: () => ({ projectId, projectName: 'Native settlement', rootDirectory: root }),
+      getRuntime: () => ({ conversationService, workflowService })
+    });
+    await expect(controller.getPending({ conversationId: conversation.id })).resolves.toMatchObject({ ok: true, value: null });
+    expect(await workflowService.get(workflow.id)).toMatchObject({ status: 'completed', deliveries: [
+      { kind: 'ppt', status: 'completed', workId: 'work-native-document-result', resultMessageId: 'message-native-document-result' }
+    ] });
   });
 
   it('persists, resumes, and safely answers one clarification workflow', async () => {

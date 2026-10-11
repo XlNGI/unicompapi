@@ -407,6 +407,35 @@ export class ConversationWorkflowService {
     return updated;
   }
 
+  /**
+   * Settles a ready document workflow from a verified result that was already
+   * persisted by another execution path (for example the Agent native tool
+   * loop). This creates only a local workflow receipt; it never dispatches a
+   * Provider call or a document tool.
+   */
+  async settleExistingDocumentResult(input: {
+    readonly workflowId: ConversationWorkflowId;
+    readonly expectedRevision: number;
+    readonly messageId: string;
+    readonly workId: string;
+  }): Promise<ConversationWorkflowV1 | undefined> {
+    const current = await this.require(input.workflowId, input.expectedRevision);
+    if (current.status !== 'ready' || current.plan.kind !== 'document' ||
+        !current.plan.documentKind || current.plan.documentKind === 'auto') return current;
+    const delivery = current.deliveries?.find(item => item.kind === current.plan.documentKind && item.status === 'pending');
+    if (!delivery) return current;
+    const localExecutionId = `existing-document-${current.id}-${current.revision}`;
+    const executing = await this.beginExecution({
+      workflowId: current.id,
+      expectedRevision: current.revision,
+      executionId: localExecutionId
+    });
+    return this.finishDocumentExecution(localExecutionId, 'completed', {
+      messageId: input.messageId,
+      workId: input.workId
+    }) ?? executing;
+  }
+
   async resumeFailedDelivery(input: {
     readonly workflowId: ConversationWorkflowId;
     readonly expectedRevision: number;

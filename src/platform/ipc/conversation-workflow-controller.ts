@@ -287,11 +287,21 @@ export class ConversationWorkflowController {
       const runtime = this.requireRuntime();
       if (!runtime.ok) return runtime;
       await runtime.value.ready;
-      const workflow = await runtime.value.workflowService.getPending(
+      let workflow = await runtime.value.workflowService.getPending(
         toConversationId(input.conversationId)
       );
-      if (workflow) await this.ensureReply(runtime.value, workflow);
-      return { ok: true, value: workflow ? toWorkflowDto(workflow) : null };
+      if (workflow) {
+        workflow = await this.settleExistingDocumentResult(runtime.value, workflow);
+        if (workflow.status !== 'completed' && workflow.status !== 'cancelled') {
+          await this.ensureReply(runtime.value, workflow);
+        }
+      }
+      return {
+        ok: true,
+        value: workflow && !['completed', 'cancelled'].includes(workflow.status)
+          ? toWorkflowDto(workflow)
+          : null
+      };
     });
   }
 
@@ -313,6 +323,33 @@ export class ConversationWorkflowController {
         if (!(error instanceof ConversationRevisionConflictError) || attempt >= 2) throw error;
       }
     }
+  }
+
+  private async settleExistingDocumentResult(
+    runtime: ConversationWorkflowControllerRuntime,
+    workflow: ConversationWorkflowV1
+  ): Promise<ConversationWorkflowV1> {
+    if (workflow.status !== 'ready' || workflow.plan.kind !== 'document' ||
+        !workflow.plan.documentKind || workflow.plan.documentKind === 'auto') return workflow;
+    const conversation = await runtime.conversationService.get(workflow.conversationId);
+    const sourceIndex = conversation.messages.findIndex(message => message.id === workflow.sourceMessageId);
+    if (sourceIndex < 0) return workflow;
+    let resultMessage: typeof conversation.messages[number] | undefined;
+    for (const message of conversation.messages.slice(sourceIndex + 1)) {
+      if (message.role === 'user') break;
+      if (message.role === 'assistant' && message.documentResult?.kind === workflow.plan.documentKind &&
+          message.documentResult.validatedContent) {
+        resultMessage = message;
+        break;
+      }
+    }
+    if (!resultMessage || resultMessage.role !== 'assistant' || !resultMessage.documentResult) return workflow;
+    return await runtime.workflowService.settleExistingDocumentResult({
+      workflowId: workflow.id,
+      expectedRevision: workflow.revision,
+      messageId: resultMessage.id,
+      workId: resultMessage.documentResult.workId
+    }) ?? workflow;
   }
 
   private async startValidated(
