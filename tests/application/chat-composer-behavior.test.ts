@@ -373,6 +373,25 @@ describe('chat composer event behavior', () => {
     expect(startAgentResponse).toHaveBeenCalledOnce();
     expect(startAgentResponse.mock.calls[0][0]).not.toHaveProperty('continuation');
   });
+  it('hides an expired session when its own response is already completed', async () => {
+    initialConversationId = conversation.conversationId;
+    const expired = { sessionId: 'expired-after-response', revision: 4, sourceMessageId: 'source-1', state: 'expired',
+      deadlineAt: '2020-01-01T00:00:00.000Z', registeredWorkCount: 1 };
+    const active = {
+      ...conversation,
+      messages: [
+        { messageId: 'source-1', conversationId: conversation.conversationId, revision: 0, role: 'user', state: 'completed', content: '制作 PPT', attachments: [], createdAt: '2026-10-11T00:00:00Z', updatedAt: '2026-10-11T00:00:00Z' },
+        { messageId: 'assistant-after', conversationId: conversation.conversationId, revision: 1, role: 'assistant', state: 'completed', content: '已完成', attachments: [], createdAt: '2026-10-11T00:00:01Z', updatedAt: '2026-10-11T00:00:02Z' }
+      ],
+      agentSessions: [expired]
+    } as never;
+    Object.assign(window.unicomp!.chatContexts!, {
+      listConversations: vi.fn(async () => ({ ok: true, value: [active] })),
+      getConversation: vi.fn(async () => ({ ok: true, value: active }))
+    });
+    await settle();
+    expect(find(tree, item => typeof item.type === 'function' && (item.type as { name?: string }).name === 'AgentSessionNotice')).toBeUndefined();
+  });
   it('explicitly closes an unknown planning task without a response or selected model and refreshes its root state', async () => {
     initialConversationId = conversation.conversationId; candidateEnabled = false;
     const unknown = { sessionId: 'unknown-planning', revision: 4, sourceMessageId: 'old-source', state: 'needs_reconciliation',

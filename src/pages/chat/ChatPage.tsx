@@ -982,9 +982,15 @@ export function ChatPage({
     [selected]
   );
   const recentAgentSessions = [...(selected?.agentSessions ?? [])].reverse();
+  const hasCompletedAssistantAfter = (sourceMessageId: string): boolean => {
+    const sourceIndex = selected?.messages.findIndex(message => message.messageId === sourceMessageId) ?? -1;
+    return sourceIndex >= 0 && selected!.messages.slice(sourceIndex + 1).some(message => message.role === 'assistant' && message.state === 'completed');
+  };
   const activeAgentSession = recentAgentSessions.find(item => item.state === 'needs_reconciliation')
     ?? recentAgentSessions.find(item => ['waiting_user', 'waiting_authorization'].includes(item.state))
-    ?? (recentAgentSessions[0]?.state === 'expired' ? recentAgentSessions[0] : undefined);
+    ?? (recentAgentSessions[0]?.state === 'expired' && !hasCompletedAssistantAfter(recentAgentSessions[0].sourceMessageId)
+      ? recentAgentSessions[0]
+      : undefined);
   useEffect(() => { setNewAgentTaskRequested(false); }, [session?.projectId, selectedId]);
   useEffect(() => { reconciliationEpochRef.current += 1; setReconciliationInspection(undefined); setReconciliationConfirmed(false); setReconciliationBusy(false); }, [session?.projectId, selectedId]);
   useEffect(() => {
