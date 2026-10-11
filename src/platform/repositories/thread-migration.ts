@@ -246,7 +246,11 @@ export class LegacyThreadMigration {
     if (input.shadow.differences.length) reasons.push(`shadow_differences:${input.shadow.differences.length}`);
     if (input.activeExecutionCount !== 0) reasons.push(`active_executions:${input.activeExecutionCount}`);
     if (!input.backupVerified) reasons.push('backup_not_verified');
-    if (input.legacyGeneration !== input.targetGeneration) reasons.push('generation_lag');
+    // Legacy conversation revisions count message mutations (including
+    // streaming deltas), while Thread generations count Thread commits. They
+    // are independent clocks and must not be compared numerically. Ledger
+    // completeness plus the content/summary Shadow Compare is the integrity
+    // gate; both raw counters remain in the fence for audit and rollback.
     if (input.ledger.entries.some(entry => entry.status !== 'migrated')) reasons.push('ledger_incomplete');
     if (input.legacyGeneration < 0 || input.targetGeneration < 0) reasons.push('invalid_generation');
     const fence: AuthorityFenceV1 = { schemaVersion: 1, state: reasons.length ? 'legacy_authoritative' : 'prepared', generation: Math.max(input.legacyGeneration, input.targetGeneration), legacyGeneration: input.legacyGeneration, targetGeneration: input.targetGeneration, preparedAt: this.now(), backupVerified: input.backupVerified };
