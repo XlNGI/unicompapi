@@ -6,9 +6,11 @@ import {
   addCompletedAssistantMessage,
   addUserMessage,
   createProjectConversation,
+  createItemV1,
   toConversationId,
   toIsoTimestamp,
   toMessageId,
+  toMessageItemId,
   toProjectId,
   toThreadId
 } from '../../src/domain';
@@ -117,6 +119,32 @@ describe('Legacy Thread migration and Shadow Read', () => {
       const repository = new ThreadFileRepository(root);
       const migration = new LegacyThreadMigration(root, repository, { migrationId: 'shadow-workflow-test' });
       await migration.migrate([{ conversation }]);
+      const report = await migration.shadowCompare([{ conversation }]);
+      expect(report.differences).toEqual([]);
+    } finally { await rm(root, { recursive: true, force: true }); }
+  });
+
+  it('allows Thread facts that are ahead of the Legacy compatibility projection', async () => {
+    const root = await mkdtemp(path.join(os.tmpdir(), 'unicomp-thread-shadow-ahead-'));
+    try {
+      const conversation = legacyConversation();
+      const repository = new ThreadFileRepository(root);
+      const migration = new LegacyThreadMigration(root, repository, { migrationId: 'shadow-ahead-test' });
+      await migration.migrate([{ conversation }]);
+      const turn = (await repository.readTurns(toThreadId(conversation.id)))[0]!;
+      const ahead = createItemV1({
+        itemId: toMessageItemId('thread-ahead-assistant'),
+        threadId: toThreadId(conversation.id),
+        turnId: turn.turnId,
+        sequence: conversation.messages.length + 1,
+        type: 'assistant_message',
+        status: 'completed',
+        createdAt: t1,
+        updatedAt: t1,
+        messageSource: { messageId: toMessageId('thread-ahead-assistant'), messageRevision: 0 },
+        content: 'Thread 已先提交，Legacy 投影稍后追上。'
+      });
+      await repository.append({ threadId: toThreadId(conversation.id), idempotencyKey: 'thread-ahead', occurredAt: t1, items: [ahead] });
       const report = await migration.shadowCompare([{ conversation }]);
       expect(report.differences).toEqual([]);
     } finally { await rm(root, { recursive: true, force: true }); }

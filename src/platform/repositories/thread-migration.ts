@@ -63,7 +63,7 @@ export interface MigrationRunReport {
 
 export interface ShadowDifference {
   readonly conversationId: ConversationId;
-  readonly kind: 'missing_thread' | 'summary_mismatch' | 'item_count_mismatch' | 'content_hash_mismatch' | 'duplicate_thread' | 'execution_reference_mismatch' | 'model_context_mismatch';
+  readonly kind: 'missing_thread' | 'summary_mismatch' | 'item_count_mismatch' | 'content_hash_mismatch' | 'artifact_projection_mismatch' | 'duplicate_thread' | 'execution_reference_mismatch' | 'model_context_mismatch';
   readonly detail: string;
 }
 
@@ -220,23 +220,45 @@ export class LegacyThreadMigration {
         shadowArtifactOrdinal += 1;
         return [projectArtifactItem({ threadId: expectedBase.thread.threadId, sequence: expectedBase.items.length + shadowArtifactOrdinal, status: message.state, content: artifact.fileName, createdAt: message.createdAt, updatedAt: message.updatedAt, sourceIdentity: `legacy-artifact:${message.id}:${artifact.workId}`, workId: toWorkId(artifact.workId) })];
       }));
-      if (!thread || thread.title !== expected.thread.title || thread.status !== expected.thread.status || thread.itemCount !== expected.items.length || thread.turnCount !== expected.turns.length) differences.push({ conversationId: conversation.id, kind: 'summary_mismatch', detail: 'Thread metadata differs from legacy projection' });
-      if (items.length !== expected.items.length) differences.push({ conversationId: conversation.id, kind: 'item_count_mismatch', detail: `${items.length} target items vs ${expected.items.length} legacy items` });
-      const sourceContentHash = sha256Hex(canonicalJson(expected.items.map(item => [item.itemId, item.content, item.status])));
-      const targetContentHash = sha256Hex(canonicalJson(items.map(item => [item.itemId, item.content, item.status])));
+      const expectedMessages = expected.items.filter(isCanonicalMessageItem);
+      const targetMessages = items.filter(isCanonicalMessageItem);
+      const targetByMessageId = new Map(targetMessages.map(item => [String(item.messageSource!.messageId), item]));
+      const missingMessages = expectedMessages.filter(item => !targetByMessageId.has(String(item.messageSource!.messageId)));
+      // Thread is the write authority after cutover. It can legitimately be
+      // ahead of Legacy while the compatibility projection is catching up.
+      // The gate therefore requires every Legacy message to exist in Thread,
+      // while allowing additional Thread messages and projection Items.
+      if (!thread || thread.title !== expected.thread.title || thread.status !== expected.thread.status ||
+        thread.itemCount < expectedMessages.length || thread.turnCount < expected.turns.length) differences.push({ conversationId: conversation.id, kind: 'summary_mismatch', detail: 'Thread metadata is behind the Legacy facts' });
+      if (missingMessages.length > 0 || targetMessages.length < expectedMessages.length) differences.push({ conversationId: conversation.id, kind: 'item_count_mismatch', detail: `${missingMessages.length} Legacy messages are missing from Thread` });
+      const sourceContentHash = sha256Hex(canonicalJson(expectedMessages.map(item => [item.messageSource!.messageId, item.content, item.status])));
+      const targetContentHash = sha256Hex(canonicalJson(expectedMessages.map(item => {
+        const target = targetByMessageId.get(String(item.messageSource!.messageId));
+        return [item.messageSource!.messageId, target?.content, target?.status];
+      })));
       if (sourceContentHash !== targetContentHash) differences.push({ conversationId: conversation.id, kind: 'content_hash_mismatch', detail: `${sourceContentHash} != ${targetContentHash}` });
-      const expectedContextHash = sha256Hex(canonicalJson(conversation.messages.filter(message => message.state === 'completed' && !message.workflowReply).map(message => [message.role, message.content])));
+      const expectedContextMessages = expectedMessages.filter(item => item.status === 'completed' && item.legacyMessageSnapshot?.workflowReply === undefined);
+      const expectedContextHash = sha256Hex(canonicalJson(expectedContextMessages.map(item => [item.type === 'user_message' ? 'user' : 'assistant', item.content])));
       // Workflow replies are deliberately excluded from the Agent context on
       // the Legacy side (see conversation-context-builder). Keep Shadow
       // Compare semantically aligned with that contract; otherwise every
       // migrated conversation containing a clarification/source notice is
       // permanently blocked at startup with a false model_context_mismatch.
-      const targetContextHash = sha256Hex(canonicalJson(items
-        .filter(item => item.messageSource && item.status === 'completed' &&
-          item.messageSource.messageId !== undefined &&
-          item.legacyMessageSnapshot?.workflowReply === undefined)
-        .map(item => [item.type === 'user_message' ? 'user' : 'assistant', item.content])));
+      const targetContextHash = sha256Hex(canonicalJson(expectedContextMessages.map(item => {
+        const target = targetByMessageId.get(String(item.messageSource!.messageId));
+        return [item.type === 'user_message' ? 'user' : 'assistant', target?.content];
+      })));
       if (expectedContextHash !== targetContextHash) differences.push({ conversationId: conversation.id, kind: 'model_context_mismatch', detail: `${expectedContextHash} != ${targetContextHash}` });
+      const expectedArtifacts = expected.items.filter(item => item.type === 'document_artifact_projection');
+      const targetArtifacts = items.filter(item => item.type === 'document_artifact_projection');
+      const missingArtifacts = expectedArtifacts.filter(expectedArtifact => {
+        const workId = expectedArtifact.projectionSource?.workId;
+        return !targetArtifacts.some(targetArtifact =>
+          String(targetArtifact.projectionSource?.workId ?? '') === String(workId ?? '') &&
+          targetArtifact.content === expectedArtifact.content && targetArtifact.status === expectedArtifact.status
+        );
+      });
+      if (missingArtifacts.length > 0) differences.push({ conversationId: conversation.id, kind: 'artifact_projection_mismatch', detail: `${missingArtifacts.length} Legacy artifacts are missing from Thread` });
     }
     return { sourceLabel: this.options.sourceLabel ?? 'isolated-legacy-copy', checkedConversations: source.length, differences, sourceSummaryHash: sha256Hex(canonicalJson(source.map(snapshot => summaryFromConversation(snapshot.conversation)))), targetSummaryHash: sha256Hex(canonicalJson(summaries)), modelContextCompared: true };
   }
@@ -324,6 +346,7 @@ function toExecutionLinks(references: readonly LegacyExecutionReference[], conve
 }
 
 function replaceLedgerEntry(entries: MigrationLedgerEntry[], next: MigrationLedgerEntry): void { const index = entries.findIndex(entry => entry.conversationId === next.conversationId); if (index < 0) entries.push(next); else entries[index] = next; }
+function isCanonicalMessageItem(item: import('../../domain').ItemV1): boolean { return (item.type === 'user_message' || item.type === 'assistant_message') && item.messageSource !== undefined; }
 function summaryFromConversation(conversation: Conversation): unknown { return { conversationId: conversation.id, projectId: conversation.projectId, title: conversation.title, status: conversation.status, updatedAt: conversation.updatedAt, messageCount: conversation.messages.length, turnCount: conversation.messages.filter(message => message.role === 'user').length }; }
 function canonicalJson(value: unknown): string { return JSON.stringify(sortValue(value)); }
 function sortValue(value: unknown): unknown { if (Array.isArray(value)) return value.map(sortValue); if (value && typeof value === 'object') return Object.fromEntries(Object.entries(value as Record<string, unknown>).filter(([, entry]) => entry !== undefined).sort(([left], [right]) => left.localeCompare(right)).map(([key, entry]) => [key, sortValue(entry)])); return value; }
