@@ -22,6 +22,7 @@ import {
   ThreadProjectionCoordinator,
   ConversationTurnCoordinator,
   ThreadLegacyProjectionWorker,
+  ConversationContextReader,
   ConversationWebResearchService,
   DocumentTaskRuntimeService,
   ProjectContextRegistryService,
@@ -73,6 +74,7 @@ import {
   JsonProviderUsageObservationRepository,
   JsonProjectConversationRepository,
   JsonProjectContextRepository,
+  JsonWorkRepository,
   ConversationRevisionConflictError
 } from '../repositories';
 import { NodeProjectStorage } from '../storage';
@@ -304,6 +306,18 @@ export function createChatContextRuntime(
       session.projectId
     );
     const agentRuns = new JsonConversationAgentRunRepository(storage, session.projectId, executionTimestamp);
+    const contextThreadRepository = (dependencies.threadFileReadEnabled || dependencies.threadFileWriteEnabled)
+      ? new ThreadFileRepository(session.rootDirectory)
+      : undefined;
+    const contextReader = contextThreadRepository
+      ? new ConversationContextReader(
+          contextThreadRepository,
+          agentRuns,
+          responseExecutions,
+          new JsonDocumentTaskRuntimeRepository(storage, session.projectId),
+          new JsonWorkRepository(storage, session.projectId)
+        )
+      : undefined;
     const ownedRunsByResponse = new Map<string, ConversationAgentRunId>();
     const sessions = new JsonConversationAgentSessionRepository(storage, session.projectId, executionTimestamp);
     let continuationRuntime: ConversationAgentContinuationRuntime;
@@ -474,7 +488,8 @@ export function createChatContextRuntime(
         return { execution, conversation: { ...toConversationDto(await service.get(toConversationId(execution.conversationId))),
           agentSessions: await continuationRuntime.list(execution.conversationId) } };
       },
-      cancelExecution: async id => { await executionCoordinator.cancel(toConversationResponseExecutionId(id)); } });
+      cancelExecution: async id => { await executionCoordinator.cancel(toConversationResponseExecutionId(id)); },
+      ...(contextReader ? { contextReader } : {}) });
     const agentRuntimeRepository = new JsonConversationAgentRuntimeRepository(storage, session.projectId, now);
     const agentRuntime = new ConversationAgentRuntimeService({ repository: agentRuntimeRepository, now,
       executionOwnershipGuard: runId => sessionService.assertExecutionOwnershipIfPresent(runId),

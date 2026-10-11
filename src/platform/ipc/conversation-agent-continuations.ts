@@ -9,6 +9,7 @@ import {
 } from '../../domain';
 import { ConversationAgentSessionError, type ConversationAgentSessionService } from '../../application/conversation-agent-session-service';
 import { ConversationWorkflowService } from '../../application/conversation-workflow-service';
+import type { ConversationContextReader } from '../../application/conversation-context-reader';
 import { ConversationIntentOrchestrator, type ConversationIntentClassifierPort, type ConversationSemanticContext } from '../../application/conversation-intent-orchestrator';
 import type { ConversationApplicationService } from '../../application/conversation-service';
 import { JsonConversationWorkflowRepository } from '../repositories/json-conversation-workflow-repository';
@@ -39,6 +40,7 @@ export class ConversationAgentContinuationRuntime {
     readonly supportsMutation?: boolean;
     readonly replayExecution: (responseExecutionId: string) => Promise<ConversationAgentResponseStartDto>;
     readonly cancelExecution: (responseExecutionId: string) => Promise<void>;
+    readonly contextReader?: ConversationContextReader;
   }) {
     this.workflowRepository = new JsonConversationWorkflowRepository(options.storage, options.projectId, options.now);
     this.workflows = new ConversationWorkflowService(this.workflowRepository, new ConversationIntentOrchestrator({
@@ -252,7 +254,7 @@ export class ConversationAgentContinuationRuntime {
           request?.action === 'continue' && item.status === 'ready'));
       const leaseSignal = await this.options.sessionService.signalForRun(session.id);
       const signal = leaseSignal ? AbortSignal.any([leaseSignal, input.signal]) : input.signal;
-      const context = { ...this.semanticContext(input.conversation, session), semanticCandidate: {
+      const context = { ...(await this.semanticContext(input.conversation, session)), semanticCandidate: {
         candidateId: input.input.candidateId, productFeature: input.input.productFeature
       } };
       if (!workflow) {
@@ -312,12 +314,19 @@ export class ConversationAgentContinuationRuntime {
       throw error;
     }
   }
-  private semanticContext(conversation: Conversation, session: ConversationAgentSessionV1): ConversationSemanticContext {
+  private async semanticContext(conversation: Conversation, session: ConversationAgentSessionV1): Promise<ConversationSemanticContext> {
+    let threadItems: readonly { readonly itemId: { readonly namespace: string; readonly value: string }; readonly type: string; readonly content?: string }[] | undefined;
+    if (this.options.contextReader) {
+      try { threadItems = (await this.options.contextReader.read(conversation.id)).items; } catch { /* compatibility fallback below */ }
+    }
     const documents = conversation.messages.flatMap(message => message.state === 'completed' && message.documentResult
       ? [{ messageId: message.id, kind: message.documentResult.kind, fileName: message.documentResult.fileName }] : []);
     const pinned = new Set(session.inputReferences.filter(reference => reference.kind === 'message').map(reference => reference.id));
-    return { documents, ...(documents.length ? { latestDocumentKind: documents.at(-1)!.kind } : {}),
-      recentUserMessages: conversation.messages.filter(message => message.role === 'user' && pinned.has(message.id)).map(message => message.content) };
+    const recentUserMessages = threadItems
+      ?.filter(item => item.type === 'user_message' && item.content && pinned.has(item.itemId.value as never))
+      .map(item => item.content!)
+      ?? conversation.messages.filter(message => message.role === 'user' && pinned.has(message.id)).map(message => message.content);
+    return { documents, ...(documents.length ? { latestDocumentKind: documents.at(-1)!.kind } : {}), recentUserMessages };
   }
   private initialPolicy(conversation: Conversation): ExecutionBudgetPolicy {
     const hasPpt = this.options.supportsMutation !== false && conversation.messages.some(message => message.documentResult?.kind === 'ppt');
