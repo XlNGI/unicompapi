@@ -218,8 +218,9 @@ async function inspectOutbound(request, domain, expectedModel) {
     // the production finalizer deliberately removes all tools for the final
     // answer. Keep this request inside the bounded generation transcript while
     // validating that the model only receives the completed read observation.
+    const toolMessagesBeforeFinal = (payload.messages ?? []).filter(message => message.role === 'tool');
     const finalAnswerRequest = activeCase.outerRequests >= 2 &&
-      (payload.tools == null || (Array.isArray(payload.tools) && payload.tools.length === 0));
+      toolMessagesBeforeFinal.length === 2 && payload.messages?.at(-1)?.role === 'tool';
     if (finalAnswerRequest) {
       const assistantCalls = [];
       const toolMessages = [];
