@@ -8,6 +8,8 @@
 
 后续代码审计确认：第二个 Work 的直接来源是同一 source message 上 Agent native `generate_pptx` 结果与 Legacy `executeReadyWorkflow` 路径重叠；它不是单纯的恢复器重放，但对用户仍表现为重复正式交付。已增加 Workflow 查询层门禁：发现同一 source message 后已有校验通过的 `documentResult` 时，只创建本地完成 receipt，不再启动 Provider 或本地文档生成。原验收结论中的重复副作用仍然有效，修复后需重新执行同类隔离验收。
 
+真实项目 `新建文件夹 (3)` 的后续日志进一步确认：第一次 Response `response-execution-9d7fc9d0-e275-4b90-95ed-ad3a99fa094e` 在 06:07:53 完成并登记 Work `work-document-345a9723-6b4e-4564-a6a1-be3d193285ed`；随后同一 source message 在没有新增用户消息的情况下启动第二个 Response `response-execution-77aae5a6-d9b3-45c1-983b-323bb63d4548`。第一次 Agent Tool 生成成功后，Host 写入的 `documentResult` 只包含 Work/文件名/大小/类型，不带本地生成服务可选的 `validatedContent`；原防重门禁因此过严，未识别正式 Host 收据。已将门禁修正为 completed Assistant + Host 登记的 `documentResult.workId`，并保留本地结算，不触发第二次生成。第二次失败来自其后续本地校验/有限修正阶段，错误为 `verification_failed`，不是第一次 PPT 生成失败。
+
 修复验证：新增 `ConversationWorkflowService.settleExistingDocumentResult`、Workflow Controller 查询结算和 ChatPage 执行前最新 Workflow 刷新；Application/Controller 35/35、生产文档/Runtime 70/70、typecheck、lint、build 通过；真实 Electron Mock Provider 通过 Agent、取消边界、Tool Calling、PPT/Word/Excel 生成。此前隔离项目中的两个 Work 保留为失败现场证据，未直接修改；新鲜隔离用例需确认同一 source message 最终只出现一个正式 Work。
 
 ### 真实会话日志复核：PPT 生成与登记通过（2026-10-11）

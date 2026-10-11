@@ -246,7 +246,8 @@ describe('ConversationWorkflowController', () => {
     await conversations.save(current, current.revision - 1);
     current = attachDocumentResultToMessage(current, toMessageId('message-native-document-result'), {
       kind: 'ppt', workId: toWorkId('work-native-document-result'), fileName: 'native-result.pptx', sizeBytes: 10,
-      validatedContent: 'validated'
+      // Agent-native Work receipts are formally verified by the Host but do
+      // not carry the local generation service's optional validatedContent.
     }, toIsoTimestamp(now()));
     await conversations.save(current, current.revision - 1);
 

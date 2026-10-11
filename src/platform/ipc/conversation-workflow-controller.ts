@@ -337,8 +337,9 @@ export class ConversationWorkflowController {
     let resultMessage: typeof conversation.messages[number] | undefined;
     for (const message of conversation.messages.slice(sourceIndex + 1)) {
       if (message.role === 'user') break;
-      if (message.role === 'assistant' && message.documentResult?.kind === workflow.plan.documentKind &&
-          message.documentResult.validatedContent) {
+      if (message.role === 'assistant' && message.state === 'completed' &&
+          message.documentResult?.kind === workflow.plan.documentKind &&
+          message.documentResult.workId) {
         resultMessage = message;
         break;
       }
