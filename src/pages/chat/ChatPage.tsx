@@ -2303,6 +2303,19 @@ export function ChatPage({
     suppliedResearchReferences?: readonly WebResearchReferenceDto[]
   ) {
     if (workflowExecutionInFlightRef.current) return;
+    // The initial ready snapshot may have been read before an Agent-native
+    // response persisted its document Work. Refresh immediately before any
+    // legacy workflow execution so an existing verified result is settled by
+    // the host instead of starting a second generation.
+    if (chat?.getPendingWorkflow) {
+      const latestPending = await chat.getPendingWorkflow(conversation.conversationId);
+      if (!latestPending.ok) return;
+      if (!latestPending.value || latestPending.value.workflowId !== workflow.workflowId) {
+        setActiveWorkflow(latestPending.value ?? undefined);
+        return;
+      }
+      workflow = latestPending.value;
+    }
     workflowExecutionInFlightRef.current = true;
     setWorkflowExecutionActive(true);
     setWorkflowCancelRequested(false);
