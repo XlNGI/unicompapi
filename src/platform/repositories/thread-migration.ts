@@ -1,6 +1,6 @@
 import { mkdir, readFile, stat } from 'node:fs/promises';
 import path from 'node:path';
-import type { Conversation, ConversationAgentRunId, ConversationId, ConversationResponseExecutionId, IsoTimestamp, MessageId, ThreadId } from '../../domain';
+import type { Conversation, ConversationAgentRunId, ConversationId, ConversationResponseExecutionId, IsoTimestamp, ItemV1, MessageId, ThreadId } from '../../domain';
 import { appendDisplayItems, conversationToThreadProjection, projectArtifactItem } from '../../application/conversation-thread-adapter';
 import type { ConversationExecutionLinkInput } from '../../application/conversation-thread-adapter';
 import { sha256Hex, toIsoTimestamp, toWorkId } from '../../domain';
@@ -346,7 +346,7 @@ function toExecutionLinks(references: readonly LegacyExecutionReference[], conve
 }
 
 function replaceLedgerEntry(entries: MigrationLedgerEntry[], next: MigrationLedgerEntry): void { const index = entries.findIndex(entry => entry.conversationId === next.conversationId); if (index < 0) entries.push(next); else entries[index] = next; }
-function isCanonicalMessageItem(item: import('../../domain').ItemV1): boolean { return (item.type === 'user_message' || item.type === 'assistant_message') && item.messageSource !== undefined; }
+function isCanonicalMessageItem(item: ItemV1): boolean { return (item.type === 'user_message' || item.type === 'assistant_message') && item.messageSource !== undefined; }
 function summaryFromConversation(conversation: Conversation): unknown { return { conversationId: conversation.id, projectId: conversation.projectId, title: conversation.title, status: conversation.status, updatedAt: conversation.updatedAt, messageCount: conversation.messages.length, turnCount: conversation.messages.filter(message => message.role === 'user').length }; }
 function canonicalJson(value: unknown): string { return JSON.stringify(sortValue(value)); }
 function sortValue(value: unknown): unknown { if (Array.isArray(value)) return value.map(sortValue); if (value && typeof value === 'object') return Object.fromEntries(Object.entries(value as Record<string, unknown>).filter(([, entry]) => entry !== undefined).sort(([left], [right]) => left.localeCompare(right)).map(([key, entry]) => [key, sortValue(entry)])); return value; }
