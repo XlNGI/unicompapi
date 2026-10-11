@@ -6,7 +6,7 @@
 
 登记 Work `work-document-969a7719-5eee-4aec-b6fd-5932bd701bfe` 对应 `files/documents/企业内部AI办公助手项目汇报-20261011043748-23aa8262-8593-4583-b6bb-20fc9993e86d.pptx`，大小 198,365 bytes，文件状态 `available`，发布前后 Hash 校验通过。Production Trace 依次完成渲染、结构检查、Hash 检查、原子发布、发布后 Hash 检查、Work 登记和 `task_complete`。该项目当前不存在 `entities/threads` 目录，本次未观察到 ThreadFile 写入，符合关闭写入开关的预期。
 
-结论：真实 Provider 单次 PPT 生成 `PASS`；文档渲染与登记 `PASS`；ThreadFile 写入关闭符合预期。该记录不扩展为真实 Provider 连续读取/修改工具验收，也不代表生产 Cutover 已批准。`TT: undefined function: 32` 保持为 PDF.js 字体解析警告，不影响本次结果。
+结论：真实 Provider 单次 PPT 生成 `PASS`；文档渲染与登记 `PASS`；ThreadFile 写入关闭符合预期；负责人已在 PowerPoint 中完成视觉确认，页面内容、布局和可打开性 `PASS`。该记录不扩展为真实 Provider 连续读取/修改工具验收，也不代表生产 Cutover 已批准。`TT: undefined function: 32` 保持为 PDF.js 字体解析警告，不影响本次结果。
 
 ### 自动验收复核：未完成项目代码级门禁（2026-10-11）
 
