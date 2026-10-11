@@ -1,5 +1,11 @@
 # UniComp 开发计划
 
+### 统一达成计划：Thread-first 会话、新执行权威与模型适配（2026-10-11）
+
+根据当前代码审查，后续主线统一为：Thread/Turn/Item 作为新会话权威；Agent Runtime 作为唯一执行权威；Document Runtime/Work 作为文档权威；Provider Capability Evidence/Feature Contract 作为模型适配权威。`ConversationWorkflowService` 只保留计划、确认、多交付状态和失败语义，退出独立 Provider/文档副作用执行；Legacy Conversation 只保留历史读取和迁移兼容。停止继续扩展 Legacy 主链路，优先实施唯一 Turn Coordinator、Thread-first 新会话和模型能力统一接线。
+
+当前量化：src 约 196,605 行、electron 约 5,621 行、tests 约 99,794 行、docs/scripts 约 32,500 行。膨胀主要来自 Legacy/Thread、Agent Native/Workflow、恢复/结算和 Provider 能力历史实现并存；瘦身目标是删除重复业务权威，不删除安全门禁、测试证据或迁移备份。完整计划见[Thread-first 与模型适配统一达成计划](docs/current/thread-first-model-adapter-unified-plan.md)。本记录只冻结目标和实施顺序，不在本轮切换生产存储或修改真实数据。
+
 ### 受控崩溃恢复验收：发现重复 Work 缺陷（2026-10-11）
 
 在隔离项目 `OA-Recovery-Test-20261011`（`project-6d383536-b582-4f7d-8b6c-f813615a5130`）执行真实 Provider 崩溃重启验收。取消用例两次均正确进入 `cancelled`，无正式 Work；该部分 `PASS`。崩溃用例在 `response-execution-330dbb22-e7ec-499d-acda-7fe2282ced28` 处于 `streaming`/文档生成阶段时结束 Electron 主进程，随后重启。原执行最终完成，原 Work `work-document-3e4b9f3a-141c-4bf2-a1fc-1fd26cbd71d8` 和文件 `document-file-05fe91ce-bb7c-4345-b7c1-fe33422ee250` 保留，大小 305,343 bytes、Hash `fa681bad11063b1c5d6f4c8316b4810dcce6106ae33cb824900344832164dfb6`，因此“已有正式 Work 不被删除”通过。
