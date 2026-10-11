@@ -1,5 +1,9 @@
 # UniComp 开发计划
 
+### 人工验收补充：真实调用生成 PPT（2026-10-10）
+
+负责人反馈已通过真实调用成功生成 PPT。这确认 Agent-first 主链路到 PPT 生成能力至少完成了一次真实端到端人工验收。当前证据只覆盖“真实调用可生成 PPT”这一事实；Provider 连续 Tool Calling、取消/恢复、崩溃恢复、历史迁移和 Thread 存储 Cutover 仍分别按原门禁处理，未因本次结果自动标记完成。
+
 ### 维护实施：首次打开会话首屏读取解耦（2026-10-10；本地主链路验收完成）
 
 负责人反馈“首次打开会话加载很慢”。定位确认：首选会话详情仍调用完整 `getConversation()`，首屏被 `responses.ready`、同会话执行句柄终态等待、ParentRun/AgentSession 读取、保留作品校验以及 `getPendingWorkflow()` 的恢复链路共同阻塞。已增加受控 `ConversationIdRequest.readMode`：`fast` 详情读取返回完整已持久化消息但跳过恢复屏障和执行投影读取；对话页首屏先用快速详情显示，完整读取与文档恢复在后台补齐。启用 Thread 读取时直接由 `Thread Item Page` 负责首屏消息，避免重复 Legacy 全量详情读取。快速结果暂时去除未校验的 `retainedDocumentResult`，不改变正式作品门禁；发送、取消、恢复、文档登记等路径继续使用默认完整读取。

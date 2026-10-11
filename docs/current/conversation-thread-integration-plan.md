@@ -2,7 +2,7 @@
 
 日期：2026-10-10
 
-状态：计划已冻结，阶段 0 完成，阶段 1 完成，阶段 2 Renderer 初步接线完成，阶段 3 Shadow Projection 接线完成，阶段 4 Item 索引初步完成，隔离 Electron/Mock Provider 验收完成
+状态：计划已冻结，阶段 0 完成，阶段 1 完成，阶段 2 Renderer 初步接线完成，阶段 3 Shadow Projection 接线完成，阶段 4 Item 索引初步完成，隔离 Electron/Mock Provider 验收完成；已补充一次真实调用生成 PPT 的人工验收事实
 
 ## 1. 基线与范围
 
@@ -204,4 +204,4 @@ Thread 相关增加：
 
 ## 8. 当前实施起点
 
-当前分支 `codex/conversation-thread-integration-plan` 从 `develop@b1d01c7f5f346cd2ff170ab77ad1de930267257a` 建立。阶段 0 已完成：三方 SHA、祖先关系、只读合并冲突、复用范围和测试基线已记录；`typecheck`、`lint`、`build`、`git diff --check` 通过。当前 `pnpm test` 的 Node/UI 为 396/396，Vitest 为 3300/3315，15 项失败；聊天核心定向复核为 116/116，文档生成循环以 30 秒独立门禁复核为 17/17。阶段 1 已接入 Thread/Turn/Item 合同、ThreadFile Repository/迁移工具、Thread Query DTO/parser、只读 IPC/preload 和 Runtime 选择器，并在显式 `VITE_UNICOMP_THREAD_READ_PATH=1` 下让 ChatPage 读取 Thread Summary、首屏 Item Page 和更早消息分页；默认 Legacy 路径不变。阶段 2 已把现有消息行包进可切换的 `VirtualMessageList`，并保留默认 Legacy 列表；真实 Electron 已完成 ThreadFile/Legacy 读取、分页、虚拟行和项目切换验收。阶段 3 已新增 `ThreadCommandService` 和 `ThreadProjectionCoordinator`，在显式 `UNICOMP_THREAD_FILE_WRITE_PATH=1` 下为 Agent 消息写入 Shadow Thread Turn/User Item、Agent Run Execution Link 和终态 Assistant Item；默认生产路径关闭该 flag，未切换权威。阶段 4 已增加持久化 Item sequence/offset index 和按序列范围读取，隔离 Node 性能基线已通过；Mock Provider + 真实 Electron 已通过普通 Agent、取消起始、单次 Tool Calling、PPT Work、Word/Excel 物理文件生成。真实外部 Provider、连续 Tool Calling 恢复、历史迁移和 Cutover 尚未完成。本计划不授权生产 Cutover。
+当前分支 `codex/conversation-thread-integration-plan` 从 `develop@b1d01c7f5f346cd2ff170ab77ad1de930267257a` 建立。阶段 0 已完成：三方 SHA、祖先关系、只读合并冲突、复用范围和测试基线已记录；`typecheck`、`lint`、`build`、`git diff --check` 通过。当前 `pnpm test` 的 Node/UI 为 396/396，Vitest 为 3300/3315，15 项失败；聊天核心定向复核为 116/116，文档生成循环以 30 秒独立门禁复核为 17/17。阶段 1 已接入 Thread/Turn/Item 合同、ThreadFile Repository/迁移工具、Thread Query DTO/parser、只读 IPC/preload 和 Runtime 选择器，并在显式 `VITE_UNICOMP_THREAD_READ_PATH=1` 下让 ChatPage 读取 Thread Summary、首屏 Item Page 和更早消息分页；默认 Legacy 路径不变。阶段 2 已把现有消息行包进可切换的 `VirtualMessageList`，并保留默认 Legacy 列表；真实 Electron 已完成 ThreadFile/Legacy 读取、分页、虚拟行和项目切换验收。阶段 3 已新增 `ThreadCommandService` 和 `ThreadProjectionCoordinator`，在显式 `UNICOMP_THREAD_FILE_WRITE_PATH=1` 下为 Agent 消息写入 Shadow Thread Turn/User Item、Agent Run Execution Link 和终态 Assistant Item；默认生产路径关闭该 flag，未切换权威。阶段 4 已增加持久化 Item sequence/offset index 和按序列范围读取，隔离 Node 性能基线已通过；Mock Provider + 真实 Electron 已通过普通 Agent、取消起始、单次 Tool Calling、PPT Work、Word/Excel 物理文件生成。真实调用生成 PPT 的单次人工验收已确认；连续 Tool Calling 恢复、系统化真实 Provider 矩阵、历史迁移和 Cutover 尚未完成。本计划不授权生产 Cutover。
