@@ -36,7 +36,8 @@ export class ConversationResponseExecutionLifecycle {
     private readonly repository: ConversationResponseExecutionRepository,
     private readonly ids: ConversationResponseStreamEventIdFactory,
     private readonly channel?: ControlledConversationResponseStreamChannel,
-    private readonly now: () => IsoTimestamp = () => new Date().toISOString() as IsoTimestamp
+    private readonly now: () => IsoTimestamp = () => new Date().toISOString() as IsoTimestamp,
+    private readonly onPersistedEvent?: (event: ConversationResponseStreamEventV1) => Promise<void>
   ) {}
 
   start(executionId: ConversationResponseExecutionId): Promise<ConversationResponseStreamEventV1> {
@@ -239,6 +240,9 @@ export class ConversationResponseExecutionLifecycle {
       occurredAt: this.now()
     }));
     await this.repository.appendEvents(appended);
+    if (this.onPersistedEvent) {
+      for (const event of appended) await this.onPersistedEvent(event);
+    }
     if (publish) {
       for (const event of appended) {
         this.channel?.publish(toControlledConversationResponseStreamEventDto({ execution, event }));

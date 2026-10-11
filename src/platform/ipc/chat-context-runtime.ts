@@ -57,6 +57,7 @@ import {
   type ConversationAgentRunId,
   type ConversationResponseExecutionId,
   type ConversationResponseExecutionV1,
+  type ConversationResponseStreamEventV1,
   type ItemStatus,
   type ProjectId,
   type WorkId,
@@ -452,6 +453,7 @@ export function createChatContextRuntime(
       now
     );
     const streamChannel = new ControlledConversationResponseStreamChannel();
+    let projectThreadStreamEvent: ((event: ConversationResponseStreamEventV1) => Promise<void>) | undefined;
     const responseLifecycle = new ConversationResponseExecutionLifecycle(
       responseExecutions,
       {
@@ -459,7 +461,8 @@ export function createChatContextRuntime(
           toConversationResponseStreamEventId(`response-stream-${randomUUID()}`)
       },
       streamChannel,
-      () => toIsoTimestamp(now())
+      () => toIsoTimestamp(now()),
+      async event => { await projectThreadStreamEvent?.(event); }
     );
     const executionCoordinator = new ConversationExecutionCoordinator();
     const ownedResponseIds = new Set<string>();
@@ -933,6 +936,29 @@ export function createChatContextRuntime(
     const legacyProjection = threadWriteRepository
       ? new ThreadLegacyProjectionWorker(threadWriteRepository, projectConversations, now)
       : undefined;
+    if (turnCoordinator) {
+      projectThreadStreamEvent = async event => {
+        const execution = await responseLifecycle.readModel(event.responseExecutionId);
+        const conversation = await projectConversations.get(toConversationId(execution.conversationId));
+        const assistant = conversation?.messages.find(message => message.id === execution.assistantMessageId);
+        const status: ItemStatus = execution.state === 'completed' ? 'completed'
+          : execution.state === 'cancelled' ? 'cancelled'
+            : execution.state === 'failed' ? 'failed'
+              : execution.state === 'interrupted' ? 'interrupted' : 'streaming';
+        await turnCoordinator.projectAssistantMessage({
+          threadId: execution.conversationId,
+          sourceMessageId: execution.userMessageId,
+          assistantMessageId: execution.assistantMessageId,
+          messageRevision: assistant?.revision ?? 0,
+          status,
+          content: assistant?.content ?? execution.content,
+          createdAt: toIsoTimestamp(assistant?.createdAt ?? execution.createdAt),
+          updatedAt: event.occurredAt,
+          ...(assistant ? { legacyMessageSnapshot: assistant as unknown as Readonly<Record<string, unknown>> } : {})
+        });
+        await legacyProjection?.drain(String(execution.conversationId));
+      };
+    }
     const responses: ConversationResponseControllerRuntime = {
       conversationService: service,
       conversations: projectConversations,
