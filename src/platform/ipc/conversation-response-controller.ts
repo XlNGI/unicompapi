@@ -662,7 +662,22 @@ export class ConversationResponseController {
         throw new ConversationAttachmentError('attachment_changed', '新增附件须先绑定到当前需求，请补充资料后再执行。');
       }
     } else if (input.conversation) {
-      conversation = input.conversation.editedMessageId
+      if (!input.conversation.editedMessageId && runtime.turnCoordinator) {
+        const messageId = runtime.conversationService.nextMessageId();
+        acceptedThreadTurn = await step(() => runtime.turnCoordinator!.acceptUserTurn({
+          threadId: conversation.id,
+          projectId: runtime.conversations.projectId,
+          title: conversation.title,
+          messageId,
+          content: input.content,
+          createdAt: toIsoTimestamp(this.now()),
+          clientCommandId: input.clientCommandId
+        }));
+        await step(() => runtime.legacyProjection?.drain(String(conversation.id)) ?? Promise.resolve({ projected: 0, pending: 0 }));
+        preacceptedThreadTurn = true;
+        conversation = await step(() => runtime.conversationService.get(conversation.id));
+      } else {
+        conversation = input.conversation.editedMessageId
         ? await step(() => runtime.conversationService.editCancelledUserMessage({
             conversationId: conversation.id,
             expectedRevision: input.conversation!.expectedRevision,
@@ -682,6 +697,7 @@ export class ConversationResponseController {
               ? { displayContent: input.displayContent }
               : {})
           }));
+      }
     } else {
       if (!preacceptedThreadTurn) {
         conversation = await step(() => runtime.conversationService.addUserMessage({
