@@ -513,7 +513,9 @@ export function createChatContextRuntime(
             workId: result.workId,
             responseExecutionId: responseExecution.id,
             ...(linkedRun ? { agentRunId: linkedRun.id } : {}),
-            status: responseExecution.state === 'completed' ? 'completed' : 'failed',
+            status: responseExecution.state === 'completed' ? 'completed'
+              : responseExecution.state === 'cancelled' ? 'cancelled'
+                : responseExecution.state === 'interrupted' ? 'interrupted' : 'failed',
             content: `${result.fileName} (${result.kind})`,
             createdAt: responseExecution.createdAt,
             updatedAt: toIsoTimestamp(now())
