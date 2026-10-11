@@ -62,6 +62,14 @@ export interface ProjectAssistantMessageInput {
   readonly legacyMessageSnapshot?: Readonly<Record<string, unknown>>;
 }
 
+export interface UpdateThreadItemInput {
+  readonly threadId: ThreadId | string;
+  readonly itemId: ItemV1['itemId'];
+  readonly status: ItemStatus;
+  readonly content?: string;
+  readonly updatedAt: IsoTimestamp;
+}
+
 export interface ProjectDocumentArtifactInput {
   readonly threadId: ThreadId | string;
   readonly sourceMessageId: string;
@@ -140,7 +148,12 @@ export class ThreadProjectionCoordinator {
       item.itemId.namespace === 'message' && item.itemId.value === input.assistantMessageId &&
       item.messageSource?.messageRevision === input.messageRevision
     );
-    if (existing) return { thread, item: existing, alreadyCommitted: true };
+    if (existing) {
+      if (existing.status === input.status && existing.content === input.content && existing.updatedAt === input.updatedAt) {
+        return { thread, item: existing, alreadyCommitted: true };
+      }
+      return this.updateItem({ threadId, itemId: existing.itemId, status: input.status, content: input.content, updatedAt: input.updatedAt });
+    }
     const turns = await this.repository.readTurns(threadId);
     const turn = turns.find(candidate => candidate.userItemId?.namespace === 'message' && candidate.userItemId.value === input.sourceMessageId);
     if (!turn) throw new Error('turn_not_found_for_assistant');
@@ -182,7 +195,10 @@ export class ThreadProjectionCoordinator {
     const existing = (await this.repository.readItems(threadId)).find(item =>
       item.type === 'document_artifact_projection' && item.projectionSource?.workId !== undefined && String(item.projectionSource.workId) === String(input.workId)
     );
-    if (existing) return { thread, item: existing, alreadyCommitted: true };
+    if (existing) {
+      if (existing.status === input.status && existing.content === input.content && existing.updatedAt === input.updatedAt) return { thread, item: existing, alreadyCommitted: true };
+      return this.updateItem({ threadId, itemId: existing.itemId, status: input.status, content: input.content, updatedAt: input.updatedAt });
+    }
     const item = projectArtifactItem({
       threadId,
       turnId: turn.turnId,
@@ -223,7 +239,10 @@ export class ThreadProjectionCoordinator {
       item.type === input.kind && item.projectionSource?.toolCallId !== undefined &&
       String(item.projectionSource.toolCallId) === input.toolCallId
     );
-    if (existing) return { thread, item: existing, alreadyCommitted: true };
+    if (existing) {
+      if (existing.status === input.status && existing.content === input.content && existing.updatedAt === input.updatedAt) return { thread, item: existing, alreadyCommitted: true };
+      return this.updateItem({ threadId, itemId: existing.itemId, status: input.status, content: input.content, updatedAt: input.updatedAt });
+    }
     const projected = createToolProjectionItem({ ...input, threadId, turnId: turn.turnId, sequence: thread.lastItemSequence + 1 });
     const result = await this.repository.append({
       threadId,
@@ -240,6 +259,24 @@ export class ThreadProjectionCoordinator {
     );
     if (!committed) throw new Error('thread_tool_idempotency_record_missing');
     return { thread: result.thread, item: committed, alreadyCommitted: true };
+  }
+
+  private async updateItem(input: UpdateThreadItemInput): Promise<{ readonly thread: ThreadV1; readonly item: ItemV1; readonly alreadyCommitted: boolean }> {
+    const threadId = toThreadId(String(input.threadId));
+    const thread = await this.repository.getThread(threadId);
+    if (!thread) throw new Error('thread_not_found');
+    const current = (await this.repository.readItems(threadId)).find(item => item.itemId.namespace === input.itemId.namespace && item.itemId.value === input.itemId.value);
+    if (!current) throw new Error('thread_item_not_found');
+    const next = { ...current, status: input.status, updatedAt: input.updatedAt, ...(input.content !== undefined ? { content: input.content } : {}) } satisfies ItemV1;
+    const result = await this.repository.append({
+      threadId,
+      idempotencyKey: `thread-item-update:${threadId}:${input.itemId.namespace}:${input.itemId.value}:${input.status}:${input.updatedAt}`,
+      occurredAt: input.updatedAt,
+      expectedGeneration: thread.generation,
+      items: [next],
+      projectionOutbox: [projectionEvent(next, `thread-item-update:${threadId}:${input.itemId.namespace}:${input.itemId.value}:${input.status}:${input.updatedAt}`, input.updatedAt)]
+    });
+    return { thread: result.thread, item: next, alreadyCommitted: result.alreadyCommitted };
   }
 }
 

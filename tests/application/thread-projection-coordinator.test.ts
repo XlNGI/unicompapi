@@ -63,10 +63,12 @@ describe('ThreadProjectionCoordinator', () => {
       content: 'generate_pptx', createdAt: toIsoTimestamp('2026-10-10T00:00:01.000Z'), updatedAt: toIsoTimestamp('2026-10-10T00:00:02.000Z') };
     const call = await coordinator.projectTool({ ...common, kind: 'tool_call_projection' });
     const result = await coordinator.projectTool({ ...common, kind: 'tool_result_projection', content: 'completed' });
-    const replay = await coordinator.projectTool({ ...common, kind: 'tool_result_projection', content: 'changed' });
+    const replay = await coordinator.projectTool({ ...common, kind: 'tool_result_projection', content: 'changed', updatedAt: toIsoTimestamp('2026-10-10T00:00:03.000Z') });
+    const sameReplay = await coordinator.projectTool({ ...common, kind: 'tool_result_projection', content: 'changed', updatedAt: toIsoTimestamp('2026-10-10T00:00:03.000Z') });
     expect(call.item.type).toBe('tool_call_projection');
     expect(result.item.type).toBe('tool_result_projection');
-    expect(replay.alreadyCommitted).toBe(true);
+    expect(replay.alreadyCommitted).toBe(false);
+    expect(sameReplay.alreadyCommitted).toBe(true);
     expect(replay.item.itemId).toEqual(result.item.itemId);
   });
 });

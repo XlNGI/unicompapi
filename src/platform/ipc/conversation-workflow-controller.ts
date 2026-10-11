@@ -1,6 +1,7 @@
 import type {
   ConversationApplicationService,
-  ConversationWorkflowService
+  ConversationWorkflowService,
+  ConversationTurnCoordinator
 } from '../../application';
 import {
   toConversationId,
@@ -36,6 +37,8 @@ export interface ConversationWorkflowControllerRuntime {
     pin(fileIds: readonly string[]): Promise<readonly ConversationAttachmentReference[]>;
     prepareSummary?(input: Parameters<ConversationAttachmentContextService['prepareSummary']>[0]): Promise<void>;
   };
+  readonly turnCoordinator?: ConversationTurnCoordinator;
+  readonly legacyProjection?: { drain(threadId: string): Promise<{ readonly projected: number; readonly pending: number }> };
 }
 
 export class ConversationWorkflowController {
@@ -124,6 +127,20 @@ export class ConversationWorkflowController {
         content: input.content,
         ...(attachments ? { attachments } : {})
       });
+      if (runtime.turnCoordinator) {
+        const source = conversation.messages.at(-1)!;
+        await runtime.turnCoordinator.acceptUserTurn({
+          threadId: conversation.id,
+          projectId: session.projectId,
+          title: conversation.title,
+          messageId: source.id,
+          messageRevision: source.revision,
+          content: source.content,
+          createdAt: source.createdAt,
+          clientCommandId: input.clientCommandId ?? `answer:${input.workflowId}:${input.expectedWorkflowRevision}`
+        });
+        await runtime.legacyProjection?.drain(String(conversation.id));
+      }
       const sourceMessageId = conversation.messages.at(-1)!.id;
       return withProductionTrace({ rootDirectory: session.rootDirectory, projectId: session.projectId,
         conversationId: conversation.id, sourceMessageId, traceId: sourceMessageId,
@@ -153,7 +170,7 @@ export class ConversationWorkflowController {
       return {
         ok: true,
         value: {
-          conversation: toConversationDto(await this.ensureReply(runtime, updated)),
+          conversation: toConversationDto(await this.projectWorkflowReply(runtime, await this.ensureReply(runtime, updated), updated)),
           workflow: toWorkflowDto(updated)
         }
       };
@@ -398,6 +415,19 @@ export class ConversationWorkflowController {
     if (!source || source.role !== 'user') {
       return failure('message_not_completed', 'The workflow source message is unavailable');
     }
+    if (runtime.turnCoordinator) {
+      await runtime.turnCoordinator.acceptUserTurn({
+        threadId: conversation.id,
+        projectId: session.projectId,
+        title: conversation.title,
+        messageId: source.id,
+        messageRevision: source.revision,
+        content: source.content,
+        createdAt: source.createdAt,
+        clientCommandId: input.clientCommandId
+      });
+      await runtime.legacyProjection?.drain(String(conversation.id));
+    }
     return withProductionTrace({ rootDirectory: session.rootDirectory, projectId: session.projectId,
       conversationId: conversation.id, sourceMessageId: source.id, traceId: source.id,
       clientCommandId: input.clientCommandId }, async () => {
@@ -428,11 +458,37 @@ export class ConversationWorkflowController {
     return {
       ok: true,
       value: {
-        conversation: toConversationDto(await this.ensureReply(runtime, workflow)),
+        conversation: toConversationDto(await this.projectWorkflowReply(runtime, await this.ensureReply(runtime, workflow), workflow)),
         workflow: toWorkflowDto(workflow)
       }
     };
     });
+  }
+
+  private async projectWorkflowReply(
+    runtime: ConversationWorkflowControllerRuntime,
+    conversation: Awaited<ReturnType<ConversationApplicationService['get']>>,
+    workflow: ConversationWorkflowV1
+  ): Promise<typeof conversation> {
+    if (!runtime.turnCoordinator) return conversation;
+    const reply = [...conversation.messages].reverse().find(message =>
+      message.role === 'assistant' && message.workflowReply?.workflowId === workflow.id &&
+      message.workflowReply.revision >= workflow.revision
+    );
+    if (!reply) return conversation;
+    await runtime.turnCoordinator.projectAssistantMessage({
+      threadId: conversation.id,
+      sourceMessageId: workflow.sourceMessageId,
+      assistantMessageId: reply.id,
+      messageRevision: reply.revision,
+      status: 'completed',
+      content: reply.content,
+      createdAt: reply.createdAt,
+      updatedAt: reply.updatedAt,
+      legacyMessageSnapshot: reply as unknown as Readonly<Record<string, unknown>>
+    });
+    await runtime.legacyProjection?.drain(String(conversation.id));
+    return conversation;
   }
 
   private requireRuntime():

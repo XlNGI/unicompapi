@@ -1446,6 +1446,8 @@ export function createChatContextRuntime(
           now
         ),
         workflowService: runtime.workflowService,
+        turnCoordinator: runtime.responses.turnCoordinator,
+        legacyProjection: runtime.responses.legacyProjection,
         attachments: runtime.attachments,
         ready: runtime.responses.ready
       };
