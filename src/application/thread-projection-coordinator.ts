@@ -1,6 +1,8 @@
 import {
   appendTurnExecutionLink,
   createItemV1,
+  updateItemV1,
+  updateTurnV1,
   toConversationAgentRunId,
   toConversationResponseExecutionId,
   toProjectionItemId,
@@ -144,19 +146,37 @@ export class ThreadProjectionCoordinator {
     const threadId = toThreadId(String(input.threadId));
     const thread = await this.repository.getThread(threadId);
     if (!thread) throw new Error('thread_not_found');
-    const existing = (await this.repository.readItems(threadId)).find(item =>
+    const existing = latestItem((await this.repository.readItems(threadId)).filter(item =>
       item.itemId.namespace === 'message' && item.itemId.value === input.assistantMessageId &&
       item.messageSource?.messageRevision === input.messageRevision
-    );
-    if (existing) {
-      if (existing.status === input.status && existing.content === input.content && existing.updatedAt === input.updatedAt) {
-        return { thread, item: existing, alreadyCommitted: true };
-      }
-      return this.updateItem({ threadId, itemId: existing.itemId, status: input.status, content: input.content, updatedAt: input.updatedAt });
-    }
+    ));
     const turns = await this.repository.readTurns(threadId);
     const turn = turns.find(candidate => candidate.userItemId?.namespace === 'message' && candidate.userItemId.value === input.sourceMessageId);
     if (!turn) throw new Error('turn_not_found_for_assistant');
+    if (existing) {
+      // A terminal Item is immutable with respect to late stream/status
+      // events. This prevents a delayed delta from reopening a cancelled or
+      // failed response.
+      if (isTerminalItemStatus(existing.status) && input.status !== existing.status) {
+        return { thread, item: existing, alreadyCommitted: true };
+      }
+      const item = updateItemV1(existing, { status: input.status, content: input.content, updatedAt: input.updatedAt });
+      const updatedTurn = updateTurnForAssistant(turn, item);
+      if (item.status === existing.status && item.content === existing.content && item.updatedAt === existing.updatedAt &&
+        JSON.stringify(updatedTurn) === JSON.stringify(turn)) {
+        return { thread, item: existing, alreadyCommitted: true };
+      }
+      const result = await this.repository.append({
+        threadId,
+        idempotencyKey: `thread-item-update:${threadId}:message:${input.assistantMessageId}:${input.status}:${input.updatedAt}`,
+        occurredAt: input.updatedAt,
+        expectedGeneration: thread.generation,
+        turns: [updatedTurn],
+        items: [item],
+        projectionOutbox: [projectionEvent(item, `thread-item-update:${threadId}:message:${input.assistantMessageId}:${input.status}:${input.updatedAt}`, input.updatedAt)]
+      });
+      return { thread: result.thread, item, alreadyCommitted: result.alreadyCommitted };
+    }
     const item = {
       schemaVersion: 1 as const,
       itemId: toMessageItemId(input.assistantMessageId),
@@ -171,11 +191,13 @@ export class ThreadProjectionCoordinator {
       content: input.content,
       ...(input.legacyMessageSnapshot ? { legacyMessageSnapshot: input.legacyMessageSnapshot } : {})
     } satisfies ItemV1;
+    const updatedTurn = updateTurnForAssistant(turn, item);
     const result = await this.repository.append({
       threadId,
       idempotencyKey: `thread-assistant:${input.assistantMessageId}:${input.messageRevision}`,
       occurredAt: input.updatedAt,
       expectedGeneration: thread.generation,
+      turns: [updatedTurn],
       items: [item],
       projectionOutbox: [projectionEvent(item, `thread-assistant:${input.assistantMessageId}:${input.messageRevision}`, input.updatedAt)]
     });
@@ -192,9 +214,9 @@ export class ThreadProjectionCoordinator {
     const turns = await this.repository.readTurns(threadId);
     const turn = turns.find(candidate => candidate.userItemId?.namespace === 'message' && candidate.userItemId.value === input.sourceMessageId);
     if (!turn) throw new Error('turn_not_found_for_artifact');
-    const existing = (await this.repository.readItems(threadId)).find(item =>
+    const existing = latestItem((await this.repository.readItems(threadId)).filter(item =>
       item.type === 'document_artifact_projection' && item.projectionSource?.workId !== undefined && String(item.projectionSource.workId) === String(input.workId)
-    );
+    ));
     if (existing) {
       if (existing.status === input.status && existing.content === input.content && existing.updatedAt === input.updatedAt) return { thread, item: existing, alreadyCommitted: true };
       return this.updateItem({ threadId, itemId: existing.itemId, status: input.status, content: input.content, updatedAt: input.updatedAt });
@@ -235,10 +257,10 @@ export class ThreadProjectionCoordinator {
     const turns = await this.repository.readTurns(threadId);
     const turn = turns.find(candidate => candidate.userItemId?.namespace === 'message' && candidate.userItemId.value === input.sourceMessageId);
     if (!turn) throw new Error('turn_not_found_for_tool_projection');
-    const existing = (await this.repository.readItems(threadId)).find(item =>
+    const existing = latestItem((await this.repository.readItems(threadId)).filter(item =>
       item.type === input.kind && item.projectionSource?.toolCallId !== undefined &&
       String(item.projectionSource.toolCallId) === input.toolCallId
-    );
+    ));
     if (existing) {
       if (existing.status === input.status && existing.content === input.content && existing.updatedAt === input.updatedAt) return { thread, item: existing, alreadyCommitted: true };
       return this.updateItem({ threadId, itemId: existing.itemId, status: input.status, content: input.content, updatedAt: input.updatedAt });
@@ -265,9 +287,12 @@ export class ThreadProjectionCoordinator {
     const threadId = toThreadId(String(input.threadId));
     const thread = await this.repository.getThread(threadId);
     if (!thread) throw new Error('thread_not_found');
-    const current = (await this.repository.readItems(threadId)).find(item => item.itemId.namespace === input.itemId.namespace && item.itemId.value === input.itemId.value);
+    const current = latestItem((await this.repository.readItems(threadId)).filter(item => item.itemId.namespace === input.itemId.namespace && item.itemId.value === input.itemId.value));
     if (!current) throw new Error('thread_item_not_found');
-    const next = { ...current, status: input.status, updatedAt: input.updatedAt, ...(input.content !== undefined ? { content: input.content } : {}) } satisfies ItemV1;
+    if (isTerminalItemStatus(current.status) && input.status !== current.status) {
+      return { thread, item: current, alreadyCommitted: true };
+    }
+    const next = updateItemV1(current, { status: input.status, updatedAt: input.updatedAt, ...(input.content !== undefined ? { content: input.content } : {}) });
     const result = await this.repository.append({
       threadId,
       idempotencyKey: `thread-item-update:${threadId}:${input.itemId.namespace}:${input.itemId.value}:${input.status}:${input.updatedAt}`,
@@ -278,6 +303,35 @@ export class ThreadProjectionCoordinator {
     });
     return { thread: result.thread, item: next, alreadyCommitted: result.alreadyCommitted };
   }
+}
+
+function isTerminalItemStatus(status: ItemStatus): boolean {
+  return ['completed', 'failed', 'cancelled', 'interrupted', 'unknown'].includes(status);
+}
+
+function latestItem(items: readonly ItemV1[]): ItemV1 | undefined {
+  return [...items].sort((left, right) => left.updatedAt.localeCompare(right.updatedAt) || left.sequence - right.sequence).at(-1);
+}
+
+function updateTurnForAssistant(turn: TurnV1, item: ItemV1): TurnV1 {
+  const assistantItemIds = turn.assistantItemIds.some(candidate => String(candidate) === String(item.itemId))
+    ? turn.assistantItemIds
+    : [...turn.assistantItemIds, item.itemId];
+  const status = item.status === 'completed' ? 'completed'
+    : item.status === 'failed' ? 'failed'
+      : item.status === 'cancelled' ? 'cancelled'
+        : item.status === 'interrupted' ? 'interrupted'
+          : item.status === 'unknown' ? 'unknown' : turn.status;
+  if (isTerminalTurnStatus(turn.status) && status !== turn.status) return updateTurnV1(turn, { assistantItemIds });
+  return updateTurnV1(turn, {
+    assistantItemIds,
+    status,
+    ...(isTerminalTurnStatus(status) ? { completedAt: item.updatedAt } : {})
+  });
+}
+
+function isTerminalTurnStatus(status: TurnV1['status']): boolean {
+  return ['completed', 'failed', 'cancelled', 'interrupted', 'unknown'].includes(status);
 }
 
 function projectionEvent(item: ItemV1, idempotencyKey: string, occurredAt: IsoTimestamp): ThreadProjectionOutboxEventV1 {

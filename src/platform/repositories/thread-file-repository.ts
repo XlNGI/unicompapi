@@ -240,7 +240,12 @@ export class ThreadFileRepository {
   async readTurns(threadId: ThreadId): Promise<readonly TurnV1[]> {
     const manifest = await this.getManifest(threadId);
     const records = await this.readCommittedRecords<TurnV1>(threadId, manifest, 'turn');
-    return records.map(record => parseTurnV1(record.payload));
+    const turns = dedupeTurns(records.map(record => parseTurnV1(record.payload)));
+    // Older commits may have written an Assistant Item before the Turn update
+    // was introduced. Hydrate the read model from committed Items so those
+    // records still expose a coherent Turn without rewriting the journal.
+    const items = await this.readItems(threadId);
+    return turns.map(turn => hydrateTurnFromItems(turn, items));
   }
 
   async readExecutionLinks(threadId: ThreadId): Promise<readonly TurnExecutionLinkV1[]> {
@@ -591,6 +596,42 @@ function dedupeItems(items: readonly ItemV1[]): readonly ItemV1[] {
     if (!previous || previous.updatedAt <= item.updatedAt) latest.set(key, item);
   }
   return [...latest.values()].sort((left, right) => left.sequence - right.sequence || `${left.itemId.namespace}:${left.itemId.value}`.localeCompare(`${right.itemId.namespace}:${right.itemId.value}`));
+}
+function dedupeTurns(turns: readonly TurnV1[]): readonly TurnV1[] {
+  const latest = new Map<string, TurnV1>();
+  for (const turn of turns) {
+    const previous = latest.get(String(turn.turnId));
+    if (!previous ||
+      turn.executionLinkRevision > previous.executionLinkRevision ||
+      turn.assistantItemIds.length > previous.assistantItemIds.length ||
+      turn.status !== previous.status) {
+      latest.set(String(turn.turnId), turn);
+    }
+  }
+  return [...latest.values()].sort((left, right) => left.turnSequence - right.turnSequence || String(left.turnId).localeCompare(String(right.turnId)));
+}
+function hydrateTurnFromItems(turn: TurnV1, items: readonly ItemV1[]): TurnV1 {
+  const assistants = items
+    .filter(item => item.turnId === turn.turnId && item.type === 'assistant_message')
+    .sort((left, right) => left.sequence - right.sequence);
+  if (!assistants.length) return turn;
+  const assistantItemIds = [...new Map([
+    ...turn.assistantItemIds.map(item => [String(item), item] as const),
+    ...assistants.map(item => [String(item.itemId), item.itemId] as const)
+  ]).values()];
+  const latest = assistants.at(-1)!;
+  const status = latest.status === 'completed' ? 'completed'
+    : latest.status === 'failed' ? 'failed'
+      : latest.status === 'cancelled' ? 'cancelled'
+        : latest.status === 'interrupted' ? 'interrupted'
+          : latest.status === 'unknown' ? 'unknown' : turn.status;
+  return {
+    ...turn,
+    assistantItemIds,
+    ...(status === 'completed' || status === 'failed' || status === 'cancelled' || status === 'interrupted' || status === 'unknown'
+      ? { status, completedAt: latest.updatedAt }
+      : { status })
+  };
 }
 function canonicalJson(value: unknown): string { return JSON.stringify(sortValue(value)); }
 function sortValue(value: unknown): unknown { if (Array.isArray(value)) return value.map(sortValue); if (value && typeof value === 'object') return Object.fromEntries(Object.entries(value as Record<string, unknown>).filter(([, entry]) => entry !== undefined).sort(([left], [right]) => left.localeCompare(right)).map(([key, entry]) => [key, sortValue(entry)])); return value; }

@@ -55,6 +55,27 @@ describe('ThreadProjectionCoordinator', () => {
     expect(second.item.itemId).toEqual(first.item.itemId);
   });
 
+  it('updates the same Assistant Item and Turn terminal state idempotently', async () => {
+    const repo = repository();
+    const coordinator = new ThreadProjectionCoordinator(repo);
+    const pending = await coordinator.projectAssistantMessage({
+      threadId: 'thread-projection', sourceMessageId: 'message-projection', assistantMessageId: 'assistant-projection',
+      messageRevision: 0, status: 'pending', content: '', createdAt: toIsoTimestamp('2026-10-10T00:00:01.000Z'), updatedAt: toIsoTimestamp('2026-10-10T00:00:01.000Z')
+    });
+    const completed = await coordinator.projectAssistantMessage({
+      threadId: 'thread-projection', sourceMessageId: 'message-projection', assistantMessageId: 'assistant-projection',
+      messageRevision: 0, status: 'completed', content: '完成', createdAt: pending.item.createdAt, updatedAt: toIsoTimestamp('2026-10-10T00:00:02.000Z')
+    });
+    const lateDelta = await coordinator.projectAssistantMessage({
+      threadId: 'thread-projection', sourceMessageId: 'message-projection', assistantMessageId: 'assistant-projection',
+      messageRevision: 0, status: 'streaming', content: '晚到', createdAt: pending.item.createdAt, updatedAt: toIsoTimestamp('2026-10-10T00:00:03.000Z')
+    });
+    expect(completed.item.status).toBe('completed');
+    expect(lateDelta.item.status).toBe('completed');
+    expect((await repo.readTurns())[0]?.assistantItemIds).toHaveLength(1);
+    expect((await repo.readTurns())[0]?.status).toBe('completed');
+  });
+
   it('projects Tool Call and Tool Result as separate idempotent Items', async () => {
     const repo = repository();
     const coordinator = new ThreadProjectionCoordinator(repo);

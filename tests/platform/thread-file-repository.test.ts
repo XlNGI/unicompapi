@@ -73,6 +73,17 @@ describe('ThreadFileRepository commit and recovery protocol', () => {
     expect((await repository.readProjectionReceipts(threadId)).map(item => item.eventId)).toEqual([event.eventId]);
   });
 
+  it('returns one latest Turn after execution-link updates', async () => {
+    const { repository } = await setup();
+    const { turn, item } = records(1);
+    await repository.append({ threadId, idempotencyKey: 'turn-initial', occurredAt: t1, turns: [turn], items: [item] });
+    const updated = { ...turn, executionLinkRevision: 1 };
+    await repository.append({ threadId, idempotencyKey: 'turn-update', occurredAt: t1, turns: [updated] });
+    const turns = await repository.readTurns(threadId);
+    expect(turns).toHaveLength(1);
+    expect(turns[0]?.executionLinkRevision).toBe(1);
+  });
+
   it('deduplicates the same idempotency key and rejects changed payloads', async () => {
     const { repository } = await setup();
     const { turn, item } = records(1);
