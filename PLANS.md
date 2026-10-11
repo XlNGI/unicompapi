@@ -1,5 +1,11 @@
 # UniComp 开发计划
 
+### 自动验收复核：未完成项目代码级门禁（2026-10-11）
+
+已代替重复人工步骤执行自动验收：生产文档生成/读取/更新、Agent Continuation、Thread 迁移与读取共 82/82 通过；性能与 Thread 仓储基线 21/21 通过；`pnpm typecheck`、`pnpm lint`、`pnpm build` 通过。真实 Electron ThreadFile/Legacy 双模式会话验收均通过（3 会话、120 条消息、分页、虚拟列表、项目切换）；Mock Provider + 真实 Electron 通过普通 Agent、持久执行身份、起始取消、Provider Tool Calling、PPT、Word、Excel 物理文件登记。
+
+边界：上述 Provider 自动验收使用受控 Transport 或 Mock Provider，不能替代真实外部 Provider 矩阵；当前真实调用会话仍只暴露 `generate_pptx`，因此“真实 Provider 生成后读取/修改已有 PPT”继续标记为 `blocked`。本轮未读取真实凭证、未修改真实用户数据、未切换 ThreadFile 写权威、未执行生产 Cutover。验收细节见[新会话系统未完成项目人工验收手册](docs/current/conversation-remaining-manual-acceptance-runbook.md)。
+
 ### 人工验收补充：真实调用生成 PPT（2026-10-10）
 
 负责人反馈已通过真实调用成功生成 PPT。这确认 Agent-first 主链路到 PPT 生成能力至少完成了一次真实端到端人工验收。当前证据只覆盖“真实调用可生成 PPT”这一事实；Provider 连续 Tool Calling、取消/恢复、崩溃恢复、历史迁移和 Thread 存储 Cutover 仍分别按原门禁处理，未因本次结果自动标记完成。
