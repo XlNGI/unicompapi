@@ -14,6 +14,8 @@
 
 当前尚未执行最终 Production Authority Cutover；Legacy 兼容快照仍保留为回滚和 Runtime 兼容来源，必须等待真实 Provider 矩阵、增量 Shadow 对账和回滚演练完成后单独批准。
 
+负责人已明确批准切换。启动屏障现在在备份、迁移 Ledger 和 Shadow Compare 通过后写入 `authority-fence.v1.json` 的 `new_authoritative` 状态；Legacy 文件、`.bak`、Thread Journal 和显式 `UNICOMP_THREAD_FIRST=0` 回滚路径保留。真实项目的切换发生在下一次项目打开时，不在开发工具执行期间直接改写用户目录。
+
 已实施并通过定向门禁：
 
 - `ConversationTurnCoordinator` 成为 Thread 接受、Execution Link 和 Assistant Projection 的唯一 Application 接线点；`ConversationResponseController` 不再直接持有两套 Thread 写服务。

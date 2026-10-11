@@ -2,7 +2,9 @@
 
 ### Thread-first 写入收敛实施（2026-10-11）
 
-已完成：Thread Commit + Durable Projection Outbox、Legacy 幂等投影 Worker、普通 Agent/已有会话/直接 IPC/Workflow 的 Thread-first User Turn、Assistant Stream 同一 Item 状态投影、Tool/Artifact 状态更新和 Agent Continuation 的 Thread Context Reader 接线。新增提交从 `c4c4f63` 到 `75755c2`，typecheck、lint、build 及新增定向回归通过。最终生产 Authority Cutover 仍按执行限制保留，需真实 Provider 矩阵、增量对账和回滚演练后单独批准。
+已完成：Thread Commit + Durable Projection Outbox、Legacy 幂等投影 Worker、普通 Agent/已有会话/直接 IPC/Workflow 的 Thread-first User Turn、Assistant Stream 同一 Item 状态投影、Tool/Artifact 状态更新和 Agent Continuation 的 Thread Context Reader 接线。新增提交从 `c4c4f63` 到 `75755c2`，typecheck、lint、build 及新增定向回归通过。最终 Authority Fence 已接入，真实项目在下一次打开时按启动屏障完成切换；外部 Provider 矩阵仍是独立验收项。
+
+负责人随后批准切换；`LegacyThreadMigration.activateThreadAuthority()` 已接入启动屏障。项目启动时只有在备份、迁移 Ledger 和 Shadow Compare 通过后才写入 `authority-fence.v1.json:new_authoritative`；Legacy、`.bak`、Thread Journal 和 `UNICOMP_THREAD_FIRST=0` 回滚路径保留。
 
 ### Thread-first 安全门禁自动化（2026-10-11）
 
