@@ -30,3 +30,4 @@ export * from './thread-command-service';
 export * from './thread-projection-coordinator';
 export * from './conversation-turn-coordinator';
 export * from './thread-legacy-projection-worker';
+export * from './conversation-context-reader';
