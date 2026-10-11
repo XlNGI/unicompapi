@@ -4,7 +4,7 @@
 
 负责人反馈已通过真实调用成功生成 PPT。这确认 Agent-first 主链路到 PPT 生成能力至少完成了一次真实端到端人工验收。当前证据只覆盖“真实调用可生成 PPT”这一事实；Provider 连续 Tool Calling、取消/恢复、崩溃恢复、历史迁移和 Thread 存储 Cutover 仍分别按原门禁处理，未因本次结果自动标记完成。
 
-剩余项目的逐项人工操作、证据和通过标准见[新会话系统未完成项目人工验收手册](docs/current/conversation-remaining-manual-acceptance-runbook.md)。
+剩余项目的逐项人工操作、证据和通过标准见[新会话系统未完成项目人工验收手册](docs/current/conversation-remaining-manual-acceptance-runbook.md)。当前真实生成会话只暴露 `generate_pptx`；读取和修改已有 PPT 的连续工具链因此记录为 `blocked`，不会把工具合同存在误记为真实 Provider 已验收。
 
 ### 维护实施：首次打开会话首屏读取解耦（2026-10-10；本地主链路验收完成）
 

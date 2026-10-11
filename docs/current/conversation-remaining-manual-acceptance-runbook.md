@@ -12,26 +12,32 @@
 
 每个用例都记录：`pass`、`fail` 或 `blocked`。`blocked` 表示缺少可控故障注入、真实 Provider 能力或负责人批准，不能改写成通过。
 
-## 1. 真实 Provider 连续 Tool Calling
+## 1. 真实 Provider 工具链边界
 
-### 操作
+当前这次真实生成会话只向模型暴露 `generate_pptx`。它可以一次性生成完整 PPT，但不能在同一用户可见会话中假定存在“读取刚生成 PPT”或“追加/修改页面”的工具。因此下面两项当前应记录为 `blocked`，不能人工伪造为通过：
 
-1. 在隔离项目新建会话，发送一个明确需要两个连续工具步骤的请求。例如先生成 PPT，再读取该 PPT 的实际结果并追加一页或修改指定页。必须使用当前已批准的文档工具能力。
-2. 在执行过程中记录会话中显示的 Tool Call、Observation、最终回复、文件名和 Work 信息。
-3. 打开执行详情或 Production Trace，确认两个工具调用属于同一个 Agent Run/Response Execution，并且序号连续。
-4. 重新打开会话，确认工具调用、Observation、最终结果和 Work 仍存在且没有重复。
-5. 打开实际 PPT，核对页数、修改内容、文件 Hash 和登记信息。
+- 生成后调用 `read_document_structure`；
+- 根据读取结果调用 `add_slide`、`update_element` 或其他修改工具。
 
-### 通过标准
+代码仓库中确实存在这些受控合同，但它们要求已有已验证文档、文档身份/版本和相应读取或写入授权；合同存在不等于当前会话已经向 Provider 暴露。新建 PPT 的真实人工验收目前只覆盖 `generate_pptx`。
 
-- 顺序为“模型计划 → 工具 A → Observation A → 工具 B → Observation B → 最终回复”；
-- 两次调用均经过工具白名单、权限、预算和参数校验；
-- 第二次调用使用第一步的真实结果，而不是模型伪造的文件路径或结果；
-- 同一个 Agent Run 内没有重复副作用调用；
-- PPT、Work、Execution、会话 Item 和 Trace 互相可关联；
-- 重新打开后状态和文件一致。
+### 当前可执行的人工验收
 
-一次真实调用成功生成 PPT 只能通过“单次真实 PPT 生成”，不能替代本用例。
+1. 在隔离项目提供完整主题、内容和页数要求。
+2. 明确同意生成，执行 `generate_pptx`。
+3. 核对最终 PPT、实际页数、Work、Execution、文件 Hash 和重新打开后的会话记录。
+
+通过标准是一次生成闭环完整且没有重复 Work。你刚刚完成的真实 PPT 生成属于这一项。
+
+### 后续工具链验收条件
+
+只有在一个“已有已验证 PPT + 明确读取/编辑授权”的会话中实际看到 `read_document_structure`，并在读取后看到受控编辑工具时，才执行连续 Tool Calling 验收：
+
+```text
+读取结构 → Observation → add_slide/update_element → Observation → 最终回复
+```
+
+届时还要核对同一 Agent Run/Response Execution、连续序号、版本递增、单次 Work 登记、实际 PPT 内容和重新打开后的结果。如果工具列表仍只有 `generate_pptx`，该用例继续保持 `blocked`。
 
 ## 2. 取消、失败和恢复
 
