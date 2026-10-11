@@ -6,6 +6,8 @@ import type {
 import {
   toConversationId,
   toConversationWorkflowId,
+  toIsoTimestamp,
+  type Conversation,
   type ConversationAttachmentReference,
   type ConversationWorkflowV1,
   type DocumentContextSnapshot
@@ -391,14 +393,6 @@ export class ConversationWorkflowController {
       }
       throw error;
     }
-    let conversation = input.conversation
-      ? await runtime.conversationService.get(
-          toConversationId(input.conversation.conversationId)
-        )
-      : await runtime.conversationService.create({
-          title: input.title,
-          projectId: session.projectId
-        });
     const attachments = input.attachmentFileIds !== undefined
       ? input.attachmentFileIds.length ? await runtime.attachments?.pin(input.attachmentFileIds) : []
       : undefined;
@@ -406,17 +400,41 @@ export class ConversationWorkflowController {
       return failure('invalid_request', 'Conversation attachments are unavailable');
     }
     signal.throwIfAborted();
-    conversation = await runtime.conversationService.addUserMessage({
-      conversationId: conversation.id,
-      expectedRevision: input.conversation?.expectedRevision ?? conversation.revision,
-      content: input.content,
-      ...(attachments ? { attachments } : {})
-    });
+    let conversation: Conversation;
+    let preaccepted = false;
+    if (!input.conversation && runtime.turnCoordinator) {
+      const conversationId = runtime.conversationService.nextConversationId();
+      const messageId = runtime.conversationService.nextMessageId();
+      await runtime.turnCoordinator.createThread({ threadId: conversationId, projectId: session.projectId, title: input.title, createdAt: toIsoTimestamp(new Date().toISOString()) });
+      await runtime.turnCoordinator.acceptUserTurn({
+        threadId: conversationId,
+        projectId: session.projectId,
+        title: input.title,
+        messageId,
+        content: input.content,
+        createdAt: toIsoTimestamp(new Date().toISOString()),
+        clientCommandId: input.clientCommandId,
+        ...(attachments ? { legacyMessageSnapshot: { attachments } } : {})
+      });
+      await runtime.legacyProjection?.drain(String(conversationId));
+      conversation = await runtime.conversationService.get(conversationId);
+      preaccepted = true;
+    } else {
+      conversation = input.conversation
+        ? await runtime.conversationService.get(toConversationId(input.conversation.conversationId))
+        : await runtime.conversationService.create({ title: input.title, projectId: session.projectId });
+      conversation = await runtime.conversationService.addUserMessage({
+        conversationId: conversation.id,
+        expectedRevision: input.conversation?.expectedRevision ?? conversation.revision,
+        content: input.content,
+        ...(attachments ? { attachments } : {})
+      });
+    }
     const source = conversation.messages.at(-1);
     if (!source || source.role !== 'user') {
       return failure('message_not_completed', 'The workflow source message is unavailable');
     }
-    if (runtime.turnCoordinator) {
+    if (runtime.turnCoordinator && !preaccepted) {
       await runtime.turnCoordinator.acceptUserTurn({
         threadId: conversation.id,
         projectId: session.projectId,
