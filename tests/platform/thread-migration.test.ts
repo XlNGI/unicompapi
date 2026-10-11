@@ -89,6 +89,39 @@ describe('Legacy Thread migration and Shadow Read', () => {
     } finally { await rm(root, { recursive: true, force: true }); }
   });
 
+  it('does not treat workflow replies as Agent context during shadow compare', async () => {
+    const root = await mkdtemp(path.join(os.tmpdir(), 'unicomp-thread-shadow-workflow-'));
+    try {
+      let conversation = legacyConversation();
+      conversation = {
+        ...conversation,
+        messages: [
+          ...conversation.messages,
+          {
+            schemaVersion: 1,
+            id: toMessageId('legacy-workflow-reply'),
+            conversationId: conversation.id,
+            revision: 0,
+            role: 'assistant',
+            content: '本次制作不联网搜索。',
+            workflowReply: { workflowId: 'workflow-1', revision: 0 },
+            attachments: [],
+            createdAt: t1,
+            updatedAt: t1,
+            state: 'completed',
+            completedAt: t1,
+            streamSequence: 0
+          }
+        ]
+      };
+      const repository = new ThreadFileRepository(root);
+      const migration = new LegacyThreadMigration(root, repository, { migrationId: 'shadow-workflow-test' });
+      await migration.migrate([{ conversation }]);
+      const report = await migration.shadowCompare([{ conversation }]);
+      expect(report.differences).toEqual([]);
+    } finally { await rm(root, { recursive: true, force: true }); }
+  });
+
   it('treats an omitted and empty execution reference list as the same migration input', async () => {
     const root = await mkdtemp(path.join(os.tmpdir(), 'unicomp-thread-migration-normalize-'));
     try {

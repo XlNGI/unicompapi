@@ -226,7 +226,16 @@ export class LegacyThreadMigration {
       const targetContentHash = sha256Hex(canonicalJson(items.map(item => [item.itemId, item.content, item.status])));
       if (sourceContentHash !== targetContentHash) differences.push({ conversationId: conversation.id, kind: 'content_hash_mismatch', detail: `${sourceContentHash} != ${targetContentHash}` });
       const expectedContextHash = sha256Hex(canonicalJson(conversation.messages.filter(message => message.state === 'completed' && !message.workflowReply).map(message => [message.role, message.content])));
-      const targetContextHash = sha256Hex(canonicalJson(items.filter(item => item.messageSource && item.status === 'completed' && item.messageSource.messageId !== undefined).map(item => [item.type === 'user_message' ? 'user' : 'assistant', item.content])));
+      // Workflow replies are deliberately excluded from the Agent context on
+      // the Legacy side (see conversation-context-builder). Keep Shadow
+      // Compare semantically aligned with that contract; otherwise every
+      // migrated conversation containing a clarification/source notice is
+      // permanently blocked at startup with a false model_context_mismatch.
+      const targetContextHash = sha256Hex(canonicalJson(items
+        .filter(item => item.messageSource && item.status === 'completed' &&
+          item.messageSource.messageId !== undefined &&
+          item.legacyMessageSnapshot?.workflowReply === undefined)
+        .map(item => [item.type === 'user_message' ? 'user' : 'assistant', item.content])));
       if (expectedContextHash !== targetContextHash) differences.push({ conversationId: conversation.id, kind: 'model_context_mismatch', detail: `${expectedContextHash} != ${targetContextHash}` });
     }
     return { sourceLabel: this.options.sourceLabel ?? 'isolated-legacy-copy', checkedConversations: source.length, differences, sourceSummaryHash: sha256Hex(canonicalJson(source.map(snapshot => summaryFromConversation(snapshot.conversation)))), targetSummaryHash: sha256Hex(canonicalJson(summaries)), modelContextCompared: true };
