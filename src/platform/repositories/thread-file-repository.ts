@@ -207,7 +207,7 @@ export class ThreadFileRepository {
   async readItems(threadId: ThreadId, readAtSequence?: number): Promise<readonly ItemV1[]> {
     const manifest = await this.getManifest(threadId);
     const records = await this.readCommittedRecords<ItemV1>(threadId, manifest, 'item');
-    return records.filter(record => readAtSequence === undefined || record.sequence <= readAtSequence).map(record => parseItemV1(record.payload));
+    return dedupeItems(records.filter(record => readAtSequence === undefined || record.sequence <= readAtSequence).map(record => parseItemV1(record.payload)));
   }
 
   async listItemSequences(threadId: ThreadId, readAtSequence?: number): Promise<readonly number[]> {
@@ -234,7 +234,7 @@ export class ThreadFileRepository {
         result.push(parseItemV1(record.payload));
       }
     }
-    return result.sort((left, right) => left.sequence - right.sequence);
+    return dedupeItems(result);
   }
 
   async readTurns(threadId: ThreadId): Promise<readonly TurnV1[]> {
@@ -583,6 +583,15 @@ function validateManifest(value: ThreadManifestV1, threadId: ThreadId): ThreadMa
 function advanceManifest(previous: ThreadManifestV1, commit: CommitRecordV1, participants: Iterable<CommitParticipantDraft>, items: readonly ItemV1[], turns: readonly TurnV1[], outbox: readonly ThreadProjectionOutboxEventV1[]): ThreadManifestV1 { const map = new Map(previous.segments.map(segment => [segment.segmentId, segment])); for (const participant of participants) map.set(participant.segmentId, { segmentId: participant.segmentId, recordKind: participant.recordKind, committedBytes: participant.endOffset, lastSequence: Math.max(...items.map(item => item.sequence), ...turns.map(turn => turn.turnSequence), ...outbox.map(item => item.sequence), previous.committedSequence), checksum: participant.checksum }); return { ...previous, generation: commit.generation, committedSequence: commit.commitSequence, committedItemSequence: Math.max(previous.committedItemSequence, ...items.map(item => item.sequence), 0), committedTurnSequence: Math.max(previous.committedTurnSequence, ...turns.map(turn => turn.turnSequence), 0), lastCommitHash: commit.commitHash, segments: [...map.values()], revision: previous.revision + 1 }; }
 function applyThreadDelta(thread: ThreadV1, patch: ThreadAppendInput['thread'] | undefined, items: readonly ItemV1[], turns: readonly TurnV1[], updatedAt: string): ThreadV1 { return parseThreadV1({ ...thread, ...patch, updatedAt, generation: thread.generation + 1, itemCount: Math.max(thread.itemCount, ...items.map(item => item.sequence), thread.itemCount), turnCount: Math.max(thread.turnCount, ...turns.map(turn => turn.turnSequence), thread.turnCount), lastItemSequence: Math.max(thread.lastItemSequence, ...items.map(item => item.sequence), thread.lastItemSequence) }); }
 function toSummary(thread: ThreadV1): ThreadSummaryProjection { return { threadId: thread.threadId, projectId: thread.projectId, title: thread.title, status: thread.status, createdAt: thread.createdAt, updatedAt: thread.updatedAt, revision: thread.generation, itemCount: thread.itemCount, turnCount: thread.turnCount, ...(thread.lastItemId ? { lastItemId: thread.lastItemId } : {}) }; }
+function dedupeItems(items: readonly ItemV1[]): readonly ItemV1[] {
+  const latest = new Map<string, ItemV1>();
+  for (const item of items) {
+    const key = `${item.itemId.namespace}:${item.itemId.value}`;
+    const previous = latest.get(key);
+    if (!previous || previous.updatedAt <= item.updatedAt) latest.set(key, item);
+  }
+  return [...latest.values()].sort((left, right) => left.sequence - right.sequence || `${left.itemId.namespace}:${left.itemId.value}`.localeCompare(`${right.itemId.namespace}:${right.itemId.value}`));
+}
 function canonicalJson(value: unknown): string { return JSON.stringify(sortValue(value)); }
 function sortValue(value: unknown): unknown { if (Array.isArray(value)) return value.map(sortValue); if (value && typeof value === 'object') return Object.fromEntries(Object.entries(value as Record<string, unknown>).filter(([, entry]) => entry !== undefined).sort(([left], [right]) => left.localeCompare(right)).map(([key, entry]) => [key, sortValue(entry)])); return value; }
 async function atomicWrite(file: string, value: unknown): Promise<void> { await mkdir(path.dirname(file), { recursive: true }); const temp = `${file}.tmp-${process.pid}-${Date.now()}`; await writeFile(temp, `${canonicalJson(value)}\n`, 'utf8'); const handle = await open(temp, 'r+'); await handle.sync(); await handle.close(); await rename(temp, file); }
