@@ -321,6 +321,7 @@ export function createChatContextRuntime(
     const ownedRunsByResponse = new Map<string, ConversationAgentRunId>();
     const sessions = new JsonConversationAgentSessionRepository(storage, session.projectId, executionTimestamp);
     let continuationRuntime: ConversationAgentContinuationRuntime;
+    let turnCoordinatorForContinuation: ConversationTurnCoordinator | undefined;
     const sessionService = new ConversationAgentSessionService({ repository: sessions, ownerId: sessionOwnerId,
       leaseTtlMs: dependencies.executionLeaseTtlMs,
       now: executionNow, hash: value => createHash('sha256').update(value).digest('hex'),
@@ -489,7 +490,20 @@ export function createChatContextRuntime(
           agentSessions: await continuationRuntime.list(execution.conversationId) } };
       },
       cancelExecution: async id => { await executionCoordinator.cancel(toConversationResponseExecutionId(id)); },
-      ...(contextReader ? { contextReader } : {}) });
+      ...(contextReader ? { contextReader } : {}),
+      nextMessageId: () => conversationIds.nextMessageId(),
+      projectLocalAssistant: async input => {
+        await turnCoordinatorForContinuation?.projectAssistantMessage({
+          threadId: input.threadId,
+          sourceMessageId: input.sourceMessageId,
+          assistantMessageId: input.assistantMessageId,
+          messageRevision: 0,
+          status: 'completed',
+          content: input.content,
+          createdAt: toIsoTimestamp(input.createdAt),
+          updatedAt: toIsoTimestamp(input.createdAt)
+        });
+      } });
     const agentRuntimeRepository = new JsonConversationAgentRuntimeRepository(storage, session.projectId, now);
     const agentRuntime = new ConversationAgentRuntimeService({ repository: agentRuntimeRepository, now,
       executionOwnershipGuard: runId => sessionService.assertExecutionOwnershipIfPresent(runId),
@@ -960,6 +974,7 @@ export function createChatContextRuntime(
     const turnCoordinator = threadCommands && threadProjections
       ? new ConversationTurnCoordinator(threadCommands, threadProjections)
       : undefined;
+    turnCoordinatorForContinuation = turnCoordinator;
     const legacyProjection = threadWriteRepository
       ? new ThreadLegacyProjectionWorker(threadWriteRepository, projectConversations, now)
       : undefined;

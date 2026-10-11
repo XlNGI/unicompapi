@@ -41,6 +41,8 @@ export class ConversationAgentContinuationRuntime {
     readonly replayExecution: (responseExecutionId: string) => Promise<ConversationAgentResponseStartDto>;
     readonly cancelExecution: (responseExecutionId: string) => Promise<void>;
     readonly contextReader?: ConversationContextReader;
+    readonly nextMessageId?: () => string;
+    readonly projectLocalAssistant?: (input: { readonly threadId: string; readonly sourceMessageId: string; readonly assistantMessageId: string; readonly content: string; readonly createdAt: string }) => Promise<void>;
   }) {
     this.workflowRepository = new JsonConversationWorkflowRepository(options.storage, options.projectId, options.now);
     this.workflows = new ConversationWorkflowService(this.workflowRepository, new ConversationIntentOrchestrator({
@@ -280,8 +282,12 @@ export class ConversationAgentContinuationRuntime {
         this.cacheChallenge(waiting);
         const question = workflow.status === 'needs_confirmation' ? '已保存当前任务规划。确认后将在原任务剩余额度内执行。'
           : workflow.pendingQuestions.map(item => item.question).join('\n') || '请补充当前任务需要的信息。';
+        const localMessageId = this.options.nextMessageId?.();
         await this.options.conversations.ensureLocalReply(input.conversation.id,
-          `agent-wait-${session.id}-${waiting.session.waitingVersion}`, question);
+          `agent-wait-${session.id}-${waiting.session.waitingVersion}`, question,
+          this.options.projectLocalAssistant && localMessageId ? { beforeSave: assistantMessage => this.options.projectLocalAssistant!({
+            threadId: String(input.conversation.id), sourceMessageId: String(message.id), assistantMessageId: String(assistantMessage.id), content: assistantMessage.content, createdAt: String(assistantMessage.createdAt)
+          }) } : undefined);
         input.signal.throwIfAborted();
         this.preparations.delete(session.id);
         return { agentSession: this.toDto(waiting.session), waiting: true, parentRunId: session.id, workflow };

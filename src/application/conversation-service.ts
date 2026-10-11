@@ -26,6 +26,7 @@ import {
   type DocumentGenerationStatus,
   type MessageFailureReason,
   type MessageId,
+  type Message,
   type ProjectId
 } from '../domain';
 import type { ConversationWorkflowV1 } from '../domain';
@@ -81,7 +82,7 @@ export class ConversationApplicationService {
     return this.requireConversation(conversationId);
   }
 
-  async ensureWorkflowReply(workflow: ConversationWorkflowV1): Promise<Conversation> {
+  async ensureWorkflowReply(workflow: ConversationWorkflowV1, options?: { readonly beforeSave?: (message: Message) => Promise<void> }): Promise<Conversation> {
     const conversation = await this.requireConversation(workflow.conversationId);
     const content = conversationWorkflowReply(workflow, conversation);
     if (!content || conversation.status !== 'active' || conversation.messages.some((message) =>
@@ -91,17 +92,19 @@ export class ConversationApplicationService {
       workflowReply: { workflowId: workflow.id, revision: workflow.revision },
       createdAt: toIsoTimestamp(this.now())
     });
+    await options?.beforeSave?.(updated.messages.at(-1)!);
     await this.repository.save(updated, conversation.revision);
     return updated;
   }
 
-  async ensureLocalReply(conversationId: ConversationId, key: string, content: string): Promise<Conversation> {
+  async ensureLocalReply(conversationId: ConversationId, key: string, content: string, options?: { readonly beforeSave?: (message: Message) => Promise<void> }): Promise<Conversation> {
     const conversation = await this.requireConversation(conversationId);
     if (conversation.messages.some(message => message.workflowReply?.workflowId === key)) return conversation;
     const updated = addCompletedAssistantMessage(conversation, {
       id: this.ids.nextMessageId(), content, workflowReply: { workflowId: key, revision: 0 },
       createdAt: toIsoTimestamp(this.now())
     });
+    await options?.beforeSave?.(updated.messages.at(-1)!);
     await this.repository.save(updated, conversation.revision);
     return updated;
   }
