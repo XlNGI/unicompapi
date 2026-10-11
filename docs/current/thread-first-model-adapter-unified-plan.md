@@ -9,6 +9,7 @@
 - `ConversationTurnCoordinator` 成为 Thread 接受、Execution Link 和 Assistant Projection 的唯一 Application 接线点；`ConversationResponseController` 不再直接持有两套 Thread 写服务。
 - Thread-first 文档任务复用已确认的 Workflow revision，进入现有 Agent/Response/Document Tool Runtime 时不会再次运行语义规划；Legacy 环境继续保留原有文档路径。
 - 已验证 Work 在本地校验和正式登记后以幂等 `document_artifact_projection` 写入 Thread；投影失败只形成 projection debt，不重放 Provider 或删除 Work。
+- Agent Runtime 已保存的 `toolId / stepRef / status / resultHash` 会以独立、幂等的 Tool Call/Tool Result Items 投影到同一 Turn；取消、中断和未知状态保留原终态语义。
 - `pnpm dev:thread-first` 开关同时打开 Electron ThreadFile 读写和 Renderer Thread 读取；生产默认仍未切换存储权威。
 - Windows Electron ThreadFile 读模式已完成 3 Thread/40 Item 重启比对：Summary p95 约 1ms、Item Page p95 约 3.9ms、虚拟行和重启后语义签名一致。
 
