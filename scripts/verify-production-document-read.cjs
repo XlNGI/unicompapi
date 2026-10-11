@@ -214,6 +214,36 @@ async function inspectOutbound(request, domain, expectedModel) {
     return 'art_direction';
   }
   if (generationCase) {
+    // After the host confirms the generated file through read_document_structure,
+    // the production finalizer deliberately removes all tools for the final
+    // answer. Keep this request inside the bounded generation transcript while
+    // validating that the model only receives the completed read observation.
+    const finalAnswerRequest = activeCase.outerRequests >= 2 &&
+      (payload.tools == null || (Array.isArray(payload.tools) && payload.tools.length === 0));
+    if (finalAnswerRequest) {
+      const assistantCalls = [];
+      const toolMessages = [];
+      for (const message of payload.messages ?? []) {
+        for (const call of message.tool_calls ?? []) assistantCalls.push(call);
+        if (message.role === 'tool') toolMessages.push(message);
+      }
+      requireCondition(assistantCalls.length === 2 && toolMessages.length === 2,
+        'final_answer_transcript_incomplete');
+      requireCondition(assistantCalls[0]?.function?.name === 'generate_pptx' &&
+        assistantCalls[1]?.function?.name === 'read_document_structure',
+      'final_answer_tool_sequence_invalid');
+      requireCondition(toolMessages.every(message => typeof message.content === 'string'),
+        'final_answer_observation_missing');
+      requireCondition(toolMessages.some(message => message.content.includes(markers[0]) &&
+        message.content.includes(markers[1])), 'final_answer_observation_facts_missing');
+      activeCase.finalAnswerRequests = (activeCase.finalAnswerRequests ?? 0) + 1;
+      activeCase.providerStages.push({ stage: 'final_answer', model: safeModel(payload.model),
+        status: 'request_started', toolsVisible: false, outputTokenLimit: tokenLimit });
+      activeCase.outerRequests += 1;
+      activeCase.networkRequests += 1;
+      report.networkRequests += 1;
+      return 'final_answer';
+    }
     const expectedToolId = activeCase.outerRequests === 0 ? 'generate_pptx' : 'read_document_structure';
     const registry = domain.createCanonicalToolRegistry();
     const schema = domain.canonicalToolInputSchema(registry.get(expectedToolId));
@@ -583,7 +613,8 @@ async function executeCase(platform, domain, storage, projectId, fixture, candid
   requireCondition(execution.state === 'completed', 'provider_response_not_completed');
   requireCondition((liveGeneration ? entry.networkRequests >= 4 && entry.networkRequests <= 5 && entry.artDirectionRequests === 1 && entry.toolCalls.length === 2 &&
     entry.toolCalls[0].toolId === 'generate_pptx' && entry.toolCalls[1].toolId === 'read_document_structure' &&
-    entry.artifactVerified && entry.toolCallIdMatched && entry.answerUsesObservation && entry.observationMatchesPhysicalFile
+    entry.artifactVerified && entry.toolCallIdMatched && entry.finalAnswerRequests === 1 &&
+    entry.answerUsesObservation && entry.observationMatchesPhysicalFile
     : entry.networkRequests === 2 && entry.toolCalls.length === 1 && entry.toolCallIdMatched && entry.observationContainsExpectedFacts && entry.answerUsesObservation) && !entry.pathOrRuntimeContextLeak,
   'production_tool_roundtrip_not_verified');
   requireCondition(entry.trace.some(item => item.code === 'tool_result' && item.status === 'completed'), 'tool_trace_missing');

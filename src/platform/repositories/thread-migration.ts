@@ -234,7 +234,7 @@ export class LegacyThreadMigration {
       const sourceContentHash = sha256Hex(canonicalJson(expectedMessages.map(item => [item.messageSource!.messageId, item.content, item.status])));
       const targetContentHash = sha256Hex(canonicalJson(expectedMessages.map(item => {
         const target = targetByMessageId.get(String(item.messageSource!.messageId));
-        return [item.messageSource!.messageId, target?.content, target?.status];
+        return [item.messageSource!.messageId, target?.content, shadowComparableStatus(item, target)];
       })));
       if (sourceContentHash !== targetContentHash) differences.push({ conversationId: conversation.id, kind: 'content_hash_mismatch', detail: `${sourceContentHash} != ${targetContentHash}` });
       const expectedContextMessages = expectedMessages.filter(item => item.status === 'completed' && item.legacyMessageSnapshot?.workflowReply === undefined);
@@ -347,6 +347,14 @@ function toExecutionLinks(references: readonly LegacyExecutionReference[], conve
 
 function replaceLedgerEntry(entries: MigrationLedgerEntry[], next: MigrationLedgerEntry): void { const index = entries.findIndex(entry => entry.conversationId === next.conversationId); if (index < 0) entries.push(next); else entries[index] = next; }
 function isCanonicalMessageItem(item: ItemV1): boolean { return (item.type === 'user_message' || item.type === 'assistant_message') && item.messageSource !== undefined; }
+function shadowComparableStatus(expected: ItemV1, target: ItemV1 | undefined): ItemV1['status'] | undefined {
+  // Legacy stores an application-shutdown interruption as a failed message
+  // with failureReason=interrupted, while the Thread execution projection
+  // preserves the more precise interrupted terminal state. These are the same
+  // durable outcome and must not block recovery at the shadow gate.
+  if (expected.status === 'failed' && expected.legacyMessageSnapshot?.failureReason === 'interrupted' && target?.status === 'interrupted') return expected.status;
+  return target?.status;
+}
 function summaryFromConversation(conversation: Conversation): unknown { return { conversationId: conversation.id, projectId: conversation.projectId, title: conversation.title, status: conversation.status, updatedAt: conversation.updatedAt, messageCount: conversation.messages.length, turnCount: conversation.messages.filter(message => message.role === 'user').length }; }
 function canonicalJson(value: unknown): string { return JSON.stringify(sortValue(value)); }
 function sortValue(value: unknown): unknown { if (Array.isArray(value)) return value.map(sortValue); if (value && typeof value === 'object') return Object.fromEntries(Object.entries(value as Record<string, unknown>).filter(([, entry]) => entry !== undefined).sort(([left], [right]) => left.localeCompare(right)).map(([key, entry]) => [key, sortValue(entry)])); return value; }

@@ -4,6 +4,7 @@ import path from 'node:path';
 import { describe, expect, it } from 'vitest';
 import {
   addCompletedAssistantMessage,
+  beginAssistantMessage,
   attachDocumentResultToMessage,
   addUserMessage,
   createProjectConversation,
@@ -14,7 +15,8 @@ import {
   toMessageItemId,
   toProjectId,
   toThreadId,
-  toWorkId
+  toWorkId,
+  failAssistantMessage
 } from '../../src/domain';
 import { LegacyFileMigrationRunner, LegacyThreadMigration } from '../../src/platform/repositories/thread-migration';
 import { ThreadFileRepository } from '../../src/platform/repositories/thread-file-repository';
@@ -149,6 +151,23 @@ describe('Legacy Thread migration and Shadow Read', () => {
       await repository.append({ threadId: toThreadId(conversation.id), idempotencyKey: 'thread-ahead', occurredAt: t1, items: [ahead] });
       const report = await migration.shadowCompare([{ conversation }]);
       expect(report.differences).toEqual([]);
+    } finally { await rm(root, { recursive: true, force: true }); }
+  });
+
+  it('treats interrupted Thread execution and Legacy failed interruption as the same terminal fact', async () => {
+    const root = await mkdtemp(path.join(os.tmpdir(), 'unicomp-thread-shadow-interrupted-'));
+    try {
+      let conversation = createProjectConversation({ id: toConversationId('legacy-interrupted-conversation'), projectId: toProjectId('project-migration'), title: 'Interrupted', createdAt: t0 });
+      conversation = addUserMessage(conversation, { id: toMessageId('legacy-interrupted-user'), content: 'continue', createdAt: t0 });
+      conversation = beginAssistantMessage(conversation, { id: toMessageId('legacy-interrupted-assistant'), createdAt: t0 });
+      conversation = failAssistantMessage(conversation, toMessageId('legacy-interrupted-assistant'), 'interrupted', t1);
+      const repository = new ThreadFileRepository(root);
+      const migration = new LegacyThreadMigration(root, repository, { migrationId: 'shadow-interrupted-test' });
+      await migration.migrate([{ conversation }]);
+      const threadId = toThreadId(conversation.id);
+      const assistant = (await repository.readItems(threadId)).find(item => item.messageSource?.messageId === toMessageId('legacy-interrupted-assistant'))!;
+      await repository.append({ threadId, idempotencyKey: 'shadow-interrupted-status', occurredAt: t1, items: [{ ...assistant, status: 'interrupted', updatedAt: t1 }] });
+      expect((await migration.shadowCompare([{ conversation }])).differences).toEqual([]);
     } finally { await rm(root, { recursive: true, force: true }); }
   });
 
