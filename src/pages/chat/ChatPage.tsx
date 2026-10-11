@@ -542,8 +542,19 @@ function conversationFromThreadSummary(summary: ThreadSummaryDto): ConversationD
   return { ...summary, messages: [] };
 }
 
-function messagesFromThreadItems(items: readonly ThreadItemDto[]): readonly MessageDto[] {
-  return items.flatMap(item => item.message ? [item.message] : []);
+function messagesFromThreadItems(
+  items: readonly ThreadItemDto[],
+  fallbackMessages: readonly MessageDto[] = []
+): readonly MessageDto[] {
+  const fallbackById = new Map(fallbackMessages.map(message => [message.messageId, message]));
+  return items.flatMap(item => {
+    if (!item.message) return [];
+    const fallback = fallbackById.get(item.message.messageId);
+    return [{
+      ...fallback,
+      ...item.message
+    }];
+  });
 }
 
 function ChatMessageList({ virtualized, itemIds, containerRef, children }: {
@@ -1282,7 +1293,7 @@ export function ChatPage({
     }
     let active = true;
     setThreadItemsLoading(true);
-    void chat.getThreadItemsPage({ threadId: selectedId, limit: 100, direction: 'older', cursor: undefined }).then(result => {
+    void chat.getThreadItemsPage({ threadId: selectedId, limit: 100, direction: 'older', cursor: undefined }).then(async result => {
       if (!active || !result.ok) {
         if (active && result && !result.ok) setNotice(errorMessages[result.error.code]);
         return;
@@ -1294,7 +1305,11 @@ export function ChatPage({
         complete: !result.value.hasMore
       });
       setThreadItemPages(current => ({ ...current, [selectedId]: store }));
-      const messages = messagesFromThreadItems(threadItemStoreItems(store));
+      const items = threadItemStoreItems(store);
+      const hasArtifacts = items.some(item => item.itemType === 'document_artifact_projection' && item.projectionSource?.workId);
+      const fallback = hasArtifacts ? await chat.getConversation(selectedId, 'fast') : undefined;
+      if (!active) return;
+      const messages = messagesFromThreadItems(items, fallback?.ok ? fallback.value.messages : []);
       setConversations(current => current.map(conversation => conversation.conversationId === selectedId
         ? { ...conversation, messages, revision: result.value.revision, updatedAt: result.value.updatedAt }
         : conversation));
@@ -1971,7 +1986,7 @@ export function ChatPage({
         complete: !result.value.hasMore
       });
       setThreadItemPages(previous => ({ ...previous, [selectedId]: merged }));
-      const nextMessages = messagesFromThreadItems(threadItemStoreItems(merged));
+      const nextMessages = messagesFromThreadItems(threadItemStoreItems(merged), selected?.messages ?? []);
       setConversations(previous => previous.map(conversation => conversation.conversationId === selectedId
         ? { ...conversation, messages: nextMessages, revision: result.value.revision, updatedAt: result.value.updatedAt }
         : conversation));
