@@ -473,8 +473,35 @@ export function createChatContextRuntime(
     const agentRuntime = new ConversationAgentRuntimeService({ repository: agentRuntimeRepository, now,
       executionOwnershipGuard: runId => sessionService.assertExecutionOwnershipIfPresent(runId),
       nextEventId: () => `run-event-${randomUUID()}`, hash: serialized => createHash('sha256').update(serialized).digest('hex') });
+    const projectThreadExecutionFacts = async (responseExecutionId: ConversationResponseExecutionId): Promise<void> => {
+      if (!turnCoordinator) return;
+      const canonical = await agentRuntime.findByResponse(responseExecutionId);
+      if (!canonical) return;
+      const runtimeFacts = canonical.runtime;
+      const mapStatus = (status: typeof runtimeFacts.toolCalls[number]['status']): ItemStatus =>
+        status === 'observed' ? 'completed' : status === 'failed' ? 'failed' : status === 'unknown' ? 'unknown' : 'streaming';
+      for (const tool of runtimeFacts.toolCalls) {
+        const common = {
+          threadId: runtimeFacts.conversationId,
+          sourceMessageId: runtimeFacts.sourceMessageId,
+          toolCallId: tool.stepRef,
+          toolId: tool.toolId,
+          responseExecutionId,
+          agentRunId: runtimeFacts.runId,
+          status: mapStatus(tool.status),
+          content: tool.toolId,
+          createdAt: runtimeFacts.createdAt,
+          updatedAt: runtimeFacts.updatedAt
+        } as const;
+        await turnCoordinator.projectTool({ ...common, kind: 'tool_call_projection' });
+        if (tool.resultHash || ['observed', 'failed', 'unknown'].includes(tool.status)) {
+          await turnCoordinator.projectTool({ ...common, kind: 'tool_result_projection', content: tool.failureCode ?? tool.resultHash ?? tool.status });
+        }
+      }
+    };
     const projectVerifiedDocumentArtifact = async (responseExecution: ConversationResponseExecutionV1,
       workIds: readonly WorkId[], completionRequired = false) => {
+      await projectThreadExecutionFacts(responseExecution.id).catch(error => dependencies.onError?.(error));
       const tasks = (await documentTools.collectResponseFacts(responseExecution.id)).documentTasks;
       const verified = tasks.filter(task => task.readBackConfirmed && task.registeredWork &&
         task.runtime.projectId === session.projectId && task.runtime.conversationId === responseExecution.snapshot.conversationId &&
@@ -1013,6 +1040,7 @@ export function createChatContextRuntime(
         if (!turnCoordinator) return;
         try {
           const execution = await responseLifecycle.readModel(responseExecutionId);
+          await projectThreadExecutionFacts(responseExecutionId);
           const conversation = await projectConversations.get(toConversationId(execution.conversationId));
           const assistant = conversation?.messages.find(message => message.id === execution.assistantMessageId);
           if (!conversation || !assistant || !['completed', 'failed', 'cancelled'].includes(assistant.state)) return;

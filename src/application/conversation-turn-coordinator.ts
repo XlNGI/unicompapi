@@ -35,4 +35,8 @@ export class ConversationTurnCoordinator {
   projectDocumentArtifact(input: Parameters<ThreadProjectionCoordinator['projectDocumentArtifact']>[0]) {
     return this.projections.projectDocumentArtifact(input);
   }
+
+  projectTool(input: Parameters<ThreadProjectionCoordinator['projectTool']>[0]) {
+    return this.projections.projectTool(input);
+  }
 }

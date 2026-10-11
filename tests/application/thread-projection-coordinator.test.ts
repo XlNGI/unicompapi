@@ -54,4 +54,19 @@ describe('ThreadProjectionCoordinator', () => {
     expect(second.alreadyCommitted).toBe(true);
     expect(second.item.itemId).toEqual(first.item.itemId);
   });
+
+  it('projects Tool Call and Tool Result as separate idempotent Items', async () => {
+    const repo = repository();
+    const coordinator = new ThreadProjectionCoordinator(repo);
+    const common = { threadId: 'thread-projection', sourceMessageId: 'message-projection', toolCallId: 'step-1', toolId: 'generate_pptx',
+      responseExecutionId: 'response-projection', agentRunId: 'run-projection', status: 'completed' as const,
+      content: 'generate_pptx', createdAt: toIsoTimestamp('2026-10-10T00:00:01.000Z'), updatedAt: toIsoTimestamp('2026-10-10T00:00:02.000Z') };
+    const call = await coordinator.projectTool({ ...common, kind: 'tool_call_projection' });
+    const result = await coordinator.projectTool({ ...common, kind: 'tool_result_projection', content: 'completed' });
+    const replay = await coordinator.projectTool({ ...common, kind: 'tool_result_projection', content: 'changed' });
+    expect(call.item.type).toBe('tool_call_projection');
+    expect(result.item.type).toBe('tool_result_projection');
+    expect(replay.alreadyCommitted).toBe(true);
+    expect(replay.item.itemId).toEqual(result.item.itemId);
+  });
 });

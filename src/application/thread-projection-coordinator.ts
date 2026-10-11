@@ -1,11 +1,15 @@
 import {
   appendTurnExecutionLink,
+  createItemV1,
   toConversationAgentRunId,
   toConversationResponseExecutionId,
+  toProjectionItemId,
   toThreadId,
   toTurnId,
   toMessageItemId,
   toMessageId,
+  toToolCallId,
+  sha256Hex,
   type ItemStatus,
   type ItemV1,
   type ConversationAgentRunId,
@@ -63,6 +67,20 @@ export interface ProjectDocumentArtifactInput {
   readonly responseExecutionId?: ConversationResponseExecutionId | string;
   readonly agentRunId?: ConversationAgentRunId | string;
   readonly status: ItemStatus;
+  readonly content?: string;
+  readonly createdAt: IsoTimestamp;
+  readonly updatedAt: IsoTimestamp;
+}
+
+export interface ProjectToolProjectionInput {
+  readonly kind: 'tool_call_projection' | 'tool_result_projection';
+  readonly threadId: ThreadId | string;
+  readonly sourceMessageId: string;
+  readonly toolCallId: string;
+  readonly toolId: string;
+  readonly status: ItemStatus;
+  readonly responseExecutionId?: ConversationResponseExecutionId | string;
+  readonly agentRunId?: ConversationAgentRunId | string;
   readonly content?: string;
   readonly createdAt: IsoTimestamp;
   readonly updatedAt: IsoTimestamp;
@@ -189,4 +207,54 @@ export class ThreadProjectionCoordinator {
     if (!committed) throw new Error('thread_artifact_idempotency_record_missing');
     return { thread: result.thread, item: committed, alreadyCommitted: true };
   }
+
+  async projectTool(input: ProjectToolProjectionInput): Promise<{ readonly thread: ThreadV1; readonly item: ItemV1; readonly alreadyCommitted: boolean }> {
+    const threadId = toThreadId(String(input.threadId));
+    const thread = await this.repository.getThread(threadId);
+    if (!thread) throw new Error('thread_not_found');
+    const turns = await this.repository.readTurns(threadId);
+    const turn = turns.find(candidate => candidate.userItemId?.namespace === 'message' && candidate.userItemId.value === input.sourceMessageId);
+    if (!turn) throw new Error('turn_not_found_for_tool_projection');
+    const existing = (await this.repository.readItems(threadId)).find(item =>
+      item.type === input.kind && item.projectionSource?.toolCallId !== undefined &&
+      String(item.projectionSource.toolCallId) === input.toolCallId
+    );
+    if (existing) return { thread, item: existing, alreadyCommitted: true };
+    const projected = createToolProjectionItem({ ...input, threadId, turnId: turn.turnId, sequence: thread.lastItemSequence + 1 });
+    const result = await this.repository.append({
+      threadId,
+      idempotencyKey: `thread-tool:${threadId}:${input.kind}:${input.toolCallId}`,
+      occurredAt: input.updatedAt,
+      expectedGeneration: thread.generation,
+      items: [projected]
+    });
+    if (!result.alreadyCommitted) return { thread: result.thread, item: projected, alreadyCommitted: false };
+    const committed = (await this.repository.readItems(threadId)).find(candidate =>
+      candidate.type === input.kind && candidate.projectionSource?.toolCallId !== undefined &&
+      String(candidate.projectionSource.toolCallId) === input.toolCallId
+    );
+    if (!committed) throw new Error('thread_tool_idempotency_record_missing');
+    return { thread: result.thread, item: committed, alreadyCommitted: true };
+  }
+}
+
+function createToolProjectionItem(input: ProjectToolProjectionInput & { readonly threadId: ThreadId; readonly turnId: TurnId; readonly sequence: number }): ItemV1 {
+  return createItemV1({
+    itemId: toProjectionItemId(`item-projection-v1:${sha256Hex(JSON.stringify([input.threadId, input.kind, input.toolId, input.toolCallId]))}`),
+    threadId: input.threadId,
+    turnId: input.turnId,
+    sequence: input.sequence,
+    type: input.kind,
+    status: input.status,
+    createdAt: input.createdAt,
+    updatedAt: input.updatedAt,
+    ...(input.content !== undefined ? { content: input.content } : {}),
+    projectionSource: {
+      eventSystem: 'agent_runtime',
+      sourceIdentity: `${input.toolId}:${input.toolCallId}`,
+      ...(input.responseExecutionId ? { responseExecutionId: toConversationResponseExecutionId(String(input.responseExecutionId)) } : {}),
+      ...(input.agentRunId ? { agentRunId: toConversationAgentRunId(String(input.agentRunId)) } : {}),
+      toolCallId: toToolCallId(input.toolCallId)
+    }
+  });
 }
