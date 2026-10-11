@@ -1036,7 +1036,6 @@ export function createChatContextRuntime(
         projectAssistantMessage: async input => {
           if (!turnCoordinator) return;
           await turnCoordinator.projectAssistantMessage({ ...input, createdAt: toIsoTimestamp(input.createdAt), updatedAt: toIsoTimestamp(input.updatedAt) });
-          await legacyProjection?.drain(input.threadId);
         },
         bindExecutionOwnership: async id => {
           const run = await completion.bindExecution(toConversationResponseExecutionId(id));
