@@ -956,7 +956,6 @@ export function createChatContextRuntime(
           updatedAt: event.occurredAt,
           ...(assistant ? { legacyMessageSnapshot: assistant as unknown as Readonly<Record<string, unknown>> } : {})
         });
-        await legacyProjection?.drain(String(execution.conversationId));
       };
     }
     const responses: ConversationResponseControllerRuntime = {
@@ -1136,6 +1135,7 @@ export function createChatContextRuntime(
             updatedAt: toIsoTimestamp(assistant.updatedAt),
             legacyMessageSnapshot: assistant as unknown as Readonly<Record<string, unknown>>
           });
+          await legacyProjection?.drain(String(execution.conversationId));
         } catch (error) {
           dependencies.onError?.(error);
         }
