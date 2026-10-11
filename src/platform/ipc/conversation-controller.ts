@@ -1,4 +1,4 @@
-import type { ConversationApplicationService } from '../../application';
+import type { ConversationApplicationService, ConversationTurnCoordinator } from '../../application';
 import {
   toConversationId,
   toMessageId,
@@ -30,6 +30,8 @@ export interface ConversationControllerDependencies {
   canStartNewResponse?(conversationId: string): Promise<boolean>;
   canEditUserMessage?(conversationId: string, messageId: string): Promise<boolean>;
   onError?(error: unknown): void;
+  readonly turnCoordinator?: ConversationTurnCoordinator;
+  readonly legacyProjection?: { drain(threadId: string): Promise<{ readonly projected: number; readonly pending: number }> };
 }
 
 export class ConversationController {
@@ -161,6 +163,20 @@ export class ConversationController {
         expectedRevision: input.expectedRevision,
         content: input.content
       });
+      if (this.dependencies.turnCoordinator) {
+        const message = conversation.messages.at(-1)!;
+        await this.dependencies.turnCoordinator.acceptUserTurn({
+          threadId: conversation.id,
+          projectId: conversation.projectId,
+          title: conversation.title,
+          messageId: message.id,
+          messageRevision: message.revision,
+          content: message.content,
+          createdAt: message.createdAt,
+          clientCommandId: `direct:${message.id}`
+        });
+        await this.dependencies.legacyProjection?.drain(String(conversation.id));
+      }
       return { ok: true, value: this.toDto(conversation) };
     });
   }
@@ -180,6 +196,22 @@ export class ConversationController {
         messageId: toMessageId(input.messageId),
         content: input.content
       });
+      if (this.dependencies.turnCoordinator) {
+        const message = conversation.messages.find(item => item.id === input.messageId);
+        if (message) {
+          await this.dependencies.turnCoordinator.acceptUserTurn({
+            threadId: conversation.id,
+            projectId: conversation.projectId,
+            title: conversation.title,
+            messageId: message.id,
+            messageRevision: message.revision,
+            content: message.content,
+            createdAt: message.createdAt,
+            clientCommandId: `direct-edit:${message.id}:${message.revision}`
+          });
+          await this.dependencies.legacyProjection?.drain(String(conversation.id));
+        }
+      }
       return { ok: true, value: this.toDto(conversation) };
     });
   }

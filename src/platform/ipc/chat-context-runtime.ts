@@ -1264,6 +1264,8 @@ export function createChatContextRuntime(
             (run.status === 'needs_reconciliation' || run.reconciliationReason !== undefined)),
         projectRequired: true,
         storageScope: 'current_project',
+        turnCoordinator: responses.turnCoordinator,
+        legacyProjection: responses.legacyProjection,
         onError: dependencies.onError
       }),
       conversationRepository: projectConversations,
