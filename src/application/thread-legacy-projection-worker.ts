@@ -2,6 +2,7 @@ import {
   addCompletedAssistantMessage,
   addUserMessage,
   createConversation,
+  parseMessage,
   toConversationId,
   toIsoTimestamp,
   toMessageId,
@@ -30,7 +31,13 @@ export class ThreadLegacyProjectionWorker {
     let projected = 0;
     for (const event of events) {
       if (receipts.has(event.eventId)) continue;
-      await this.project(event);
+      try {
+        await this.project(event);
+      } catch {
+        // Thread is authoritative. Keep the unacknowledged Outbox event as
+        // durable projection debt without blocking a new User Turn.
+        continue;
+      }
       const receipt: ThreadProjectionReceiptV1 = {
         schemaVersion: 1,
         eventId: event.eventId,
@@ -63,10 +70,25 @@ export class ThreadLegacyProjectionWorker {
     const messageId = toMessageId(String(item.messageSource.messageId));
     const existing = conversation.messages.find(message => message.id === messageId);
     if (existing) {
-      if (existing.content !== (item.content ?? '') || existing.revision !== item.messageSource.messageRevision) {
-        throw new Error('legacy_projection_message_conflict');
+      // Stream replay can encounter events older than a direct Legacy
+      // compatibility write. They are already represented by a newer
+      // revision and can be acknowledged safely.
+      if (existing.revision >= item.messageSource.messageRevision) return;
+      const snapshot = item.legacyMessageSnapshot;
+      if (snapshot) {
+        const projected = parseMessage(snapshot);
+        if (projected.id !== messageId || projected.conversationId !== conversation.id || projected.revision < existing.revision) {
+          throw new Error('legacy_projection_message_conflict');
+        }
+        await this.conversations.save({
+          ...conversation,
+          revision: conversation.revision + 1,
+          updatedAt: projected.updatedAt,
+          messages: conversation.messages.map(message => message.id === messageId ? projected : message)
+        }, conversation.revision);
+        return;
       }
-      return;
+      throw new Error('legacy_projection_message_conflict');
     }
     const updated = item.type === 'user_message'
       ? addUserMessage(conversation, {
