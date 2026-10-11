@@ -1,5 +1,13 @@
 # UniComp 开发计划
 
+### 真实会话日志复核：PPT 生成与登记通过（2026-10-11）
+
+负责人确认按日志证据记录本次真实会话。隔离项目 `project-4b9f0e90-8f16-4ca1-81f9-22d66a4a7e33` 的会话 `conversation-6aec886f-08a2-4f78-90d6-6bd4596b3ed6` 在 2026-10-11 04:37 UTC（00:37 EDT）完成真实 Provider PPT 生成。最新 `chat_stream` 返回 HTTP 200，耗时约 1.7 秒；最新 Response Execution `response-execution-2721db30-d7c4-4891-b58a-0c8c9365a977`、Document Runtime `runtime-document-66e3b40b-2b50-4a09-98d5-c9de5a353860` 和 Document Execution `execution-document-7a9b458b-f884-4dc0-9b2a-3f078ab6393f` 均为 `completed`。
+
+登记 Work `work-document-969a7719-5eee-4aec-b6fd-5932bd701bfe` 对应 `files/documents/企业内部AI办公助手项目汇报-20261011043748-23aa8262-8593-4583-b6bb-20fc9993e86d.pptx`，大小 198,365 bytes，文件状态 `available`，发布前后 Hash 校验通过。Production Trace 依次完成渲染、结构检查、Hash 检查、原子发布、发布后 Hash 检查、Work 登记和 `task_complete`。该项目当前不存在 `entities/threads` 目录，本次未观察到 ThreadFile 写入，符合关闭写入开关的预期。
+
+结论：真实 Provider 单次 PPT 生成 `PASS`；文档渲染与登记 `PASS`；ThreadFile 写入关闭符合预期。该记录不扩展为真实 Provider 连续读取/修改工具验收，也不代表生产 Cutover 已批准。`TT: undefined function: 32` 保持为 PDF.js 字体解析警告，不影响本次结果。
+
 ### 自动验收复核：未完成项目代码级门禁（2026-10-11）
 
 已代替重复人工步骤执行自动验收：生产文档生成/读取/更新、Agent Continuation、Thread 迁移与读取共 82/82 通过；性能与 Thread 仓储基线 21/21 通过；`pnpm typecheck`、`pnpm lint`、`pnpm build` 通过。真实 Electron ThreadFile/Legacy 双模式会话验收均通过（3 会话、120 条消息、分页、虚拟列表、项目切换）；Mock Provider + 真实 Electron 通过普通 Agent、持久执行身份、起始取消、Provider Tool Calling、PPT、Word、Excel 物理文件登记。
