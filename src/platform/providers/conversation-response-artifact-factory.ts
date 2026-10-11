@@ -27,6 +27,7 @@ import {
 } from './newapi/newapi-contracts';
 import { UNICOMPAPI_PROVIDER_PACKAGE_ID } from './newapi/unicompapi-contracts';
 import type { SubmissionArtifactFactoryPort } from './provider-submission-orchestrator';
+import type { ItemStatus } from '../../domain';
 import type { ConversationAttachmentContextService } from '../documents/conversation-attachment-context';
 import { ConversationAttachmentError } from '../documents/conversation-attachment-context';
 import { ConversationDocumentPageError, resolveConversationResponseDocumentPages, type ConversationDocumentPageContextService } from '../documents/conversation-document-page-context';
@@ -47,6 +48,16 @@ export interface ConversationResponseArtifactFactoryDependencies {
   readonly executionCoordinator?: ConversationExecutionCoordinator;
   getStartupSignal?(draftId: string): AbortSignal | undefined;
   onPreparationFailed?(executionId: string, error: unknown): Promise<void>;
+  projectAssistantMessage?(input: {
+    readonly threadId: string;
+    readonly sourceMessageId: string;
+    readonly assistantMessageId: string;
+    readonly messageRevision: number;
+    readonly status: ItemStatus;
+    readonly content: string;
+    readonly createdAt: string;
+    readonly updatedAt: string;
+  }): Promise<void>;
   bindExecutionOwnership?(executionId: string): Promise<void>;
   bindDocumentOwnership?(executionId: string): Promise<void>;
   nextMessageId?: () => MessageId;
@@ -178,6 +189,16 @@ export class ConversationResponseArtifactFactory
     const pendingConversation = beginAssistantMessage(conversation, {
       id: assistantMessageId,
       createdAt
+    });
+    await this.dependencies.projectAssistantMessage?.({
+      threadId: String(conversation.id),
+      sourceMessageId: String(draft.userMessageId),
+      assistantMessageId: String(assistantMessageId),
+      messageRevision: 0,
+      status: 'pending',
+      content: '',
+      createdAt,
+      updatedAt: createdAt
     });
     await this.dependencies.conversations.save(
       pendingConversation,
