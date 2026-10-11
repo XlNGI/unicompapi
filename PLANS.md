@@ -1,5 +1,11 @@
 # UniComp 开发计划
 
+### Thread-first 安全门禁自动化（2026-10-11）
+
+已将原先停在人工确认的 Thread-first 安全门禁接入 Electron 启动链路：默认启动先为 `entities/conversations.json` 保留 `.bak` 回滚副本，使用 `LegacyThreadMigration` 幂等迁移项目会话，再运行 `Shadow Compare`；迁移失败、Ledger 未完成或存在差异时，ThreadFile 写入屏障保持失败，不允许继续执行 Thread-first 写入。`UNICOMP_THREAD_FIRST=0` 是显式 Legacy 回滚开关。
+
+默认 Electron 真实验收已通过 3 个会话、40 条消息、重启恢复和分页/虚拟列表；Summary p95 约 1ms、Item Page p95 约 4ms，迁移重复运行不会增加 Item。当前仍保留 Legacy 会话作为 Agent 执行快照和回滚来源；正式移除该执行快照写入、真实 Provider 矩阵和灰度发布仍需后续独立验收，不能把自动门禁通过误报为全部生产 Cutover 完成。
+
 ### 统一达成计划：Thread-first 会话、新执行权威与模型适配（2026-10-11）
 
 根据当前代码审查，后续主线统一为：Thread/Turn/Item 作为新会话权威；Agent Runtime 作为唯一执行权威；Document Runtime/Work 作为文档权威；Provider Capability Evidence/Feature Contract 作为模型适配权威。`ConversationWorkflowService` 只保留计划、确认、多交付状态和失败语义，退出独立 Provider/文档副作用执行；Legacy Conversation 只保留历史读取和迁移兼容。停止继续扩展 Legacy 主链路，优先实施唯一 Turn Coordinator、Thread-first 新会话和模型能力统一接线。

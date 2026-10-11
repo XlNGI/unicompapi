@@ -29,6 +29,8 @@ try {
       cwd: projectRoot,
       env: {
         ...process.env,
+        UNICOMP_THREAD_FIRST: process.env.UNICOMP_THREAD_FIRST ?? '1',
+        VITE_UNICOMP_THREAD_FIRST: process.env.VITE_UNICOMP_THREAD_FIRST ?? '1',
         UNICOMP_ENABLE_LOCAL_FFMPEG: '1',
         UNICOMP_FFMPEG_PATH: verified.ffmpegPath,
         UNICOMP_FFPROBE_PATH: verified.ffprobePath

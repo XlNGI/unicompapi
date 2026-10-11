@@ -31,7 +31,10 @@ export function registerChatContextIpcHandlers(options: {
   };
   onError?(error: unknown): void;
 }): ChatContextIpcLifecycle {
-  const threadFirstEnabled = process.env.UNICOMP_THREAD_FIRST === '1';
+  // Thread-first is now the guarded default. Set UNICOMP_THREAD_FIRST=0 only
+  // for an explicit rollback run; the runtime migration/shadow barrier must
+  // still pass before any ThreadFile write is admitted.
+  const threadFirstEnabled = process.env.UNICOMP_THREAD_FIRST !== '0';
   const runtime = createChatContextRuntime({
     userDataDirectory: app.getPath('userData'),
     threadFileReadEnabled: threadFirstEnabled || process.env.UNICOMP_THREAD_FILE_READ_PATH === '1',

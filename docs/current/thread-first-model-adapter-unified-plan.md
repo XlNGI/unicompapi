@@ -10,10 +10,12 @@
 - Thread-first 文档任务复用已确认的 Workflow revision，进入现有 Agent/Response/Document Tool Runtime 时不会再次运行语义规划；Legacy 环境继续保留原有文档路径。
 - 已验证 Work 在本地校验和正式登记后以幂等 `document_artifact_projection` 写入 Thread；投影失败只形成 projection debt，不重放 Provider 或删除 Work。
 - Agent Runtime 已保存的 `toolId / stepRef / status / resultHash` 会以独立、幂等的 Tool Call/Tool Result Items 投影到同一 Turn；取消、中断和未知状态保留原终态语义。
-- `pnpm dev:thread-first` 开关同时打开 Electron ThreadFile 读写和 Renderer Thread 读取；生产默认仍未切换存储权威。
+- `pnpm dev:thread-first` 仍可显式启动 ThreadFile 读写和 Renderer Thread 读取；默认 Electron 启动已进入受迁移屏障保护的 Thread-first 路径。
 - Windows Electron ThreadFile 读模式已完成 3 Thread/40 Item 重启比对：Summary p95 约 1ms、Item Page p95 约 3.9ms、虚拟行和重启后语义签名一致。
+- Thread-first 启动屏障已接入：默认启动先保留 Legacy 备份，执行幂等迁移并运行 Shadow Compare；零差异后才允许 ThreadFile 写入。`UNICOMP_THREAD_FIRST=0` 可作为显式回滚开关。
+- 默认 Electron 验收已通过 3 Thread/40 Item/重启恢复，Summary p95 约 1ms、Item Page p95 约 4ms，且迁移不会产生重复 Item。
 
-尚未宣称完成：真实 Provider 连续 Tool Calling 的 Thread Tool/Observation 全量投影、历史迁移 Shadow Compare、Legacy 写入退出、生产存储 Cutover，以及真实文档 Provider E2E。上述项目仍是后续门禁，不因本检查点通过而自动切换。
+尚未宣称完成：Legacy Conversation 的执行快照写入尚未完全移除，真实 Provider 连续 Tool Calling 的外部矩阵、真实文档 Provider E2E 和正式灰度发布仍需独立验证；启动迁移与 Shadow Compare 门禁已经自动执行，不再依赖人工放行。
 
 ## 目标和边界
 

@@ -89,6 +89,20 @@ describe('Legacy Thread migration and Shadow Read', () => {
     } finally { await rm(root, { recursive: true, force: true }); }
   });
 
+  it('treats an omitted and empty execution reference list as the same migration input', async () => {
+    const root = await mkdtemp(path.join(os.tmpdir(), 'unicomp-thread-migration-normalize-'));
+    try {
+      const conversation = legacyConversation();
+      const repository = new ThreadFileRepository(root);
+      const migration = new LegacyThreadMigration(root, repository, { migrationId: 'normalize-test' });
+      const first = await migration.migrate([{ conversation }]);
+      const second = await migration.migrate([{ conversation, executionReferences: [] }]);
+      expect(first.migrated).toBe(1);
+      expect(second.skipped).toBe(1);
+      expect((await repository.readItems(toThreadId(conversation.id))).length).toBe(conversation.messages.length);
+    } finally { await rm(root, { recursive: true, force: true }); }
+  });
+
   it('blocks readiness for active executions, missing backup or shadow differences', async () => {
     const root = await mkdtemp(path.join(os.tmpdir(), 'unicomp-thread-fence-'));
     try {

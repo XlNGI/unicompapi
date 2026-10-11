@@ -149,9 +149,20 @@ export class LegacyThreadMigration {
     let migrated = 0, skipped = 0, failed = 0;
     for (const snapshot of source) {
       const conversation = snapshot.conversation;
-      const sourceChecksum = sha256Hex(canonicalJson(snapshot));
+      // Empty optional reference arrays carry no migration meaning. Normalize
+      // them before hashing so callers cannot turn an idempotent retry into a
+      // second append merely by serializing `executionReferences: []`.
+      const normalizedSnapshot: LegacyConversationSnapshot = snapshot.executionReferences?.length
+        ? snapshot
+        : { conversation: snapshot.conversation };
+      const sourceChecksum = sha256Hex(canonicalJson(normalizedSnapshot));
       const existing = entries.find(entry => entry.conversationId === conversation.id);
-      if (existing?.status === 'migrated' && existing.sourceChecksum === sourceChecksum) { skipped += 1; continue; }
+      // Once a conversation has a committed migration entry, the live
+      // Thread/Turn projection owns subsequent writes. Replaying the entire
+      // Legacy snapshot would append duplicate Items when the Legacy execution
+      // snapshot advances. Shadow Compare below remains the safety check for a
+      // genuinely missing projection and blocks startup if it finds one.
+      if (existing?.status === 'migrated') { skipped += 1; continue; }
       try {
         const baseProjection = conversationToThreadProjection(conversation, {
           executionLinks: toExecutionLinks(snapshot.executionReferences ?? [], conversation.id)

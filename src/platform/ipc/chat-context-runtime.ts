@@ -13,6 +13,7 @@ import { JsonConversationCompletionJournal } from '../repositories/json-conversa
 import { JsonDocumentTaskRuntimeRepository } from '../repositories/json-document-task-runtime-repository';
 import { projectConversationParentRun } from './conversation-parent-run-projection';
 import path from 'node:path';
+import { access, copyFile } from 'node:fs/promises';
 import {
   ConversationApplicationService,
   ConversationIntentOrchestrator,
@@ -88,6 +89,7 @@ import { toConversationDto } from './conversation-controller';
 import { ConversationThreadReadController } from './conversation-thread-read-controller';
 import { ThreadFileReadAdapter } from './thread-file-read-adapter';
 import { ThreadFileRepository } from '../repositories/thread-file-repository';
+import { LegacyThreadMigration, type LegacyConversationSnapshot } from '../repositories/thread-migration';
 import type { ThreadReadApi } from './thread-file-read-adapter';
 import { verifyRetainedDocumentArtifacts } from './retained-document-artifact-projection';
 import {
@@ -826,9 +828,59 @@ export function createChatContextRuntime(
         }
       },
       onError: error => dependencies.onError?.(error) });
+    const threadWriteRepository = dependencies.threadFileWriteEnabled
+      ? new ThreadFileRepository(session.rootDirectory)
+      : undefined;
+    const threadMigrationReady: Promise<void> = threadWriteRepository
+      ? (async () => {
+          // The Legacy file is retained as the rollback source. Create a
+          // missing backup before migration, but never overwrite an existing
+          // backup or mutate the source document.
+          const legacyPath = path.join(session.rootDirectory, 'entities', 'conversations.json');
+          const backupPath = `${legacyPath}.bak`;
+          try {
+            await access(legacyPath);
+            try { await access(backupPath); }
+            catch { await copyFile(legacyPath, backupPath); }
+          } catch (error) {
+            if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error;
+          }
+          const conversations = await projectConversations.list({ statuses: ['active', 'archived', 'deleted'] });
+          const runs = await agentRuns.list();
+          const tasks = await new JsonDocumentTaskRuntimeRepository(storage, session.projectId).list();
+          const snapshots: readonly LegacyConversationSnapshot[] = conversations.map(conversation => {
+            const executionReferences = runs
+              .filter(run => run.conversationId === conversation.id)
+              .map(run => ({
+                conversationId: conversation.id,
+                sourceMessageId: run.sourceMessageId,
+                ...(run.id ? { agentRunId: run.id } : {}),
+                ...(run.responseExecutionId ? { responseExecutionId: run.responseExecutionId } : {}),
+                workIds: tasks
+                  .filter(task => task.conversationId === conversation.id && task.sourceMessageId === run.sourceMessageId && task.workRef?.kind === 'registered')
+                  .flatMap(task => task.workRef?.kind === 'registered' ? [task.workRef.ref] : [])
+              }));
+            return { conversation, ...(executionReferences.length ? { executionReferences } : {}) };
+          });
+          const migration = new LegacyThreadMigration(session.rootDirectory, threadWriteRepository, {
+            migrationId: `thread-authority-${session.projectId}`,
+            sourceLabel: `project:${session.projectId}`,
+            now: () => toIsoTimestamp(now())
+          });
+          const result = await migration.migrate(snapshots);
+          if (result.failed > 0 || result.ledger.entries.some(entry => entry.status !== 'migrated')) {
+            throw new Error(`thread_migration_gate_blocked:ledger_failed=${result.failed}`);
+          }
+          const shadow = await migration.shadowCompare(snapshots);
+          if (shadow.differences.length > 0) {
+            throw new Error(`thread_shadow_gate_blocked:differences=${shadow.differences.length}`);
+          }
+        })()
+      : Promise.resolve();
     // Root ownership/classification precedes legacy recovery, so a live foreign
     // owner or an explicit no-effect continuation can never be swept up by it.
-    const responseRecovery = recovery.recover()
+    const responseRecovery = threadMigrationReady
+      .then(() => recovery.recover())
       .then(() => recoverLocal(id => recovery.canRecoverResponse(id), id => recovery.canRecoverRun(id)))
       .then(() => undefined);
     // Recovery may finish before any operation waits for ready. Observe a
@@ -872,9 +924,6 @@ export function createChatContextRuntime(
       });
       lazyRecoveryTail = operation.catch(() => undefined); return operation;
     };
-    const threadWriteRepository = dependencies.threadFileWriteEnabled
-      ? new ThreadFileRepository(session.rootDirectory)
-      : undefined;
     const threadCommands = threadWriteRepository ? new ThreadCommandService(threadWriteRepository) : undefined;
     const threadProjections = threadWriteRepository ? new ThreadProjectionCoordinator(threadWriteRepository) : undefined;
     const turnCoordinator = threadCommands && threadProjections
