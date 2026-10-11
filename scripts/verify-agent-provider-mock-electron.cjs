@@ -168,13 +168,30 @@ async function run() {
   if (!toolExecution) throw new Error('Tool-call execution did not reach a terminal state');
   const toolConversation = await js(`window.unicomp.chatContexts.getConversation(${JSON.stringify(toolExecution.conversationId)})`);
   const artifactMessage = toolConversation?.ok && toolConversation.value.messages?.find(message => message.documentResult);
+  let threadArtifact;
+  if (process.env.UNICOMP_THREAD_FIRST === '1') {
+    for (let attempt = 0; attempt < 40; attempt += 1) {
+      const page = await js(`window.unicomp.chatContexts.getThreadItemsPage(${JSON.stringify({ threadId: toolExecution.conversationId, limit: 200, direction: 'older', cursor: null })})`);
+      threadArtifact = page?.ok
+        ? page.value.items.find(item => item.itemType === 'document_artifact_projection')
+        : undefined;
+      if (threadArtifact?.artifact?.workId) break;
+      await delay(100);
+    }
+  }
   const toolCalling = {
     state: toolExecution.state,
     toolCallCount,
     toolCallId,
     observationReturned: toolExecution.content?.includes('工具观察结果') ?? false,
     artifactRegistered: Boolean(artifactMessage?.documentResult),
-    documentResult: artifactMessage?.documentResult ?? null
+    documentResult: artifactMessage?.documentResult ?? null,
+    threadArtifact: threadArtifact ? {
+      workId: threadArtifact.artifact?.workId ?? null,
+      fileName: threadArtifact.artifact?.fileName ?? null,
+      kind: threadArtifact.artifact?.kind ?? null,
+      sizeBytes: threadArtifact.artifact?.sizeBytes ?? null
+    } : null
   };
 
   async function generateDocumentFixture(id, content, kind) {
