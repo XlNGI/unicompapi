@@ -8,6 +8,7 @@ import type {
   LinkThreadExecutionInput,
   ProjectAssistantMessageInput
 } from './thread-projection-coordinator';
+import { toProjectId, toThreadId, type IsoTimestamp, type ProjectId, type ThreadId } from '../domain';
 
 /**
  * The single application boundary between a user Turn and the existing
@@ -19,6 +20,14 @@ export class ConversationTurnCoordinator {
     private readonly commands: ThreadCommandService,
     private readonly projections: ThreadProjectionCoordinator
   ) {}
+
+  createThread(input: { readonly threadId: ThreadId | string; readonly projectId: ProjectId | string | null; readonly title: string; readonly createdAt: IsoTimestamp }) {
+    return this.commands.createThread({
+      ...input,
+      threadId: toThreadId(String(input.threadId)),
+      projectId: input.projectId === null ? null : toProjectId(String(input.projectId))
+    });
+  }
 
   acceptUserTurn(input: AcceptThreadTurnInput): Promise<AcceptedThreadTurn> {
     return this.commands.acceptUserTurn(input);

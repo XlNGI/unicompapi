@@ -60,6 +60,10 @@ export interface AcceptedThreadTurn {
 export class ThreadCommandService {
   constructor(private readonly repository: ThreadCommandRepository) {}
 
+  createThread(input: Parameters<ThreadCommandRepository['createThread']>[0]): Promise<ThreadV1> {
+    return this.repository.createThread(input);
+  }
+
   async acceptUserTurn(input: AcceptThreadTurnInput): Promise<AcceptedThreadTurn> {
     const threadId = toThreadId(String(input.threadId));
     const projectId = input.projectId === null ? null : String(input.projectId) as ProjectId;

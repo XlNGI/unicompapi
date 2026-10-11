@@ -599,14 +599,42 @@ export class ConversationResponseController {
     const attachments = input.attachmentFileIds !== undefined
       ? attachmentFileIds.length ? await step(() => runtime.attachments!.pin(attachmentFileIds)) : []
       : undefined;
-    let conversation = input.conversation
-      ? await step(() => runtime.conversationService.get(
-          toConversationId(input.conversation!.conversationId)
-        ))
-      : await step(() => runtime.conversationService.create({
-          title: input.title,
-          projectId: runtime.conversations.projectId
-        }));
+    let acceptedThreadTurn: Awaited<ReturnType<ConversationTurnCoordinator['acceptUserTurn']>> | undefined;
+    let preacceptedThreadTurn = false;
+    let conversation: Conversation;
+    if (input.conversation) {
+      conversation = await step(() => runtime.conversationService.get(
+        toConversationId(input.conversation!.conversationId)
+      ));
+    } else if (runtime.turnCoordinator) {
+      // New conversations get their identity and User Item in Thread first.
+      // Legacy is materialized from the durable projection after this commit.
+      const conversationId = runtime.conversationService.nextConversationId();
+      const messageId = runtime.conversationService.nextMessageId();
+      await step(() => runtime.turnCoordinator!.createThread({
+        threadId: conversationId,
+        projectId: runtime.conversations.projectId,
+        title: input.title,
+        createdAt: toIsoTimestamp(this.now())
+      }));
+      acceptedThreadTurn = await step(() => runtime.turnCoordinator!.acceptUserTurn({
+        threadId: conversationId,
+        projectId: runtime.conversations.projectId,
+        title: input.title,
+        messageId,
+        content: input.content,
+        createdAt: toIsoTimestamp(this.now()),
+        clientCommandId: input.clientCommandId
+      }));
+      preacceptedThreadTurn = true;
+      await step(() => runtime.legacyProjection?.drain(String(conversationId)) ?? Promise.resolve({ projected: 0, pending: 0 }));
+      conversation = await step(() => runtime.conversationService.get(conversationId));
+    } else {
+      conversation = await step(() => runtime.conversationService.create({
+        title: input.title,
+        projectId: runtime.conversations.projectId
+      }));
+    }
     if (input.agentNative && runtime.continuations?.validate) {
       const replay = await step(() => runtime.continuations!.validate!({ conversation, input, signal }));
       if (replay) return { ok: true, value: replay };
@@ -655,15 +683,17 @@ export class ConversationResponseController {
               : {})
           }));
     } else {
-      conversation = await step(() => runtime.conversationService.addUserMessage({
-        conversationId: conversation.id,
-        expectedRevision: conversation.revision,
-        content: input.content,
-        ...(attachments ? { attachments } : {}),
-        ...(input.displayContent !== undefined
-          ? { displayContent: input.displayContent }
-          : {})
-      }));
+      if (!preacceptedThreadTurn) {
+        conversation = await step(() => runtime.conversationService.addUserMessage({
+          conversationId: conversation.id,
+          expectedRevision: conversation.revision,
+          content: input.content,
+          ...(attachments ? { attachments } : {}),
+          ...(input.displayContent !== undefined
+            ? { displayContent: input.displayContent }
+            : {})
+        }));
+      }
     }
     const userMessage = workflow
       ? conversation.messages.find((message) => message.id === workflow!.sourceMessageId)
@@ -679,7 +709,6 @@ export class ConversationResponseController {
     if (!session || session.projectId !== runtime.conversations.projectId) {
       return failure('project_not_open', 'The source project is no longer active');
     }
-    let acceptedThreadTurn: Awaited<ReturnType<ConversationTurnCoordinator['acceptUserTurn']>> | undefined;
     let agentRun: ReturnType<typeof createConversationAgentRun> | undefined;
     let agentSession: ConversationAgentSessionDto | undefined;
     let parentRunId: string | undefined;
@@ -689,7 +718,7 @@ export class ConversationResponseController {
       conversationId: conversation.id, sourceMessageId: userMessage.id, traceId: userMessage.id,
       clientCommandId: input.clientCommandId }, async () => {
     try {
-    if (runtime.turnCoordinator) {
+    if (runtime.turnCoordinator && !preacceptedThreadTurn) {
       try {
         acceptedThreadTurn = await step(() => runtime.turnCoordinator!.acceptUserTurn({
           threadId: conversation.id,

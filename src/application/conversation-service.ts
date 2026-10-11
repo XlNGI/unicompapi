@@ -59,12 +59,16 @@ export class ConversationApplicationService {
     private readonly now: () => string = () => new Date().toISOString()
   ) {}
 
+  nextConversationId(): ConversationId { return this.ids.nextConversationId(); }
+  nextMessageId(): MessageId { return this.ids.nextMessageId(); }
+
   async create(input: {
     readonly title: string;
     readonly projectId?: ProjectId | null;
+    readonly id?: ConversationId;
   }): Promise<Conversation> {
     const conversation = createConversation({
-      id: this.ids.nextConversationId(),
+      id: input.id ?? this.ids.nextConversationId(),
       title: input.title,
       projectId: input.projectId ?? null,
       createdAt: toIsoTimestamp(this.now())
@@ -149,10 +153,11 @@ export class ConversationApplicationService {
     readonly content: string;
     readonly displayContent?: string;
     readonly attachments?: readonly ConversationAttachmentReference[];
+    readonly messageId?: MessageId;
   }): Promise<Conversation> {
     return this.update(input, (conversation) =>
       addUserMessage(conversation, {
-        id: this.ids.nextMessageId(),
+        id: input.messageId ?? this.ids.nextMessageId(),
         content: input.content,
         ...(input.attachments ? { attachments: input.attachments } : {}),
         ...(input.displayContent !== undefined
