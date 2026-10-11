@@ -4,6 +4,16 @@
 
 ## 2026-10-11 实施检查点
 
+## 2026-10-11 Thread-first 写入收敛检查点
+
+- 新会话、已有会话普通 User Turn、直接聊天 IPC、Workflow 新建/追问/确认均先进入 `ConversationTurnCoordinator` 和 Thread Commit。
+- Thread Commit 原子记录 Projection Outbox；`ThreadLegacyProjectionWorker` 通过 Receipt 幂等投影 Legacy，投影失败不会重试 Provider、Tool 或 Work。
+- Response Stream Event 会更新同一个 Assistant Item；读取层按 Item identity 折叠版本，取消、失败、中断状态不会生成重复消息。
+- `ConversationContextReader` 已接入 Agent Continuation，优先读取 Thread Item，并保留 Legacy DTO 兼容回退。
+- 阶段定向门禁：应用测试 `843/843`，新增 Thread/Workflow/Runtime 定向测试通过，`typecheck`、`lint`、`build` 通过；Electron Mock Provider 生产链路继续通过。
+
+当前尚未执行最终 Production Authority Cutover；Legacy 兼容快照仍保留为回滚和 Runtime 兼容来源，必须等待真实 Provider 矩阵、增量 Shadow 对账和回滚演练完成后单独批准。
+
 已实施并通过定向门禁：
 
 - `ConversationTurnCoordinator` 成为 Thread 接受、Execution Link 和 Assistant Projection 的唯一 Application 接线点；`ConversationResponseController` 不再直接持有两套 Thread 写服务。

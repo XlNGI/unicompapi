@@ -1,5 +1,9 @@
 # UniComp 开发计划
 
+### Thread-first 写入收敛实施（2026-10-11）
+
+已完成：Thread Commit + Durable Projection Outbox、Legacy 幂等投影 Worker、普通 Agent/已有会话/直接 IPC/Workflow 的 Thread-first User Turn、Assistant Stream 同一 Item 状态投影、Tool/Artifact 状态更新和 Agent Continuation 的 Thread Context Reader 接线。新增提交从 `c4c4f63` 到 `75755c2`，typecheck、lint、build 及新增定向回归通过。最终生产 Authority Cutover 仍按执行限制保留，需真实 Provider 矩阵、增量对账和回滚演练后单独批准。
+
 ### Thread-first 安全门禁自动化（2026-10-11）
 
 已将原先停在人工确认的 Thread-first 安全门禁接入 Electron 启动链路：默认启动先为 `entities/conversations.json` 保留 `.bak` 回滚副本，使用 `LegacyThreadMigration` 幂等迁移项目会话，再运行 `Shadow Compare`；迁移失败、Ledger 未完成或存在差异时，ThreadFile 写入屏障保持失败，不允许继续执行 Thread-first 写入。`UNICOMP_THREAD_FIRST=0` 是显式 Legacy 回滚开关。
