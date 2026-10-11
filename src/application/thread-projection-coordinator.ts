@@ -17,6 +17,7 @@ import {
   type TurnId,
   type TurnV1
 } from '../domain';
+import { projectArtifactItem } from './conversation-thread-adapter';
 
 export interface ThreadProjectionRepository {
   getThread(threadId: ThreadId): Promise<ThreadV1 | undefined>;
@@ -53,6 +54,18 @@ export interface ProjectAssistantMessageInput {
   readonly createdAt: IsoTimestamp;
   readonly updatedAt: IsoTimestamp;
   readonly legacyMessageSnapshot?: Readonly<Record<string, unknown>>;
+}
+
+export interface ProjectDocumentArtifactInput {
+  readonly threadId: ThreadId | string;
+  readonly sourceMessageId: string;
+  readonly workId: string;
+  readonly responseExecutionId?: ConversationResponseExecutionId | string;
+  readonly agentRunId?: ConversationAgentRunId | string;
+  readonly status: ItemStatus;
+  readonly content?: string;
+  readonly createdAt: IsoTimestamp;
+  readonly updatedAt: IsoTimestamp;
 }
 
 /**
@@ -135,6 +148,45 @@ export class ThreadProjectionCoordinator {
     if (!result.alreadyCommitted) return { thread: result.thread, item, alreadyCommitted: false };
     const committed = (await this.repository.readItems(threadId)).find(candidate => candidate.itemId.namespace === 'message' && candidate.itemId.value === input.assistantMessageId && candidate.messageSource?.messageRevision === input.messageRevision);
     if (!committed) throw new Error('thread_assistant_idempotency_record_missing');
+    return { thread: result.thread, item: committed, alreadyCommitted: true };
+  }
+
+  async projectDocumentArtifact(input: ProjectDocumentArtifactInput): Promise<{ readonly thread: ThreadV1; readonly item: ItemV1; readonly alreadyCommitted: boolean }> {
+    const threadId = toThreadId(String(input.threadId));
+    const thread = await this.repository.getThread(threadId);
+    if (!thread) throw new Error('thread_not_found');
+    const turns = await this.repository.readTurns(threadId);
+    const turn = turns.find(candidate => candidate.userItemId?.namespace === 'message' && candidate.userItemId.value === input.sourceMessageId);
+    if (!turn) throw new Error('turn_not_found_for_artifact');
+    const existing = (await this.repository.readItems(threadId)).find(item =>
+      item.type === 'document_artifact_projection' && item.projectionSource?.workId !== undefined && String(item.projectionSource.workId) === String(input.workId)
+    );
+    if (existing) return { thread, item: existing, alreadyCommitted: true };
+    const item = projectArtifactItem({
+      threadId,
+      turnId: turn.turnId,
+      sequence: thread.lastItemSequence + 1,
+      status: input.status,
+      ...(input.content !== undefined ? { content: input.content } : {}),
+      createdAt: input.createdAt,
+      updatedAt: input.updatedAt,
+      sourceIdentity: `work:${input.workId}`,
+      ...(input.responseExecutionId ? { responseExecutionId: input.responseExecutionId } : {}),
+      ...(input.agentRunId ? { agentRunId: input.agentRunId } : {}),
+      workId: input.workId
+    });
+    const result = await this.repository.append({
+      threadId,
+      idempotencyKey: `thread-artifact:${threadId}:${input.workId}`,
+      occurredAt: input.updatedAt,
+      expectedGeneration: thread.generation,
+      items: [item]
+    });
+    if (!result.alreadyCommitted) return { thread: result.thread, item, alreadyCommitted: false };
+    const committed = (await this.repository.readItems(threadId)).find(candidate =>
+      candidate.type === 'document_artifact_projection' && candidate.projectionSource?.workId !== undefined && String(candidate.projectionSource.workId) === String(input.workId)
+    );
+    if (!committed) throw new Error('thread_artifact_idempotency_record_missing');
     return { thread: result.thread, item: committed, alreadyCommitted: true };
   }
 }

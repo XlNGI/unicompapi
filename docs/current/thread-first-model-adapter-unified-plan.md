@@ -2,6 +2,18 @@
 
 日期：2026-10-11
 
+## 2026-10-11 实施检查点
+
+已实施并通过定向门禁：
+
+- `ConversationTurnCoordinator` 成为 Thread 接受、Execution Link 和 Assistant Projection 的唯一 Application 接线点；`ConversationResponseController` 不再直接持有两套 Thread 写服务。
+- Thread-first 文档任务复用已确认的 Workflow revision，进入现有 Agent/Response/Document Tool Runtime 时不会再次运行语义规划；Legacy 环境继续保留原有文档路径。
+- 已验证 Work 在本地校验和正式登记后以幂等 `document_artifact_projection` 写入 Thread；投影失败只形成 projection debt，不重放 Provider 或删除 Work。
+- `pnpm dev:thread-first` 开关同时打开 Electron ThreadFile 读写和 Renderer Thread 读取；生产默认仍未切换存储权威。
+- Windows Electron ThreadFile 读模式已完成 3 Thread/40 Item 重启比对：Summary p95 约 1ms、Item Page p95 约 3.9ms、虚拟行和重启后语义签名一致。
+
+尚未宣称完成：真实 Provider 连续 Tool Calling 的 Thread Tool/Observation 全量投影、历史迁移 Shadow Compare、Legacy 写入退出、生产存储 Cutover，以及真实文档 Provider E2E。上述项目仍是后续门禁，不因本检查点通过而自动切换。
+
 ## 目标和边界
 
 目标是让新 Thread 架构成为可正常使用的生产会话架构，同时保留 develop 已验证的 Agent Runtime、Provider Tool Calling、Document Runtime 和 Work 安全门禁，并完成既有模型能力、计费、参数和路由计划的统一接线。

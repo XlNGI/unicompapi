@@ -37,8 +37,7 @@ import {
   ConversationWorkflowApplicationError,
   type ConversationApplicationService,
   type ConversationWorkflowService,
-  type ThreadCommandService,
-  type ThreadProjectionCoordinator
+  type ConversationTurnCoordinator
 } from '../../application';
 import type {
   ChatContextIpcResult,
@@ -84,8 +83,7 @@ export interface ConversationResponseControllerRuntime {
   readonly streamChannel: ControlledConversationResponseStreamChannel;
   readonly workflowService?: ConversationWorkflowService;
   readonly agentRuns?: ConversationAgentRunRepository;
-  readonly threadCommands?: ThreadCommandService;
-  readonly threadProjections?: ThreadProjectionCoordinator;
+  readonly turnCoordinator?: ConversationTurnCoordinator;
   readonly completion?: Pick<ConversationCompletionCoordinator, 'settle' | 'canStartNewResponse' | 'inspect' | 'reconcile' | 'acknowledge' | 'waitForOperations'>;
   readonly continuations?: {
     /** Read-only replay and scope checks run before adding another user message. */
@@ -680,7 +678,7 @@ export class ConversationResponseController {
     if (!session || session.projectId !== runtime.conversations.projectId) {
       return failure('project_not_open', 'The source project is no longer active');
     }
-    let acceptedThreadTurn: Awaited<ReturnType<ThreadCommandService['acceptUserTurn']>> | undefined;
+    let acceptedThreadTurn: Awaited<ReturnType<ConversationTurnCoordinator['acceptUserTurn']>> | undefined;
     let agentRun: ReturnType<typeof createConversationAgentRun> | undefined;
     let agentSession: ConversationAgentSessionDto | undefined;
     let parentRunId: string | undefined;
@@ -690,9 +688,9 @@ export class ConversationResponseController {
       conversationId: conversation.id, sourceMessageId: userMessage.id, traceId: userMessage.id,
       clientCommandId: input.clientCommandId }, async () => {
     try {
-    if (runtime.threadCommands) {
+    if (runtime.turnCoordinator) {
       try {
-        acceptedThreadTurn = await step(() => runtime.threadCommands!.acceptUserTurn({
+        acceptedThreadTurn = await step(() => runtime.turnCoordinator!.acceptUserTurn({
           threadId: conversation.id,
           projectId: runtime.conversations.projectId,
           title: conversation.title,
@@ -921,9 +919,9 @@ export class ConversationResponseController {
         this.dependencies.onError?.(error);
       }
     }
-    if (acceptedThreadTurn && agentRun && runtime.threadProjections) {
+    if (acceptedThreadTurn && agentRun && runtime.turnCoordinator) {
       try {
-        await step(() => runtime.threadProjections!.linkExecution({
+        await step(() => runtime.turnCoordinator!.linkExecution({
           threadId: acceptedThreadTurn!.thread.threadId,
           turnId: acceptedThreadTurn!.turn.turnId,
           agentRunId: agentRun!.id,

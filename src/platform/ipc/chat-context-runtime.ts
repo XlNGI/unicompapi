@@ -19,6 +19,7 @@ import {
   ConversationWorkflowService,
   ThreadCommandService,
   ThreadProjectionCoordinator,
+  ConversationTurnCoordinator,
   ConversationWebResearchService,
   DocumentTaskRuntimeService,
   ProjectContextRegistryService,
@@ -503,6 +504,26 @@ export function createChatContextRuntime(
       const result = { workId: document.work.id, fileName: document.fileName, sizeBytes: document.file.sizeBytes!, kind: 'ppt' as const };
       const retained = { ...result, actualPageCount: document.pages.length,
         ...(target === undefined ? {} : { planningTargetTotalPages: target }) };
+      if (turnCoordinator) {
+        try {
+          const linkedRun = await agentRuns.findByResponseExecutionId(responseExecution.id);
+          await turnCoordinator.projectDocumentArtifact({
+            threadId: responseExecution.snapshot.conversationId,
+            sourceMessageId: responseExecution.snapshot.userMessageId,
+            workId: result.workId,
+            responseExecutionId: responseExecution.id,
+            ...(linkedRun ? { agentRunId: linkedRun.id } : {}),
+            status: responseExecution.state === 'completed' ? 'completed' : 'failed',
+            content: `${result.fileName} (${result.kind})`,
+            createdAt: responseExecution.createdAt,
+            updatedAt: toIsoTimestamp(now())
+          });
+        } catch (error) {
+          // A projection debt must be recoverable without replaying a paid
+          // Provider call or deleting the verified Work.
+          dependencies.onError?.(error);
+        }
+      }
       for (let attempt = 0; attempt < 4; attempt += 1) {
         const conversation = await projectConversations.get(responseExecution.snapshot.conversationId);
         const assistant = conversation?.messages.find(message => message.id === responseExecution.snapshot.assistantMessageId);
@@ -827,6 +848,9 @@ export function createChatContextRuntime(
       : undefined;
     const threadCommands = threadWriteRepository ? new ThreadCommandService(threadWriteRepository) : undefined;
     const threadProjections = threadWriteRepository ? new ThreadProjectionCoordinator(threadWriteRepository) : undefined;
+    const turnCoordinator = threadCommands && threadProjections
+      ? new ConversationTurnCoordinator(threadCommands, threadProjections)
+      : undefined;
     const responses: ConversationResponseControllerRuntime = {
       conversationService: service,
       conversations: projectConversations,
@@ -838,8 +862,7 @@ export function createChatContextRuntime(
       streamChannel,
       workflowService,
       agentRuns,
-      ...(threadCommands ? { threadCommands } : {}),
-      ...(threadProjections ? { threadProjections } : {}),
+      ...(turnCoordinator ? { turnCoordinator } : {}),
       completion,
       refreshRecovery,
       continuations: { ...continuationRuntime.controller, validate: async input => {
@@ -985,14 +1008,14 @@ export function createChatContextRuntime(
         );
       };
       const projectThreadAssistant = async (responseExecutionId: ConversationResponseExecutionId): Promise<void> => {
-        if (!threadProjections) return;
+        if (!turnCoordinator) return;
         try {
           const execution = await responseLifecycle.readModel(responseExecutionId);
           const conversation = await projectConversations.get(toConversationId(execution.conversationId));
           const assistant = conversation?.messages.find(message => message.id === execution.assistantMessageId);
           if (!conversation || !assistant || !['completed', 'failed', 'cancelled'].includes(assistant.state)) return;
           const status: ItemStatus = assistant.state === 'completed' ? 'completed' : assistant.state === 'cancelled' ? 'cancelled' : 'failed';
-          await threadProjections.projectAssistantMessage({
+          await turnCoordinator.projectAssistantMessage({
             threadId: conversation.id,
             sourceMessageId: execution.userMessageId,
             assistantMessageId: assistant.id,

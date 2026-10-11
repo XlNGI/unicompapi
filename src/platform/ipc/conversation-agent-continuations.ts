@@ -2,7 +2,7 @@ import { createHash, randomUUID } from 'node:crypto';
 import { AsyncLocalStorage } from 'node:async_hooks';
 import {
   createConversationAgentRun, toConversationAgentRunId,
-  toConversationResponseExecutionId, toIsoTimestamp,
+  toConversationResponseExecutionId, toConversationWorkflowId, toIsoTimestamp,
   type Conversation, type ConversationAgentRunRepository,
   type ConversationAgentSessionRepository, type ConversationAgentSessionV1,
   type ControlledConversationInputReferenceV1, type ProjectId, type Message, type ConversationWorkflowV1
@@ -231,6 +231,21 @@ export class ConversationAgentContinuationRuntime {
     this.preparations.set(session.id, { signal: input.signal });
     try {
       let workflow: ConversationWorkflowV1 | undefined;
+      const requestedWorkflowInput = input.input.workflow;
+      const requestedWorkflow = requestedWorkflowInput
+        ? await this.workflows.get(toConversationWorkflowId(requestedWorkflowInput.workflowId))
+        : undefined;
+      if (requestedWorkflow) {
+        if (requestedWorkflow.projectId !== this.options.projectId ||
+            requestedWorkflow.conversationId !== input.conversation.id ||
+            requestedWorkflow.revision !== requestedWorkflowInput?.expectedRevision ||
+            requestedWorkflow.status !== 'ready') {
+          throw new ConversationAgentSessionError('reference_changed');
+        }
+        // The host already planned and confirmed this workflow. Reuse its
+        // exact plan instead of invoking semantic planning a second time.
+        workflow = requestedWorkflow;
+      }
       const pinnedMessages = new Set(session.inputReferences.filter(ref => ref.kind === 'message').map(ref => ref.id));
       const previous = (await this.workflowRepository.list(input.conversation.id)).find(item =>
         pinnedMessages.has(item.sourceMessageId) && (['needs_clarification', 'needs_confirmation'].includes(item.status) ||
@@ -240,14 +255,16 @@ export class ConversationAgentContinuationRuntime {
       const context = { ...this.semanticContext(input.conversation, session), semanticCandidate: {
         candidateId: input.input.candidateId, productFeature: input.input.productFeature
       } };
-      workflow = await this.planning.run({ sessionId: session.id, runId: reservedRunId ?? session.id }, async () => {
-        if (previous?.status === 'ready' && request?.action === 'continue') return previous;
-        if (previous && request) return this.workflows.answer({ workflowId: previous.id, expectedRevision: previous.revision,
-          rawText: request.action === 'authorize' ? '确认执行' : message.content, sourceMessageId: message.id, context, signal });
-        if (!request || request.action !== 'continue') return this.workflows.create({ projectId: this.options.projectId,
-          conversationId: input.conversation.id, sourceMessageId: message.id, rawText: message.content, context, signal });
-        return undefined;
-      });
+      if (!workflow) {
+        workflow = await this.planning.run({ sessionId: session.id, runId: reservedRunId ?? session.id }, async () => {
+          if (previous?.status === 'ready' && request?.action === 'continue') return previous;
+          if (previous && request) return this.workflows.answer({ workflowId: previous.id, expectedRevision: previous.revision,
+            rawText: request.action === 'authorize' ? '确认执行' : message.content, sourceMessageId: message.id, context, signal });
+          if (!request || request.action !== 'continue') return this.workflows.create({ projectId: this.options.projectId,
+            conversationId: input.conversation.id, sourceMessageId: message.id, rawText: message.content, context, signal });
+          return undefined;
+        });
+      }
       input.signal.throwIfAborted(); this.assertCurrent();
       if (workflow?.status === 'failed') {
         const latest = await this.require(session.id);
@@ -269,7 +286,7 @@ export class ConversationAgentContinuationRuntime {
       }
       this.preparations.set(session.id, { signal: input.signal, ...(workflow ? { workflow } : {}) });
       return { agentSession: this.toDto(await this.require(session.id)), waiting: false, parentRunId: session.id,
-        ...(reservedRunId ? { reservedRunId } : {}), ...(previous && request && workflow ? { workflow } : {}) };
+        ...(reservedRunId ? { reservedRunId } : {}), ...(workflow ? { workflow } : {}) };
     } catch (error) {
       const latest = await this.require(session.id);
       if (latest.status !== 'needs_reconciliation' && !(latest.status === 'closed' && latest.reconciliationAcknowledgement)) {

@@ -31,10 +31,11 @@ export function registerChatContextIpcHandlers(options: {
   };
   onError?(error: unknown): void;
 }): ChatContextIpcLifecycle {
+  const threadFirstEnabled = process.env.UNICOMP_THREAD_FIRST === '1';
   const runtime = createChatContextRuntime({
     userDataDirectory: app.getPath('userData'),
-    threadFileReadEnabled: process.env.UNICOMP_THREAD_FILE_READ_PATH === '1',
-    threadFileWriteEnabled: process.env.UNICOMP_THREAD_FILE_WRITE_PATH === '1',
+    threadFileReadEnabled: threadFirstEnabled || process.env.UNICOMP_THREAD_FILE_READ_PATH === '1',
+    threadFileWriteEnabled: threadFirstEnabled || process.env.UNICOMP_THREAD_FILE_WRITE_PATH === '1',
     getSession: options.getSession,
     providerRegistry: options.providerRegistry,
     providerPackages: options.providerPackages,

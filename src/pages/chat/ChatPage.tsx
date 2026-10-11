@@ -810,9 +810,14 @@ export function ChatPage({
   const imageFeatures = window.unicomp?.imageFeatures;
   const storage = window.unicomp?.storage;
   const threadReadsEnabled = Boolean(
-    (import.meta.env.VITE_UNICOMP_THREAD_READ_PATH === '1' || import.meta.env.VITE_UNICOMP_THREAD_FILE_READ_PATH === '1') &&
+    (import.meta.env.VITE_UNICOMP_THREAD_FIRST === '1' ||
+      import.meta.env.VITE_UNICOMP_THREAD_READ_PATH === '1' ||
+      import.meta.env.VITE_UNICOMP_THREAD_FILE_READ_PATH === '1') &&
     chat?.listThreadSummaries && chat.getThread && chat.getThreadItemsPage
   );
+  // Thread-first execution is opt-in until Shadow Read and rollback gates are
+  // complete. Read-only Thread adapters keep the legacy document route.
+  const threadFirstExecutionEnabled = import.meta.env.VITE_UNICOMP_THREAD_FIRST === '1' && threadReadsEnabled;
   const [session, setSession] = useState<StorageProjectSessionDto>();
   const [projects, setProjects] = useState<readonly StorageProjectSummaryDto[]>([]);
   const [expandedProjectIds, setExpandedProjectIds] = useState<ReadonlySet<string>>(() => new Set());
@@ -2495,6 +2500,17 @@ export function ChatPage({
               (message) => message.documentResult?.fileName === workflow.plan.targetHint?.name
             )?.messageId
           : undefined);
+      if (threadFirstExecutionEnabled) {
+        // Confirmed document work uses the same Agent/Response/Tool runtime as
+        // a native request. The ready workflow is passed as an immutable plan;
+        // the runtime owns authorization, tool calls and Work registration.
+        await startChatResponse(
+          composeWorkflowRequirements(workflow, sourceContent),
+          conversation,
+          workflow
+        );
+        return true;
+      }
       return sendDocumentMessage({
         workflow,
         conversation,
@@ -2780,6 +2796,7 @@ export function ChatPage({
             : [];
         }),
         parameterValues: {},
+        ...(workflow && threadFirstExecutionEnabled ? { agentNative: true } : {}),
         ...(continuationAction && activeAgentSession?.resumeToken ? { continuation: {
           sessionId: activeAgentSession.sessionId, expectedRevision: activeAgentSession.revision,
           resumeToken: activeAgentSession.resumeToken, action: continuationAction

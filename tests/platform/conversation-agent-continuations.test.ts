@@ -103,6 +103,23 @@ describe('Host conversation continuations', () => {
     expect(await f.runtime.executionContext('continuation-response')).toMatchObject({ policy: { startedAt: start, deadlineAt: start + 360_000, maxToolCalls: 8, budgetUnits: 24 } });
     expect(child.parentRunId).toBe(session.id);
   });
+  it('reuses a host-confirmed workflow when Thread-first execution supplies its revision', async () => {
+    const classifier = { classify: vi.fn(async () => { throw new Error('workflow must not be replanned'); }) };
+    const f = await setup(classifier);
+    const planned = await f.prepare(f.request('制作一份关于龙的传说的10页PPT'));
+    expect(planned.workflow).toMatchObject({ status: 'ready' });
+    await f.service.settle(toConversationAgentRunId(planned.agentSession.sessionId), 'completed');
+    f.runtime.discardPreparation(planned.agentSession.sessionId);
+    const requested = f.request('执行已确认的 PPT', undefined, 'thread-first-confirmed-workflow');
+    const replay = await f.prepare({
+      ...requested,
+      conversation: { ...requested.conversation!, expectedRevision: 1 },
+      workflow: { workflowId: planned.workflow!.id, expectedRevision: planned.workflow!.revision }
+    });
+    expect(replay.waiting).toBe(false);
+    expect(replay.workflow?.id).toBe(planned.workflow!.id);
+    expect(classifier.classify).not.toHaveBeenCalled();
+  });
   it('persists a missing topic and binds the answer to the same root and original deadline', async () => {
     const f = await setup(), waiting = await f.prepare(f.request('制作一个PPT'));
     expect(waiting).toMatchObject({ waiting: true, agentSession: { state: 'waiting_user', waiting: { allowedActions: ['reply'] } } });

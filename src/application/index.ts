@@ -28,3 +28,4 @@ export * from './conversation-thread-adapter';
 export * from './model-history-reader';
 export * from './thread-command-service';
 export * from './thread-projection-coordinator';
+export * from './conversation-turn-coordinator';

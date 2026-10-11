@@ -439,6 +439,7 @@ describe('chat composer event behavior', () => {
       parameters: { topic: '季度经营' } }, pendingQuestions: [] };
     const pending = deferred<{ ok: false; error: { code: 'response_start_cancelled'; message: string } }>();
     startWorkflow.mockResolvedValue({ ok: true, value: { conversation: documentConversation, workflow: ready } });
+    getPendingWorkflow.mockResolvedValue({ ok: true, value: ready });
     startResponse.mockImplementation(async () => pending.promise);
     const cancelResponseStart = vi.fn(async () => ({ ok: true, value: { cancelled: true } }));
     Object.assign(window.unicomp!.chatContexts!, { cancelResponseStart });
