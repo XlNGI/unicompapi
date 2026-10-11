@@ -64,11 +64,12 @@ export class ConversationController {
 
   get(request: unknown): Promise<ChatContextIpcResult<ConversationDto>> {
     return this.execute(async () => {
-      const input = chatContextRequestParsers.conversationId(request);
-      await this.dependencies.refreshRecovery?.(input.conversationId);
+      const input = chatContextRequestParsers.conversationRead(request);
+      const fastRead = input.readMode === 'fast';
+      if (!fastRead) await this.dependencies.refreshRecovery?.(input.conversationId);
       const conversation = await this.dependencies.service.get(toConversationId(input.conversationId));
-      const parentRuns = await this.dependencies.readParentRuns?.(conversation.id);
-      const agentSessions = await this.dependencies.readAgentSessions?.(conversation.id);
+      const parentRuns = fastRead ? undefined : await this.dependencies.readParentRuns?.(conversation.id);
+      const agentSessions = fastRead ? undefined : await this.dependencies.readAgentSessions?.(conversation.id);
       return {
         ok: true,
         value: { ...this.toDto(conversation), ...(parentRuns ? { parentRuns } : {}), ...(agentSessions ? { agentSessions } : {}) }

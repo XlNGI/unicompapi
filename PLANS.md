@@ -1,5 +1,17 @@
 # UniComp 开发计划
 
+### 维护实施：首次打开会话首屏读取解耦（2026-10-10；本地主链路验收完成）
+
+负责人反馈“首次打开会话加载很慢”。定位确认：首选会话详情仍调用完整 `getConversation()`，首屏被 `responses.ready`、同会话执行句柄终态等待、ParentRun/AgentSession 读取、保留作品校验以及 `getPendingWorkflow()` 的恢复链路共同阻塞。已增加受控 `ConversationIdRequest.readMode`：`fast` 详情读取返回完整已持久化消息但跳过恢复屏障和执行投影读取；对话页首屏先用快速详情显示，完整读取与文档恢复在后台补齐。启用 Thread 读取时直接由 `Thread Item Page` 负责首屏消息，避免重复 Legacy 全量详情读取。快速结果暂时去除未校验的 `retainedDocumentResult`，不改变正式作品门禁；发送、取消、恢复、文档登记等路径继续使用默认完整读取。
+
+实际修改：`src/shared/chat-context-ipc.ts`、`electron/preload.ts`、`src/platform/ipc/conversation-controller.ts`、`src/platform/ipc/chat-context-runtime.ts`、`src/pages/chat/ChatPage.tsx`；新增控制器回归覆盖快速/完整详情边界。未切换 ThreadFile 生产写权威，未修改用户数据。
+
+验证：`pnpm typecheck`、全仓 `pnpm lint`、`pnpm build` 通过；ConversationController/Runtime 定向测试 27/27、保留作品投影回归 17/17、Node/UI 合同套件 43/43 通过；真实 Electron ThreadFile 与 Legacy 双模式会话验收通过（各 3 会话、120 条消息、分页/虚拟列表/项目切换保持可用）。构建仅保留既有 Vite CJS API 与大 chunk 提示。当前改动尚未提交、推送、合并、部署或重启用户应用。
+
+### 新会话系统安全整合计划（2026-10-10；隔离 Electron/Mock Provider 验收完成）
+
+以 `develop@b1d01c7f5f346cd2ff170ab77ad1de930267257a` 为当前执行基线，以 `feature/conversation-phase0` 和 `feature/conversation-e2e-completion` 为目标 Thread 架构来源。阶段 0 已完成三方 SHA/祖先关系、只读合并模拟、复用范围、架构边界和测试基线冻结；当前 Node/UI 为 396/396，Vitest 为 3300/3315，15 项失败，核心聊天定向复核 116/116，文档生成循环 30 秒独立复核 17/17。阶段 1 已接入 Thread/Turn/Item 合同、ThreadFile Repository/迁移工具、Thread Query DTO/parser、只读 IPC/preload 和 Runtime 选择器，并在显式 `VITE_UNICOMP_THREAD_READ_PATH=1` 下让 ChatPage 读取 Thread Summary、首屏 Item Page 和更早消息分页；默认 Legacy 路径不变。阶段 2 已把现有消息行包进可切换的 `VirtualMessageList`，并保留默认 Legacy 列表；真实 Electron 已完成 ThreadFile/Legacy 读取、分页、虚拟行和项目切换验收。阶段 3 已新增 `ThreadCommandService` 和 `ThreadProjectionCoordinator`，在显式 `UNICOMP_THREAD_FILE_WRITE_PATH=1` 下为 Agent 消息写入 Shadow Thread Turn/User Item、Agent Run Execution Link 和终态 Assistant Item；默认生产路径关闭该 flag，未切换权威。阶段 4 已增加持久化 Item sequence/offset index 和按序列范围读取，隔离 Node 性能基线已通过；Mock Provider + 真实 Electron 已通过普通 Agent、取消起始、单次 Tool Calling、PPT Work、Word/Excel 物理文件生成。真实外部 Provider、连续 Tool Calling 恢复、历史迁移和 Cutover 尚未完成。后续采用“低冲突新增代码复用、高冲突页面/IPC 局部适配”的混合整合方式；保留 Agent Runtime、Response Execution、Document Runtime、Tool Bridge、Work/Hash 门禁和当前 `readMode: fast`/RAF 流式行为。Legacy Conversation 继续作为生产权威，ThreadFile 先用于隔离读取、Shadow Read 和候选存储，未授权生产 Cutover。详细范围、复用清单、阶段门禁和回滚条件见 [新会话系统安全整合计划](docs/current/conversation-thread-integration-plan.md)。
+
 ### 维护立项：会话与 Agent 业务架构性能治理计划（2026-10-08；计划阶段，未实施）
 
 负责人同意先形成计划，再进入代码改造。已新增[会话与 Agent 业务架构性能治理计划](docs/current/conversation-agent-architecture-performance-plan.md)，将当前卡顿问题按主流 Agent 架构拆为 P0 基准与可观测性、P1 会话摘要读模型、P2 消息分页、P3 recovery 解耦、P4 事件追加与批量快照、P5 Renderer 渐进显示六个阶段，并拆成小 PR。

@@ -153,6 +153,11 @@ describe('current retained artifact capability', () => {
       const reopened = createChatContextRuntime({ userDataDirectory: path.join(data.scope.rootDirectory, 'isolated-profile'),
         getSession: () => ({ projectId, projectName: '离线重开夹具', rootDirectory: data.scope.rootDirectory }),
         now: () => now, onError: error => errors.push(error) });
+      const fast = await reopened.conversations.get({ conversationId: data.dto.conversationId, readMode: 'fast' });
+      expect(fast.ok).toBe(true);
+      if (!fast.ok) throw new Error(fast.error.code);
+      expect(fast.value.messages.find(message => message.messageId === 'retained-assistant'))
+        .not.toHaveProperty('retainedDocumentResult');
       const result = await reopened.conversations.get({ conversationId: data.dto.conversationId });
       expect(result.ok).toBe(true);
       if (!result.ok) throw new Error(result.error.code);

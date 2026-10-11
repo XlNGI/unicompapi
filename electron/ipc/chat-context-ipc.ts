@@ -33,6 +33,8 @@ export function registerChatContextIpcHandlers(options: {
 }): ChatContextIpcLifecycle {
   const runtime = createChatContextRuntime({
     userDataDirectory: app.getPath('userData'),
+    threadFileReadEnabled: process.env.UNICOMP_THREAD_FILE_READ_PATH === '1',
+    threadFileWriteEnabled: process.env.UNICOMP_THREAD_FILE_WRITE_PATH === '1',
     getSession: options.getSession,
     providerRegistry: options.providerRegistry,
     providerPackages: options.providerPackages,
@@ -54,6 +56,18 @@ export function registerChatContextIpcHandlers(options: {
   );
   ipcMain.handle(chatContextIpcChannels.listConversations, (_event, request: unknown) =>
     conversations.list(request)
+  );
+  ipcMain.handle(chatContextIpcChannels.listThreadSummaries, (_event, request: unknown) =>
+    runtime.threadReads.listThreadSummaries(request)
+  );
+  ipcMain.handle(chatContextIpcChannels.getThread, (_event, request: unknown) =>
+    runtime.threadReads.getThread(request)
+  );
+  ipcMain.handle(chatContextIpcChannels.getThreadItemsPage, (_event, request: unknown) =>
+    runtime.threadReads.getThreadItemsPage(request)
+  );
+  ipcMain.handle(chatContextIpcChannels.getTurn, (_event, request: unknown) =>
+    runtime.threadReads.getTurn(request)
   );
   ipcMain.handle(chatContextIpcChannels.listConversationCandidates, () =>
     conversations.listCandidates()

@@ -1,0 +1,40 @@
+import { describe, expect, it } from 'vitest';
+import { ThreadProjectionCoordinator } from '../../src/application/thread-projection-coordinator';
+import { createThreadV1, createTurnV1, toIsoTimestamp, toProjectId, toThreadId, toTurnId, type ThreadV1, type TurnExecutionLinkV1, type TurnV1 } from '../../src/domain';
+
+function repository() {
+  const threadId = toThreadId('thread-projection');
+  let thread: ThreadV1 = { ...createThreadV1({ threadId, projectId: toProjectId('project-projection'), title: '投影测试', createdAt: toIsoTimestamp('2026-10-10T00:00:00.000Z') }), generation: 1, turnCount: 1 };
+  const turn = createTurnV1({ turnId: toTurnId('turn-projection'), threadId, turnSequence: 1, createdAt: toIsoTimestamp('2026-10-10T00:00:00.000Z'), provenance: 'native' });
+  const turns: TurnV1[] = [turn];
+  const links: TurnExecutionLinkV1[] = [];
+  const commands = new Set<string>();
+  return {
+    async getThread() { return thread; },
+    async readTurns() { return turns; },
+    async readExecutionLinks() { return links; },
+    async readItems() { return []; },
+    async append(input: { idempotencyKey: string; turns?: readonly TurnV1[]; executionLinks?: readonly TurnExecutionLinkV1[] }) {
+      if (commands.has(input.idempotencyKey)) return { thread, alreadyCommitted: true };
+      commands.add(input.idempotencyKey);
+      if (input.turns) turns.splice(0, turns.length, ...input.turns);
+      if (input.executionLinks) links.push(...input.executionLinks);
+      thread = { ...thread, generation: thread.generation + 1 };
+      return { thread, alreadyCommitted: false };
+    }
+  };
+}
+
+describe('ThreadProjectionCoordinator', () => {
+  it('links one Agent Run to a Turn and treats replay as idempotent', async () => {
+    const repo = repository();
+    const coordinator = new ThreadProjectionCoordinator(repo);
+    const input = { threadId: 'thread-projection', turnId: 'turn-projection', agentRunId: 'agent-run-projection', responseExecutionId: 'response-projection', createdAt: toIsoTimestamp('2026-10-10T00:00:01.000Z') };
+    const first = await coordinator.linkExecution(input);
+    const second = await coordinator.linkExecution(input);
+    expect(first.alreadyCommitted).toBe(false);
+    expect(second.alreadyCommitted).toBe(true);
+    expect(second.link.linkSequence).toBe(1);
+    expect(repo.readExecutionLinks).toBeDefined();
+  });
+});

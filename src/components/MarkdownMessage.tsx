@@ -1,13 +1,16 @@
-import { memo } from 'react';
+import { memo, useMemo } from 'react';
+import type { ReactElement } from 'react';
 import ReactMarkdown from 'react-markdown';
 import type { Components } from 'react-markdown';
 import remarkGfm from 'remark-gfm';
+import { recordMarkdownParse } from './markdownMetrics';
 import '../styles/components.css';
 
 export interface MarkdownMessageProps {
   readonly content: string;
   readonly className?: string;
   readonly allowImages?: boolean;
+  readonly cache?: boolean;
 }
 
 const markdownComponents: Components = {
@@ -21,19 +24,43 @@ const textImageComponents: Components = {
   ...markdownComponents,
   img({ alt }) { return <span>{alt || '图片'}</span>; }
 };
+const completedMarkdownCache = new Map<string, ReactElement>();
+const completedMarkdownCacheLimit = 128;
+
+export function clearCompletedMarkdownCache(): void {
+  completedMarkdownCache.clear();
+}
 
 export const MarkdownMessage = memo(function MarkdownMessage({
   content,
   className = '',
-  allowImages = true
+  allowImages = true,
+  cache = true
 }: MarkdownMessageProps) {
   const classes = ['uc-markdown-message', className].filter(Boolean).join(' ');
+  const renderedMarkdown = useMemo(() => {
+    const cacheKey = `${allowImages ? 'images' : 'text'}:${content}`;
+    if (cache && content.length <= 200_000) {
+      const cached = completedMarkdownCache.get(cacheKey);
+      if (cached) return cached;
+    }
+    const startedAt = performance.now();
+    const element = <ReactMarkdown components={allowImages ? markdownComponents : textImageComponents} remarkPlugins={markdownRemarkPlugins}>
+      {content}
+    </ReactMarkdown>;
+    recordMarkdownParse(performance.now() - startedAt);
+    if (cache && content.length <= 200_000) {
+      completedMarkdownCache.set(cacheKey, element);
+      while (completedMarkdownCache.size > completedMarkdownCacheLimit) {
+        completedMarkdownCache.delete(completedMarkdownCache.keys().next().value!);
+      }
+    }
+    return element;
+  }, [allowImages, cache, content]);
 
   return (
     <div className={classes}>
-      <ReactMarkdown components={allowImages ? markdownComponents : textImageComponents} remarkPlugins={markdownRemarkPlugins}>
-        {content}
-      </ReactMarkdown>
+      {renderedMarkdown}
     </div>
   );
 });

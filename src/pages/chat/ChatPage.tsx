@@ -1,5 +1,5 @@
 import { Children, cloneElement, isValidElement, useEffect, useMemo, useRef, useState } from 'react';
-import type { ClipboardEvent, FormEvent, ReactNode } from 'react';
+import type { ClipboardEvent, FormEvent, ReactNode, RefObject } from 'react';
 import {
   LuArchive,
   LuArchiveRestore,
@@ -49,6 +49,8 @@ import type {
   ConversationResponseStreamEventDto,
   ConversationWorkflowDto,
   MessageDto,
+  ThreadItemDto,
+  ThreadSummaryDto,
   ProjectContextCandidateDto,
   ProjectContextDetailDto,
   ProjectContextDraftPreviewDto
@@ -83,6 +85,9 @@ import {
   type OfficeRequestAction
 } from '../../application';
 import { documentPresentationPreferences } from '../../application/document-presentation-preferences';
+import { createThreadItemStore, mergeThreadItemStore, threadItemStoreItems, type ThreadItemStore } from './threadItemStore';
+import { createThreadSummaryStore, replaceThreadSummaryStore, threadSummaryStoreItems, type ThreadSummaryStore } from './threadSummaryStore';
+import { VirtualMessageList } from './VirtualMessageList';
 import '../../styles/pages.css';
 
 const errorMessages: Record<ChatContextIpcErrorCode, string> = {
@@ -140,6 +145,12 @@ const errorMessages: Record<ChatContextIpcErrorCode, string> = {
   document_page_scope_exceeded: '该页面超出本次完整读取范围，请缩小问题范围。',
   clarification_required: '请先补充会话任务所需的信息。',
   confirmation_expired: '任务确认已过期，请重新发送需求。',
+  thread_not_found: '该会话或交互轮次已不存在。',
+  thread_cursor_invalid: '会话列表位置已失效，请重新加载。',
+  thread_cursor_expired: '会话列表快照已过期，请重新加载。',
+  thread_cursor_scope_mismatch: '会话列表位置不属于当前项目或会话，请重新加载。',
+  thread_page_limit_out_of_range: '每次读取的历史消息数量无效。',
+  thread_read_degraded: '该会话数据需要本地检查，目前无法完整读取。',
   adapter_unavailable: '文本适配器当前不可用。',
   storage_error: '本地保存失败，请检查存储状态后重试。'
 };
@@ -527,6 +538,25 @@ function mergeConversationRead(
   });
 }
 
+function conversationFromThreadSummary(summary: ThreadSummaryDto): ConversationDto {
+  return { ...summary, messages: [] };
+}
+
+function messagesFromThreadItems(items: readonly ThreadItemDto[]): readonly MessageDto[] {
+  return items.flatMap(item => item.message ? [item.message] : []);
+}
+
+function ChatMessageList({ virtualized, itemIds, containerRef, children }: {
+  readonly virtualized: boolean;
+  readonly itemIds: readonly string[];
+  readonly containerRef: RefObject<HTMLDivElement>;
+  readonly children: ReactNode;
+}) {
+  return virtualized
+    ? <VirtualMessageList itemIds={itemIds} containerRef={containerRef}>{children}</VirtualMessageList>
+    : <ol className="uc-chat-page__message-list">{children}</ol>;
+}
+
 function retainProjectOrder(
   previous: readonly StorageProjectSummaryDto[],
   incoming: readonly StorageProjectSummaryDto[]
@@ -779,6 +809,10 @@ export function ChatPage({
   const documentAttachments = window.unicomp?.documentAttachments;
   const imageFeatures = window.unicomp?.imageFeatures;
   const storage = window.unicomp?.storage;
+  const threadReadsEnabled = Boolean(
+    (import.meta.env.VITE_UNICOMP_THREAD_READ_PATH === '1' || import.meta.env.VITE_UNICOMP_THREAD_FILE_READ_PATH === '1') &&
+    chat?.listThreadSummaries && chat.getThread && chat.getThreadItemsPage
+  );
   const [session, setSession] = useState<StorageProjectSessionDto>();
   const [projects, setProjects] = useState<readonly StorageProjectSummaryDto[]>([]);
   const [expandedProjectIds, setExpandedProjectIds] = useState<ReadonlySet<string>>(() => new Set());
@@ -791,6 +825,10 @@ export function ChatPage({
   const [projectManagementOpen, setProjectManagementOpen] = useState(false);
   const [projectCreateName, setProjectCreateName] = useState('');
   const [conversations, setConversations] = useState<readonly ConversationDto[]>([]);
+  const [threadSummaryStore, setThreadSummaryStore] = useState<ThreadSummaryStore>(() => createThreadSummaryStore());
+  const [threadItemPages, setThreadItemPages] = useState<Readonly<Record<string, ThreadItemStore>>>({});
+  const [threadItemsLoading, setThreadItemsLoading] = useState(false);
+  const [threadItemsLoadingOlder, setThreadItemsLoadingOlder] = useState(false);
   const [selectedId, setSelectedId] = useState<string | undefined>(initialConversationId);
   const [conversationHydratingId, setConversationHydratingId] = useState<string>();
   const [historyOpen, setHistoryOpen] = useState(false);
@@ -1057,9 +1095,14 @@ export function ChatPage({
       .toLocaleLowerCase()
       .includes(keyword);
   });
-  const visibleConversations = useMemo(() => [...conversations].sort((left, right) =>
-    right.updatedAt.localeCompare(left.updatedAt)
-  ), [conversations]);
+  const visibleConversations = useMemo(() => {
+    if (!threadReadsEnabled || threadSummaryStore.orderedThreadIds.length === 0) {
+      return [...conversations].sort((left, right) => right.updatedAt.localeCompare(left.updatedAt));
+    }
+    const order = new Map(threadSummaryStore.orderedThreadIds.map((id, index) => [id, index]));
+    return [...conversations].sort((left, right) => (order.get(left.conversationId) ?? Number.MAX_SAFE_INTEGER) -
+      (order.get(right.conversationId) ?? Number.MAX_SAFE_INTEGER));
+  }, [conversations, threadReadsEnabled, threadSummaryStore]);
   const searchResults = useMemo(() => {
     const keyword = searchQuery.trim().toLocaleLowerCase();
     return visibleConversations.filter((conversation) =>
@@ -1099,9 +1142,15 @@ export function ChatPage({
         const projectListPromise = typeof storage.listProjects === 'function'
           ? storage.listProjects()
           : Promise.resolve({ ok: true as const, value: [] as readonly StorageProjectSummaryDto[] });
+        const conversationPromise = threadReadsEnabled && chat.listThreadSummaries
+          ? chat.listThreadSummaries({ includeArchived: true, includeDeleted: false, limit: 100, cursor: undefined })
+            .then(result => result.ok
+              ? { ok: true as const, value: result.value.items.map(conversationFromThreadSummary) }
+              : result)
+          : chat.listConversations(true, false, 'fast');
         const [sessionResult, conversationResult, projectsResult] = await Promise.all([
           storage.getProjectSession(),
-          chat.listConversations(true, false, 'fast'),
+          conversationPromise,
           projectListPromise
         ]);
         if (!isCurrentLoad()) return;
@@ -1142,7 +1191,13 @@ export function ChatPage({
         }
         else setNotice('读取当前项目失败，请重试。');
         if (conversationResult.ok) {
-          const loadedConversations = conversationResult.value;
+          const loadedConversations = threadReadsEnabled
+            ? (() => {
+              const nextStore = replaceThreadSummaryStore(conversationResult.value.map(conversation => ({ ...conversation, threadId: conversation.conversationId, messageCount: conversation.messages.length, turnCount: conversation.messages.filter(message => message.role === 'user').length, hasActiveDocumentGeneration: conversation.messages.some(message => Boolean(message.documentGenerationStatus)) } as ThreadSummaryDto)));
+              setThreadSummaryStore(nextStore);
+              return threadSummaryStoreItems(nextStore).map(conversationFromThreadSummary);
+            })()
+            : conversationResult.value;
           if (!isCurrentLoad()) return;
           setConversations((current) => mergeConversationRead(current, loadedConversations));
           setSelectedId((current) =>
@@ -1165,9 +1220,17 @@ export function ChatPage({
                 result.status === 'fulfilled' && result.value.ok && result.value.value.interrupted
               );
               if (!reconciledInterruptedRun || !isCurrentLoad()) return;
-              const refreshed = await chat.listConversations(true, false, 'fast');
-              if (!isCurrentLoad() || !refreshed.ok) return;
-              setConversations((current) => mergeConversationRead(current, refreshed.value));
+              let refreshedConversations: readonly ConversationDto[];
+              if (threadReadsEnabled && chat.listThreadSummaries) {
+                const refreshed = await chat.listThreadSummaries({ includeArchived: true, includeDeleted: false, limit: 100, cursor: undefined });
+                if (!isCurrentLoad() || !refreshed.ok) return;
+                refreshedConversations = refreshed.value.items.map(conversationFromThreadSummary);
+              } else {
+                const refreshed = await chat.listConversations(true, false, 'fast');
+                if (!isCurrentLoad() || !refreshed.ok) return;
+                refreshedConversations = refreshed.value;
+              }
+              setConversations((current) => mergeConversationRead(current, refreshedConversations));
             })().catch(() => undefined);
           }
         } else {
@@ -1199,7 +1262,38 @@ export function ChatPage({
       window.removeEventListener('focus', refresh);
       window.removeEventListener(PROJECT_SESSION_CHANGED_EVENT, refresh);
     };
-  }, [chat, documentGeneration, storage]);
+  }, [chat, documentGeneration, storage, threadReadsEnabled]);
+
+  useEffect(() => {
+    if (!threadReadsEnabled || !chat?.getThreadItemsPage || !selectedId) {
+      setThreadItemsLoading(false);
+      return;
+    }
+    let active = true;
+    setThreadItemsLoading(true);
+    void chat.getThreadItemsPage({ threadId: selectedId, limit: 100, direction: 'older', cursor: undefined }).then(result => {
+      if (!active || !result.ok) {
+        if (active && result && !result.ok) setNotice(errorMessages[result.error.code]);
+        return;
+      }
+      const store = createThreadItemStore(result.value.items, {
+        readAtSequence: result.value.readAtSequence,
+        olderCursor: result.value.nextCursor,
+        hasOlder: result.value.hasMore,
+        complete: !result.value.hasMore
+      });
+      setThreadItemPages(current => ({ ...current, [selectedId]: store }));
+      const messages = messagesFromThreadItems(threadItemStoreItems(store));
+      setConversations(current => current.map(conversation => conversation.conversationId === selectedId
+        ? { ...conversation, messages, revision: result.value.revision, updatedAt: result.value.updatedAt }
+        : conversation));
+    }).catch(() => {
+      if (active) setNotice('读取 Thread 历史消息失败，请重试。');
+    }).finally(() => {
+      if (active) setThreadItemsLoading(false);
+    });
+    return () => { active = false; };
+  }, [chat, selectedId, threadReadsEnabled]);
 
   useEffect(() => {
     onConversationChange?.(selectedId);
@@ -1328,49 +1422,73 @@ export function ChatPage({
     }
     const conversationId = selected.conversationId;
     setConversationHydratingId(conversationId);
-    void Promise.all([
-      chat.getPendingWorkflow(conversationId),
-      chat.getConversation(conversationId)
-    ]).then(async ([result, refreshed]) => {
+    // The Thread page already owns the first message page. Avoid issuing a
+    // second full Legacy read when that path is enabled. Workflow state is
+    // still loaded independently because it is an execution concern.
+    if (threadReadsEnabled) setConversationHydratingId(undefined);
+    void chat.getPendingWorkflow(conversationId).then((result) => {
       if (!active) return;
       setActiveWorkflow(result.ok ? result.value ?? undefined : undefined);
       setWebResearchSession(undefined);
-      if (refreshed.ok) {
-        replaceConversation(refreshed.value);
-        if (documentGeneration) {
-          const pendingGenerations = refreshed.value.messages.flatMap((message) =>
-            message.documentGenerationStatus &&
-            ['generating_content', 'validating_outline', 'generating_file'].includes(message.documentGenerationStatus.state)
-              ? [{
-                  conversationId,
-                  expectedRevision: refreshed.value.revision,
-                  messageId: message.messageId
-                }]
-              : []
-          );
-          const reconciliationResults = await Promise.allSettled(pendingGenerations.map((request) =>
-            documentGeneration.reconcileGeneration(request)
-          ));
-          const reconciledInterruptedRun = reconciliationResults.some((item) =>
-            item.status === 'fulfilled' && item.value.ok && item.value.value.interrupted
-          );
-          if (active && reconciledInterruptedRun) {
-            const reconciled = await chat.getConversation(conversationId);
-            if (reconciled.ok) replaceConversation(reconciled.value);
-          }
-        }
-      }
-      if (active) setConversationHydratingId(undefined);
     }).catch(() => {
-      if (active) {
-        setActiveWorkflow(undefined);
-        setConversationHydratingId(undefined);
-      }
+      if (active) setActiveWorkflow(undefined);
     });
+    if (!threadReadsEnabled) {
+      void chat.getConversation(conversationId, 'fast').then(async (refreshed) => {
+        if (!active) return;
+        if (!refreshed.ok) {
+          setConversationHydratingId(undefined);
+          return;
+        }
+        // Fast reads contain the complete persisted message list but do not
+        // wait for recovery or retained-artifact verification. This makes the
+        // first paint independent of unrelated execution cleanup.
+        replaceConversation(refreshed.value);
+        setConversationHydratingId(undefined);
+
+        // Keep the full read as a background consistency pass. It restores
+        // parent runs/session projections and performs the existing artifact
+        // verification without holding the first render hostage.
+        try {
+          const fullRead = await chat.getConversation(conversationId);
+          if (!active || !fullRead.ok) return;
+          let current = fullRead.value;
+          if (documentGeneration) {
+            const pendingGenerations = current.messages.flatMap((message) =>
+              message.documentGenerationStatus &&
+              ['generating_content', 'validating_outline', 'generating_file'].includes(message.documentGenerationStatus.state)
+                ? [{
+                    conversationId,
+                    expectedRevision: current.revision,
+                    messageId: message.messageId
+                  }]
+                : []
+            );
+            const reconciliationResults = await Promise.allSettled(pendingGenerations.map((request) =>
+              documentGeneration.reconcileGeneration(request)
+            ));
+            const reconciledInterruptedRun = reconciliationResults.some((item) =>
+              item.status === 'fulfilled' && item.value.ok && item.value.value.interrupted
+            );
+            if (active && reconciledInterruptedRun) {
+              const reconciled = await chat.getConversation(conversationId);
+              if (!reconciled.ok) return;
+              current = reconciled.value;
+            }
+          }
+          if (active) replaceConversation(current);
+        } catch {
+          // The fast display read is already usable; a background consistency
+          // pass may be retried by the existing focus/response refresh paths.
+        }
+      }).catch(() => {
+        if (active) setConversationHydratingId(undefined);
+      });
+    }
     return () => {
       active = false;
     };
-  }, [chat, selected?.conversationId]);
+  }, [chat, documentGeneration, selected?.conversationId, threadReadsEnabled]);
 
   useEffect(() => {
     if (!chat || !responseInProgress || !selected?.conversationId || !selected.messages.some(message => message.workflowReply?.workflowId.startsWith('native-'))) return;
@@ -1822,6 +1940,39 @@ export function ChatPage({
     setActiveWorkflow(undefined);
     setWebResearchSession(undefined);
     setHistoryOpen(false);
+  }
+
+  async function loadOlderThreadItems() {
+    if (!threadReadsEnabled || !chat?.getThreadItemsPage || !selectedId || threadItemsLoadingOlder) return;
+    const current = threadItemPages[selectedId];
+    if (!current?.hasOlder || !current.olderCursor) return;
+    const messages = messagesRef.current;
+    const beforeHeight = messages?.scrollHeight ?? 0;
+    const beforeTop = messages?.scrollTop ?? 0;
+    setThreadItemsLoadingOlder(true);
+    try {
+      const result = await chat.getThreadItemsPage({ threadId: selectedId, limit: 100, direction: 'older', cursor: current.olderCursor });
+      if (!result.ok) { setNotice(errorMessages[result.error.code]); return; }
+      const merged = mergeThreadItemStore(current, result.value.items, {
+        readAtSequence: result.value.readAtSequence,
+        olderCursor: result.value.nextCursor,
+        hasOlder: result.value.hasMore,
+        complete: !result.value.hasMore
+      });
+      setThreadItemPages(previous => ({ ...previous, [selectedId]: merged }));
+      const nextMessages = messagesFromThreadItems(threadItemStoreItems(merged));
+      setConversations(previous => previous.map(conversation => conversation.conversationId === selectedId
+        ? { ...conversation, messages: nextMessages, revision: result.value.revision, updatedAt: result.value.updatedAt }
+        : conversation));
+      requestAnimationFrame(() => {
+        const currentMessages = messagesRef.current;
+        if (currentMessages) currentMessages.scrollTop = beforeTop + (currentMessages.scrollHeight - beforeHeight);
+      });
+    } catch {
+      setNotice('读取更早 Thread 消息失败，请重试。');
+    } finally {
+      setThreadItemsLoadingOlder(false);
+    }
   }
 
   function replaceConversation(
@@ -4150,7 +4301,7 @@ export function ChatPage({
           ref={messagesRef}
         >
           <div className="uc-chat-page__messages-inner">
-            {conversationHydratingId !== undefined && conversationHydratingId === selected?.conversationId && displayMessages.length === 0 ? (
+            {(threadItemsLoading || (conversationHydratingId !== undefined && conversationHydratingId === selected?.conversationId)) && displayMessages.length === 0 ? (
               <div className="uc-chat-page__empty">
                 <strong>正在读取这段对话…</strong>
                 <p>正在恢复会话内容。</p>
@@ -4166,7 +4317,19 @@ export function ChatPage({
                 <p>在下方选择模型，然后发送第一条消息。</p>
               </div>
             ) : (
-              <ol className="uc-chat-page__message-list">
+              <>
+              {threadReadsEnabled && selectedId && threadItemPages[selectedId]?.hasOlder ? (
+                <div className="uc-chat-page__history-more" role="status">
+                  <Button disabled={threadItemsLoadingOlder} onClick={() => void loadOlderThreadItems()} variant="ghost">
+                    {threadItemsLoadingOlder ? '正在读取更早消息…' : '读取更早消息'}
+                  </Button>
+                </div>
+              ) : null}
+              <ChatMessageList
+                virtualized={threadReadsEnabled}
+                itemIds={displayMessages.map(item => item.messageId)}
+                containerRef={messagesRef}
+              >
                 {displayMessages.map((item) => {
                   const isCurrentAssistant = item.role === 'assistant' &&
                     item.messageId === responseExecution?.assistantMessageId;
@@ -4368,7 +4531,8 @@ export function ChatPage({
                     </li>
                   );
                 })}
-              </ol>
+              </ChatMessageList>
+              </>
             )}
             <div className="uc-chat-page__message-item uc-chat-page__message-item--assistant" aria-label="助手任务回复">
           {activeAgentSession ? <AgentSessionNotice session={activeAgentSession}

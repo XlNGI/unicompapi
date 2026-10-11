@@ -36,7 +36,9 @@ import {
 import {
   ConversationWorkflowApplicationError,
   type ConversationApplicationService,
-  type ConversationWorkflowService
+  type ConversationWorkflowService,
+  type ThreadCommandService,
+  type ThreadProjectionCoordinator
 } from '../../application';
 import type {
   ChatContextIpcResult,
@@ -82,6 +84,8 @@ export interface ConversationResponseControllerRuntime {
   readonly streamChannel: ControlledConversationResponseStreamChannel;
   readonly workflowService?: ConversationWorkflowService;
   readonly agentRuns?: ConversationAgentRunRepository;
+  readonly threadCommands?: ThreadCommandService;
+  readonly threadProjections?: ThreadProjectionCoordinator;
   readonly completion?: Pick<ConversationCompletionCoordinator, 'settle' | 'canStartNewResponse' | 'inspect' | 'reconcile' | 'acknowledge' | 'waitForOperations'>;
   readonly continuations?: {
     /** Read-only replay and scope checks run before adding another user message. */
@@ -676,6 +680,7 @@ export class ConversationResponseController {
     if (!session || session.projectId !== runtime.conversations.projectId) {
       return failure('project_not_open', 'The source project is no longer active');
     }
+    let acceptedThreadTurn: Awaited<ReturnType<ThreadCommandService['acceptUserTurn']>> | undefined;
     let agentRun: ReturnType<typeof createConversationAgentRun> | undefined;
     let agentSession: ConversationAgentSessionDto | undefined;
     let parentRunId: string | undefined;
@@ -685,6 +690,22 @@ export class ConversationResponseController {
       conversationId: conversation.id, sourceMessageId: userMessage.id, traceId: userMessage.id,
       clientCommandId: input.clientCommandId }, async () => {
     try {
+    if (runtime.threadCommands) {
+      try {
+        acceptedThreadTurn = await step(() => runtime.threadCommands!.acceptUserTurn({
+          threadId: conversation.id,
+          projectId: runtime.conversations.projectId,
+          title: conversation.title,
+          messageId: userMessage.id,
+          messageRevision: userMessage.revision,
+          content: userMessage.content,
+          createdAt: toIsoTimestamp(this.now()),
+          clientCommandId: input.clientCommandId
+        }));
+      } catch (error) {
+        this.dependencies.onError?.(error);
+      }
+    }
     if (input.agentNative && runtime.continuations) {
       const preparedSession = await step(() => runtime.continuations!.prepare({
         conversation, userMessageId: userMessage.id, input, signal
@@ -896,6 +917,20 @@ export class ConversationResponseController {
           await runtime.agentRuns.save(settled, agentRun.revision);
           agentRun = settled;
         }
+      } catch (error) {
+        this.dependencies.onError?.(error);
+      }
+    }
+    if (acceptedThreadTurn && agentRun && runtime.threadProjections) {
+      try {
+        await step(() => runtime.threadProjections!.linkExecution({
+          threadId: acceptedThreadTurn!.thread.threadId,
+          turnId: acceptedThreadTurn!.turn.turnId,
+          agentRunId: agentRun!.id,
+          responseExecutionId: execution.responseExecutionId,
+          sourceMessageId: userMessage.id,
+          createdAt: toIsoTimestamp(this.now())
+        }));
       } catch (error) {
         this.dependencies.onError?.(error);
       }

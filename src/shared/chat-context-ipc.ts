@@ -4,6 +4,10 @@ export const chatContextIpcChannels = {
   createConversation: 'chat-context:create-conversation',
   getConversation: 'chat-context:get-conversation',
   listConversations: 'chat-context:list-conversations',
+  listThreadSummaries: 'chat-context:list-thread-summaries',
+  getThread: 'chat-context:get-thread',
+  getThreadItemsPage: 'chat-context:get-thread-items-page',
+  getTurn: 'chat-context:get-turn',
   listConversationCandidates: 'chat-context:list-conversation-candidates',
   renameConversation: 'chat-context:rename-conversation',
   archiveConversation: 'chat-context:archive-conversation',
@@ -111,6 +115,12 @@ export type ChatContextIpcErrorCode =
   | 'document_page_out_of_range'
   | 'document_page_ambiguous'
   | 'document_page_scope_exceeded'
+  | 'thread_not_found'
+  | 'thread_cursor_invalid'
+  | 'thread_cursor_expired'
+  | 'thread_cursor_scope_mismatch'
+  | 'thread_page_limit_out_of_range'
+  | 'thread_read_degraded'
   | 'planning_cancelled'
   | 'storage_error';
 
@@ -219,6 +229,92 @@ export interface ConversationDto {
   readonly deletedAt?: string;
 }
 
+export type ThreadItemIdentityDto =
+  | { readonly namespace: 'message'; readonly value: string }
+  | { readonly namespace: 'projection'; readonly value: string };
+
+export interface ThreadSummaryDto extends Omit<ConversationDto, 'messages' | 'parentRuns' | 'agentSessions'> {
+  readonly threadId: string;
+  readonly messageCount: number;
+  readonly turnCount: number;
+  readonly hasActiveDocumentGeneration: boolean;
+  readonly lastItemId?: ThreadItemIdentityDto;
+}
+
+export interface ThreadDto extends ThreadSummaryDto {
+  readonly parentRuns?: readonly ConversationParentRunDto[];
+  readonly agentSessions?: readonly ConversationAgentSessionDto[];
+}
+
+export interface ThreadItemDto {
+  readonly itemId: ThreadItemIdentityDto;
+  readonly threadId: string;
+  readonly turnId?: string;
+  readonly sequence: number;
+  readonly itemType: 'user_message' | 'assistant_message' | 'tool_call_projection' |
+    'tool_result_projection' | 'document_artifact_projection';
+  readonly status: MessageDto['state'] | 'unknown';
+  readonly createdAt: string;
+  readonly updatedAt: string;
+  readonly messageId?: string;
+  readonly message?: MessageDto;
+  readonly projectionSource?: {
+    readonly eventSystem: 'response_execution' | 'agent_runtime' | 'production_trace' | 'work_repository';
+    readonly sourceIdentity: string;
+    readonly responseExecutionId?: string;
+    readonly agentRunId?: string;
+    readonly toolCallId?: string;
+    readonly workId?: string;
+  };
+}
+
+export interface ThreadSummaryPageDto {
+  readonly items: readonly ThreadSummaryDto[];
+  readonly nextCursor?: string;
+  readonly readAtSequence: number;
+  readonly hasMore: boolean;
+}
+
+export interface ThreadItemsPageDto {
+  readonly threadId: string;
+  readonly revision: number;
+  readonly updatedAt: string;
+  readonly items: readonly ThreadItemDto[];
+  readonly nextCursor?: string;
+  readonly readAtSequence: number;
+  readonly hasMore: boolean;
+}
+
+export interface ConversationTurnDto {
+  readonly turnId: string;
+  readonly threadId: string;
+  readonly turnSequence: number;
+  readonly status: 'open' | 'completed' | 'failed' | 'cancelled' | 'interrupted' | 'unknown';
+  readonly createdAt: string;
+  readonly completedAt?: string;
+  readonly userItemId: ThreadItemIdentityDto;
+  readonly assistantItemIds: readonly ThreadItemIdentityDto[];
+  readonly agentRunIds: readonly string[];
+  readonly responseExecutionIds: readonly string[];
+  readonly provenance: 'native' | 'legacy_inferred';
+}
+
+export interface ListThreadSummariesRequest {
+  readonly includeArchived: boolean;
+  readonly includeDeleted: boolean;
+  readonly limit: number;
+  readonly cursor: string | null;
+}
+
+export interface GetThreadRequest { readonly threadId: string }
+export interface GetTurnRequest { readonly turnId: string }
+export interface GetThreadItemsPageRequest {
+  readonly threadId: string;
+  readonly limit: number;
+  readonly direction: 'older' | 'newer';
+  readonly cursor: string | null;
+}
+
 export interface ConversationCandidateDto {
   readonly conversationId: string;
   readonly projectId: string;
@@ -302,6 +398,11 @@ export interface ConversationIdRequest {
   readonly conversationId: string;
 }
 
+export interface ConversationReadRequest extends ConversationIdRequest {
+  /** Fast display reads skip recovery barriers; callers that mutate or reconcile use the default full read. */
+  readonly readMode?: 'fast' | 'full';
+}
+
 export interface ConversationRevisionRequest extends ConversationIdRequest {
   readonly expectedRevision: number;
 }
@@ -309,7 +410,6 @@ export interface ConversationRevisionRequest extends ConversationIdRequest {
 export interface ListConversationsRequest {
   readonly includeArchived: boolean;
   readonly includeDeleted: boolean;
-  /** Fast reads avoid recovery and per-conversation artifact/session hydration for first paint. */
   readonly readMode?: 'fast' | 'full';
 }
 
@@ -781,6 +881,16 @@ export const chatContextRequestParsers = {
     const record = exactRecord(value, ['conversationId']);
     return { conversationId: controlledId(record.conversationId, 'conversationId') };
   },
+  conversationRead(value: unknown): ConversationReadRequest {
+    const record = exactRecord(value, ['conversationId'], ['readMode']);
+    if (record.readMode !== undefined && record.readMode !== 'fast' && record.readMode !== 'full') {
+      throw new TypeError('readMode is invalid');
+    }
+    return {
+      conversationId: controlledId(record.conversationId, 'conversationId'),
+      ...(record.readMode === undefined ? {} : { readMode: record.readMode })
+    };
+  },
   conversationRevision(value: unknown): ConversationRevisionRequest {
     const record = exactRecord(value, ['conversationId', 'expectedRevision']);
     return {
@@ -798,6 +908,39 @@ export const chatContextRequestParsers = {
       includeDeleted: booleanValue(record.includeDeleted, 'includeDeleted'),
       ...(record.readMode === undefined ? {} : { readMode: record.readMode })
     };
+  },
+  listThreadSummaries(value: unknown): ListThreadSummariesRequest {
+    const record = exactRecord(value, ['includeArchived', 'includeDeleted', 'limit', 'cursor']);
+    const limit = revision(record.limit, 'limit');
+    if (limit < 1 || limit > 200) throw new TypeError('limit is out of range');
+    return {
+      includeArchived: booleanValue(record.includeArchived, 'includeArchived'),
+      includeDeleted: booleanValue(record.includeDeleted, 'includeDeleted'),
+      limit,
+      cursor: record.cursor === null ? null : opaqueCursor(record.cursor, 'cursor')
+    };
+  },
+  getThread(value: unknown): GetThreadRequest {
+    const record = exactRecord(value, ['threadId']);
+    return { threadId: controlledId(record.threadId, 'threadId') };
+  },
+  getThreadItemsPage(value: unknown): GetThreadItemsPageRequest {
+    const record = exactRecord(value, ['threadId', 'limit', 'direction', 'cursor']);
+    const limit = revision(record.limit, 'limit');
+    if (limit < 1 || limit > 200) throw new TypeError('limit is out of range');
+    if (record.direction !== 'older' && record.direction !== 'newer') {
+      throw new TypeError('direction is invalid');
+    }
+    return {
+      threadId: controlledId(record.threadId, 'threadId'),
+      limit,
+      direction: record.direction,
+      cursor: record.cursor === null ? null : opaqueCursor(record.cursor, 'cursor')
+    };
+  },
+  getTurn(value: unknown): GetTurnRequest {
+    const record = exactRecord(value, ['turnId']);
+    return { turnId: controlledId(record.turnId, 'turnId') };
   },
   renameConversation(value: unknown): RenameConversationRequest {
     const record = exactRecord(value, [
@@ -1321,13 +1464,28 @@ export interface ChatContextApi {
     bindToCurrentProject: boolean
   ): Promise<ChatContextIpcResult<ConversationDto>>;
   getConversation(
-    conversationId: string
+    conversationId: string,
+    readMode?: ConversationReadRequest['readMode']
   ): Promise<ChatContextIpcResult<ConversationDto>>;
   listConversations(
     includeArchived: boolean,
     includeDeleted: boolean,
     readMode?: ListConversationsRequest['readMode']
   ): Promise<ChatContextIpcResult<readonly ConversationDto[]>>;
+  listThreadSummaries?(input: {
+    readonly includeArchived: boolean;
+    readonly includeDeleted: boolean;
+    readonly limit: number;
+    readonly cursor?: string;
+  }): Promise<ChatContextIpcResult<ThreadSummaryPageDto>>;
+  getThread?(threadId: string): Promise<ChatContextIpcResult<ThreadDto>>;
+  getThreadItemsPage?(input: {
+    readonly threadId: string;
+    readonly limit: number;
+    readonly direction?: 'older' | 'newer';
+    readonly cursor?: string;
+  }): Promise<ChatContextIpcResult<ThreadItemsPageDto>>;
+  getTurn?(turnId: string): Promise<ChatContextIpcResult<ConversationTurnDto>>;
   listConversationCandidates(): Promise<
     ChatContextIpcResult<readonly ConversationCandidateDto[]>
   >;
@@ -1559,6 +1717,14 @@ function controlledId(value: unknown, field: string): string {
     value.length > 200 ||
     !/^[A-Za-z0-9][A-Za-z0-9._:-]*$/.test(value)
   ) {
+    throw new TypeError(`${field} is invalid`);
+  }
+  return value;
+}
+
+function opaqueCursor(value: unknown, field: string): string {
+  if (typeof value !== 'string' || value.length === 0 || value.length > 4096 ||
+      !/^[A-Za-z0-9_-]+$/u.test(value)) {
     throw new TypeError(`${field} is invalid`);
   }
   return value;

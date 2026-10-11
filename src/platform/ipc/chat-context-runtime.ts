@@ -17,6 +17,8 @@ import {
   ConversationApplicationService,
   ConversationIntentOrchestrator,
   ConversationWorkflowService,
+  ThreadCommandService,
+  ThreadProjectionCoordinator,
   ConversationWebResearchService,
   DocumentTaskRuntimeService,
   ProjectContextRegistryService,
@@ -52,6 +54,7 @@ import {
   type ConversationAgentRunId,
   type ConversationResponseExecutionId,
   type ConversationResponseExecutionV1,
+  type ItemStatus,
   type ProjectId,
   type WorkId,
 } from '../../domain';
@@ -81,6 +84,10 @@ import { ConversationSemanticClassifier, conversationSemanticLimits } from '../p
 import { featureCandidateId } from '../providers/provider-registry-feature-candidates';
 import { ConversationController } from './conversation-controller';
 import { toConversationDto } from './conversation-controller';
+import { ConversationThreadReadController } from './conversation-thread-read-controller';
+import { ThreadFileReadAdapter } from './thread-file-read-adapter';
+import { ThreadFileRepository } from '../repositories/thread-file-repository';
+import type { ThreadReadApi } from './thread-file-read-adapter';
 import { verifyRetainedDocumentArtifacts } from './retained-document-artifact-projection';
 import {
   ConversationWorkflowController,
@@ -149,6 +156,8 @@ import {
 
 export interface ChatContextRuntimeDependencies {
   readonly userDataDirectory: string;
+  readonly threadFileReadEnabled?: boolean;
+  readonly threadFileWriteEnabled?: boolean;
   getSession(): StorageProjectSession | undefined;
   readonly providerRegistry?: JsonProviderRegistryStore;
   readonly providerPackages?: ProviderPackageRegistry;
@@ -172,6 +181,7 @@ export interface ChatContextRuntimeDependencies {
 
 export interface ChatContextRuntime {
   readonly conversations: ConversationControllerPort;
+  readonly threadReads: ThreadReadApi;
   readonly responses: ConversationResponseController;
   readonly projectContexts: ProjectContextController;
   readonly workflows: ConversationWorkflowController;
@@ -812,6 +822,11 @@ export function createChatContextRuntime(
       });
       lazyRecoveryTail = operation.catch(() => undefined); return operation;
     };
+    const threadWriteRepository = dependencies.threadFileWriteEnabled
+      ? new ThreadFileRepository(session.rootDirectory)
+      : undefined;
+    const threadCommands = threadWriteRepository ? new ThreadCommandService(threadWriteRepository) : undefined;
+    const threadProjections = threadWriteRepository ? new ThreadProjectionCoordinator(threadWriteRepository) : undefined;
     const responses: ConversationResponseControllerRuntime = {
       conversationService: service,
       conversations: projectConversations,
@@ -823,6 +838,8 @@ export function createChatContextRuntime(
       streamChannel,
       workflowService,
       agentRuns,
+      ...(threadCommands ? { threadCommands } : {}),
+      ...(threadProjections ? { threadProjections } : {}),
       completion,
       refreshRecovery,
       continuations: { ...continuationRuntime.controller, validate: async input => {
@@ -967,6 +984,29 @@ export function createChatContextRuntime(
           acceptance.subjectArtifacts.responseExecution.id
         );
       };
+      const projectThreadAssistant = async (responseExecutionId: ConversationResponseExecutionId): Promise<void> => {
+        if (!threadProjections) return;
+        try {
+          const execution = await responseLifecycle.readModel(responseExecutionId);
+          const conversation = await projectConversations.get(toConversationId(execution.conversationId));
+          const assistant = conversation?.messages.find(message => message.id === execution.assistantMessageId);
+          if (!conversation || !assistant || !['completed', 'failed', 'cancelled'].includes(assistant.state)) return;
+          const status: ItemStatus = assistant.state === 'completed' ? 'completed' : assistant.state === 'cancelled' ? 'cancelled' : 'failed';
+          await threadProjections.projectAssistantMessage({
+            threadId: conversation.id,
+            sourceMessageId: execution.userMessageId,
+            assistantMessageId: assistant.id,
+            messageRevision: assistant.revision,
+            status,
+            content: assistant.content,
+            createdAt: toIsoTimestamp(assistant.createdAt),
+            updatedAt: toIsoTimestamp(assistant.updatedAt),
+            legacyMessageSnapshot: assistant as unknown as Readonly<Record<string, unknown>>
+          });
+        } catch (error) {
+          dependencies.onError?.(error);
+        }
+      };
       responses.start = async (input) => {
         if (input.subject.kind !== 'conversation_response_draft') throw new TypeError('Response start requires a conversation draft');
         const draftId = input.subject.responseDraftId;
@@ -1002,6 +1042,7 @@ export function createChatContextRuntime(
                 await completion.settle(completed.subjectArtifacts.responseExecution.id,
                   completed.intent.status === 'unknown_outcome' ? { unknownResult: true } : {});
               }
+              if (completed.subjectArtifacts.kind === 'conversation') await projectThreadAssistant(completed.subjectArtifacts.responseExecution.id);
             }
           } catch (error) {
             dependencies.onError?.(error);
@@ -1055,6 +1096,7 @@ export function createChatContextRuntime(
             await closeAndSettleOwnedExecution(executionId,
               error instanceof SubmissionOrchestrationError && error.code === 'submission_outcome_unknown',
               error instanceof ExecutionBudgetError ? error.code : undefined);
+            await projectThreadAssistant(executionId);
           } catch (terminalError) {
             dependencies.onError?.(terminalError);
           }
@@ -1138,26 +1180,32 @@ export function createChatContextRuntime(
     create: (request) => requireProjectController()?.create(request) ??
       Promise.resolve(failure('project_not_open', 'A project must be open')),
     get: (request) => safeConversationOperation(async () => {
+      const input = chatContextRequestParsers.conversationRead(request);
+      const fastRead = input.readMode === 'fast';
       const session = dependencies.getSession();
       const runtime = session ? getProjectRuntime(session) : undefined;
-      await runtime?.responses.ready;
-      const requested = chatContextRequestParsers.conversationId(request);
+      if (!fastRead) await runtime?.responses.ready;
       // The UI refresh triggered by a terminal stream event must observe the
       // owned document close and retained artifact projection from that handle.
-      await runtime?.responses.executionCoordinator.waitForCompletedOperations(async id => {
+      if (!fastRead) await runtime?.responses.executionCoordinator.waitForCompletedOperations(async id => {
         const execution = await runtime.responses.executions.readModel(id);
-        return execution.conversationId === requested.conversationId && ['completed', 'failed', 'cancelled', 'interrupted'].includes(execution.state);
+        return execution.conversationId === input.conversationId && ['completed', 'failed', 'cancelled', 'interrupted'].includes(execution.state);
       });
       const project = runtime?.conversations;
       if (project) {
         const result = await project.get(request);
+        if (result.ok && fastRead) {
+          // A fast display read must never temporarily present an unverified
+          // retained artifact as a formally delivered Work. The full
+          // consistency pass restores valid receipts in the background.
+          return { ok: true, value: withoutUnverifiedRetainedArtifacts(result.value) };
+        }
         if (result.ok) return { ok: true, value: await verifyRetainedDocumentArtifacts(result.value, {
           rootDirectory: session!.rootDirectory, projectId: session!.projectId,
           isCurrent: () => { const current = dependencies.getSession(); return current?.projectId === session!.projectId && current.rootDirectory === session!.rootDirectory; }
         }) };
         if (result.error.code !== 'conversation_not_found') return result;
       }
-      const input = chatContextRequestParsers.conversationId(request);
       const legacy = await legacyRepository.get(toConversationId(input.conversationId));
       if (!legacy || (legacy.projectId !== null && legacy.projectId !== session?.projectId)) {
         return failure('conversation_not_found', 'The conversation does not exist');
@@ -1253,6 +1301,25 @@ export function createChatContextRuntime(
       ));
     }
   };
+  const legacyThreadReads = new ConversationThreadReadController(
+    conversations,
+    () => dependencies.getSession()?.projectId ?? 'legacy-unbound'
+  );
+  const threadFileRepositories = new Map<string, ThreadFileRepository>();
+  const threadReads: ThreadReadApi = dependencies.threadFileReadEnabled
+    ? new ThreadFileReadAdapter({
+      projectId: () => dependencies.getSession()?.projectId,
+      getRepository: () => {
+        const session = dependencies.getSession();
+        if (!session) return undefined;
+        const existing = threadFileRepositories.get(session.rootDirectory);
+        if (existing) return existing;
+        const repository = new ThreadFileRepository(session.rootDirectory);
+        threadFileRepositories.set(session.rootDirectory, repository);
+        return repository;
+      }
+    })
+    : legacyThreadReads;
   const projectContexts = new ProjectContextController({
     getSession: dependencies.getSession,
     onError: dependencies.onError,
@@ -1294,6 +1361,7 @@ export function createChatContextRuntime(
   });
   return {
     conversations,
+    threadReads,
     responses,
     projectContexts,
     workflows,
@@ -1339,6 +1407,18 @@ export function createChatContextRuntime(
       await Promise.all([...runtimes].map(runtime => runtime.agentRuntime.flushProjectedEvents().catch(error => dependencies.onError?.(error))));
     }
   };
+}
+
+function withoutUnverifiedRetainedArtifacts(conversation: ConversationDto): ConversationDto {
+  let changed = false;
+  const messages = conversation.messages.map(message => {
+    if (!message.retainedDocumentResult) return message;
+    changed = true;
+    const { retainedDocumentResult: removed, ...withoutReceipt } = message;
+    void removed;
+    return withoutReceipt;
+  });
+  return changed ? { ...conversation, messages } : conversation;
 }
 
 async function projectInterruptedAssistant(

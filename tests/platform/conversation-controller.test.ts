@@ -21,6 +21,7 @@ import {
   NodeProjectStorage,
   type StorageProjectSession
 } from '../../src/platform';
+import { ConversationController } from '../../src/platform/ipc/conversation-controller';
 
 const roots: string[] = [];
 
@@ -274,6 +275,41 @@ describe('ConversationController', () => {
       ok: true,
       value: [{ messages: [{ content: 'message stays out of the sidebar payload' }] }]
     });
+  });
+
+  it('supports a fast detail read without waiting for recovery or execution projections', async () => {
+    const conversation = createConversation({
+      id: toConversationId('conversation-fast-detail'),
+      projectId: toProjectId('project-chat'),
+      title: 'Fast detail chat',
+      createdAt: toIsoTimestamp('2020-01-01T00:00:00.000Z')
+    });
+    const stored = addUserMessage(conversation, {
+      id: toMessageId('message-fast-detail'),
+      content: 'persisted message remains available to the fast display read',
+      createdAt: toIsoTimestamp('2020-01-01T00:00:01.000Z')
+    });
+    let recoveryCalls = 0;
+    let parentRunCalls = 0;
+    let sessionCalls = 0;
+    const controller = new ConversationController({
+      service: { get: async () => stored } as never,
+      getSession: () => undefined,
+      refreshRecovery: async () => { recoveryCalls += 1; },
+      readParentRuns: async () => { parentRunCalls += 1; return []; },
+      readAgentSessions: async () => { sessionCalls += 1; return []; }
+    });
+
+    const fast = await controller.get({ conversationId: conversation.id, readMode: 'fast' });
+    expect(fast).toMatchObject({ ok: true, value: {
+      conversationId: conversation.id,
+      messages: [{ content: 'persisted message remains available to the fast display read' }]
+    } });
+    expect({ recoveryCalls, parentRunCalls, sessionCalls }).toEqual({ recoveryCalls: 0, parentRunCalls: 0, sessionCalls: 0 });
+
+    const full = await controller.get({ conversationId: conversation.id });
+    expect(full).toMatchObject({ ok: true, value: { conversationId: conversation.id } });
+    expect({ recoveryCalls, parentRunCalls, sessionCalls }).toEqual({ recoveryCalls: 1, parentRunCalls: 1, sessionCalls: 1 });
   });
 
   it('creates a persisted response draft and reports no fabricated candidates', async () => {

@@ -802,14 +802,29 @@ const chatContexts: ChatContextApi = {
       title,
       bindToCurrentProject
     }),
-  getConversation: (conversationId) =>
-    ipcRenderer.invoke(chatContextIpcChannels.getConversation, { conversationId }),
+  getConversation: (conversationId, readMode) =>
+    ipcRenderer.invoke(chatContextIpcChannels.getConversation, {
+      conversationId,
+      ...(readMode ? { readMode } : {})
+    }),
   listConversations: (includeArchived, includeDeleted, readMode) =>
     ipcRenderer.invoke(chatContextIpcChannels.listConversations, {
       includeArchived,
       includeDeleted,
       ...(readMode ? { readMode } : {})
     }),
+  listThreadSummaries: ({ includeArchived, includeDeleted, limit, cursor }) =>
+    ipcRenderer.invoke(chatContextIpcChannels.listThreadSummaries, {
+      includeArchived, includeDeleted, limit, cursor: cursor ?? null
+    }),
+  getThread: (threadId) =>
+    ipcRenderer.invoke(chatContextIpcChannels.getThread, { threadId }),
+  getThreadItemsPage: ({ threadId, limit, direction, cursor }) =>
+    ipcRenderer.invoke(chatContextIpcChannels.getThreadItemsPage, {
+      threadId, limit, direction: direction ?? 'older', cursor: cursor ?? null
+    }),
+  getTurn: (turnId) =>
+    ipcRenderer.invoke(chatContextIpcChannels.getTurn, { turnId }),
   listConversationCandidates: () =>
     ipcRenderer.invoke(chatContextIpcChannels.listConversationCandidates),
   renameConversation: (conversationId, expectedRevision, title) =>
@@ -1100,6 +1115,12 @@ contextBridge.exposeInMainWorld('unicomp', {
   providers,
   settings,
   storage,
+  ...(process.env.UNICOMP_E2E === '1' ? { e2e: {
+    sampleMainEventLoop: (durationMs?: number) => ipcRenderer.invoke('__unicomp_e2e_main_loop_sample', durationMs),
+    recordReactCommit: (value: unknown) => ipcRenderer.send('__unicomp_e2e_react_commit', value),
+    getReactMetrics: () => ipcRenderer.invoke('__unicomp_e2e_react_metrics'),
+    getIpcMetrics: () => []
+  } } : {}),
   windowControls: {
     minimize: () => ipcRenderer.send('window:minimize'),
     toggleMaximize: () => ipcRenderer.send('window:toggle-maximize'),
