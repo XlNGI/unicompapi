@@ -10,6 +10,38 @@
 4. 备份隔离项目目录和用户数据目录；备份后计算文件 Hash。测试结束后保留备份和报告。
 5. 真实 Provider 测试使用最小预算、低成本模型和最小测试资料；凭证只能从安全凭证库读取，不得写入报告、截图或日志。
 
+### Windows 手工关闭 ThreadFile 写入
+
+`electron/ipc/chat-context-ipc.ts` 只在 `process.env.UNICOMP_THREAD_FILE_WRITE_PATH === '1'` 时开启写入。因此可以在启动应用的同一个 PowerShell 中执行：
+
+```powershell
+$env:UNICOMP_THREAD_FILE_WRITE_PATH = '0'
+pnpm dev
+```
+
+或者清除当前 PowerShell 的变量后再启动：
+
+```powershell
+Remove-Item Env:UNICOMP_THREAD_FILE_WRITE_PATH -ErrorAction SilentlyContinue
+pnpm dev
+```
+
+如果之前把变量写入了 Windows 用户环境变量，先清除持久值，再打开新的终端：
+
+```powershell
+[Environment]::SetEnvironmentVariable('UNICOMP_THREAD_FILE_WRITE_PATH', $null, 'User')
+```
+
+如果通过 VS Code launch/task、批处理或 CI 启动，删除其中的 `UNICOMP_THREAD_FILE_WRITE_PATH=1`；`scripts/run-dev.mjs` 会把父进程环境传给 Electron 子进程。关闭旧窗口并停止旧的 Vite/Electron 进程后再启动，因为 Runtime 只在注册 IPC 时读取一次环境变量。
+
+验证方式：
+
+```powershell
+if ($env:UNICOMP_THREAD_FILE_WRITE_PATH -eq '1') { 'ThreadFile write: ON' } else { 'ThreadFile write: OFF' }
+```
+
+关闭写入不会删除已有的 `项目目录\entities\threads` 文件，也不会关闭只读 Thread 路径；它只阻止后续 `ThreadCommandService`/`ThreadProjectionCoordinator` Shadow 写入。若要同时关闭 Thread 读取，另行将 `UNICOMP_THREAD_FILE_READ_PATH`、`VITE_UNICOMP_THREAD_FILE_READ_PATH` 和 `VITE_UNICOMP_THREAD_READ_PATH` 设为 `0` 或清除，但这不是关闭写入的必要步骤。
+
 每个用例都记录：`pass`、`fail` 或 `blocked`。`blocked` 表示缺少可控故障注入、真实 Provider 能力或负责人批准，不能改写成通过。
 
 ## 1. 真实 Provider 工具链边界
