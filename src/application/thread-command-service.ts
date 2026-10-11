@@ -44,6 +44,7 @@ export interface AcceptThreadTurnInput {
   readonly content: string;
   readonly createdAt: IsoTimestamp;
   readonly clientCommandId: string;
+  readonly legacyMessageSnapshot?: Readonly<Record<string, unknown>>;
 }
 
 export interface AcceptedThreadTurn {
@@ -97,6 +98,7 @@ export class ThreadCommandService {
       createdAt: input.createdAt,
       updatedAt: input.createdAt,
       messageSource: { messageId: toMessageId(input.messageId), messageRevision: input.messageRevision ?? 0 },
+      ...(input.legacyMessageSnapshot ? { legacyMessageSnapshot: input.legacyMessageSnapshot } : {}),
       content
     });
     const turn = createTurnV1({

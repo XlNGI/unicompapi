@@ -623,6 +623,7 @@ export class ConversationResponseController {
         title: input.title,
         messageId,
         content: input.content,
+        ...(attachments ? { legacyMessageSnapshot: { attachments, ...(input.displayContent !== undefined ? { displayContent: input.displayContent } : {}) } } : {}),
         createdAt: toIsoTimestamp(this.now()),
         clientCommandId: input.clientCommandId
       }));
@@ -743,6 +744,7 @@ export class ConversationResponseController {
           messageId: userMessage.id,
           messageRevision: userMessage.revision,
           content: userMessage.content,
+          ...(attachments ? { legacyMessageSnapshot: { attachments, ...(input.displayContent !== undefined ? { displayContent: input.displayContent } : {}) } } : {}),
           createdAt: toIsoTimestamp(this.now()),
           clientCommandId: input.clientCommandId
         }));

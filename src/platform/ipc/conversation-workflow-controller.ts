@@ -136,6 +136,7 @@ export class ConversationWorkflowController {
           messageId: source.id,
           messageRevision: source.revision,
           content: source.content,
+          ...(attachments ? { legacyMessageSnapshot: { attachments } } : {}),
           createdAt: source.createdAt,
           clientCommandId: input.clientCommandId ?? `answer:${input.workflowId}:${input.expectedWorkflowRevision}`
         });
@@ -422,7 +423,8 @@ export class ConversationWorkflowController {
         title: conversation.title,
         messageId: source.id,
         messageRevision: source.revision,
-        content: source.content,
+          content: source.content,
+          ...(attachments ? { legacyMessageSnapshot: { attachments } } : {}),
         createdAt: source.createdAt,
         clientCommandId: input.clientCommandId
       });

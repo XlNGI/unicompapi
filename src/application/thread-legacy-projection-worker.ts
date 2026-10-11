@@ -72,7 +72,9 @@ export class ThreadLegacyProjectionWorker {
       ? addUserMessage(conversation, {
           id: messageId,
           content: item.content ?? '',
-          createdAt: toIsoTimestamp(item.createdAt)
+          createdAt: toIsoTimestamp(item.createdAt),
+          ...(Array.isArray(item.legacyMessageSnapshot?.attachments) ? { attachments: item.legacyMessageSnapshot.attachments as never } : {}),
+          ...(typeof item.legacyMessageSnapshot?.displayContent === 'string' ? { displayContent: item.legacyMessageSnapshot.displayContent } : {})
         })
       : addCompletedAssistantMessage(conversation, {
           id: messageId,
