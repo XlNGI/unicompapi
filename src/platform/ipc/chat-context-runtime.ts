@@ -857,12 +857,16 @@ export function createChatContextRuntime(
           // backup or mutate the source document.
           const legacyPath = path.join(session.rootDirectory, 'entities', 'conversations.json');
           const backupPath = `${legacyPath}.bak`;
+          let backupVerified = false;
           try {
             await access(legacyPath);
             try { await access(backupPath); }
             catch { await copyFile(legacyPath, backupPath); }
+            await access(backupPath);
+            backupVerified = true;
           } catch (error) {
             if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error;
+            backupVerified = true;
           }
           const conversations = await projectConversations.list({ statuses: ['active', 'archived', 'deleted'] });
           const runs = await agentRuns.list();
@@ -894,6 +898,14 @@ export function createChatContextRuntime(
           if (shadow.differences.length > 0) {
             throw new Error(`thread_shadow_gate_blocked:differences=${shadow.differences.length}`);
           }
+          const summaries = await threadWriteRepository.listThreadSummaries();
+          await migration.activateThreadAuthority({
+            legacyGeneration: Math.max(0, ...conversations.map(conversation => conversation.revision)),
+            targetGeneration: Math.max(0, ...summaries.map(summary => summary.revision)),
+            backupVerified,
+            shadow,
+            ledger: result.ledger
+          });
         })()
       : Promise.resolve();
     // Root ownership/classification precedes legacy recovery, so a live foreign

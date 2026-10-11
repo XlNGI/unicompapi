@@ -96,6 +96,14 @@ export interface CutoverReadinessReport {
   readonly onlineDualWriteSupported: false;
 }
 
+export interface ThreadAuthorityActivationInput {
+  readonly legacyGeneration: number;
+  readonly targetGeneration: number;
+  readonly backupVerified: boolean;
+  readonly shadow: ShadowComparisonReport;
+  readonly ledger: MigrationLedgerV1;
+}
+
 interface AuthorityFenceV1 {
   readonly schemaVersion: 1;
   readonly state: 'legacy_authoritative' | 'prepared' | 'new_authoritative' | 'rollback_locked';
@@ -235,6 +243,22 @@ export class LegacyThreadMigration {
     const fence: AuthorityFenceV1 = { schemaVersion: 1, state: reasons.length ? 'legacy_authoritative' : 'prepared', generation: Math.max(input.legacyGeneration, input.targetGeneration), legacyGeneration: input.legacyGeneration, targetGeneration: input.targetGeneration, preparedAt: this.now(), backupVerified: input.backupVerified };
     await atomicWrite(this.fencePath, fence);
     return { status: reasons.length ? 'blocked' : 'ready_for_separate_approval', reasons, legacyGeneration: input.legacyGeneration, targetGeneration: input.targetGeneration, activeExecutionCount: input.activeExecutionCount, backupVerified: input.backupVerified, oldAuthorityPreserved: true, onlineDualWriteSupported: false };
+  }
+
+  async activateThreadAuthority(input: ThreadAuthorityActivationInput): Promise<CutoverReadinessReport> {
+    const readiness = await this.prepareCutover({ ...input, activeExecutionCount: 0 });
+    if (readiness.status !== 'ready_for_separate_approval') throw new Error(`thread_authority_activation_blocked:${readiness.reasons.join(',')}`);
+    const fence: AuthorityFenceV1 = {
+      schemaVersion: 1,
+      state: 'new_authoritative',
+      generation: Math.max(input.legacyGeneration, input.targetGeneration),
+      legacyGeneration: input.legacyGeneration,
+      targetGeneration: input.targetGeneration,
+      preparedAt: this.now(),
+      backupVerified: input.backupVerified
+    };
+    await atomicWrite(this.fencePath, fence);
+    return readiness;
   }
 
   async rollbackReadiness(input: { readonly cutoverStarted: boolean; readonly oldStoreCaughtUp: boolean; readonly newWritesAfterCutover: number }): Promise<{ readonly status: 'safe' | 'blocked'; readonly reasons: readonly string[] }> {

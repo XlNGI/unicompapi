@@ -135,4 +135,18 @@ describe('Legacy Thread migration and Shadow Read', () => {
       expect(rollback.status).toBe('blocked');
     } finally { await rm(root, { recursive: true, force: true }); }
   });
+
+  it('activates the new authority only after a clean shadow and verified backup', async () => {
+    const root = await mkdtemp(path.join(os.tmpdir(), 'unicomp-thread-authority-activation-'));
+    try {
+      const conversation = legacyConversation();
+      const repository = new ThreadFileRepository(root);
+      const migration = new LegacyThreadMigration(root, repository, { migrationId: 'authority-activation-test' });
+      const run = await migration.migrate([{ conversation }]);
+      const shadow = await migration.shadowCompare([{ conversation }]);
+      const readiness = await migration.activateThreadAuthority({ legacyGeneration: 1, targetGeneration: 1, backupVerified: true, shadow, ledger: run.ledger });
+      expect(readiness.status).toBe('ready_for_separate_approval');
+      expect(await readFile(path.join(root, 'migration', 'authority-fence.v1.json'), 'utf8')).toContain('new_authoritative');
+    } finally { await rm(root, { recursive: true, force: true }); }
+  });
 });
