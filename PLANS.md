@@ -1,5 +1,11 @@
 # UniComp 开发计划
 
+### 受控崩溃恢复验收：发现重复 Work 缺陷（2026-10-11）
+
+在隔离项目 `OA-Recovery-Test-20261011`（`project-6d383536-b582-4f7d-8b6c-f813615a5130`）执行真实 Provider 崩溃重启验收。取消用例两次均正确进入 `cancelled`，无正式 Work；该部分 `PASS`。崩溃用例在 `response-execution-330dbb22-e7ec-499d-acda-7fe2282ced28` 处于 `streaming`/文档生成阶段时结束 Electron 主进程，随后重启。原执行最终完成，原 Work `work-document-3e4b9f3a-141c-4bf2-a1fc-1fd26cbd71d8` 和文件 `document-file-05fe91ce-bb7c-4345-b7c1-fe33422ee250` 保留，大小 305,343 bytes、Hash `fa681bad11063b1c5d6f4c8316b4810dcce6106ae33cb824900344832164dfb6`，因此“已有正式 Work 不被删除”通过。
+
+但同一会话没有新增 user message，恢复后又登记了第二个 Work `work-document-200bdf34-79a1-467f-a420-cddf380e55b6`，对应不同文件 `document-file-8a3db82b-a054-4416-a909-408b5faca4c5`，大小 435,369 bytes、Hash `fbd8538d26b01865a41d6c7d1c1c6a82c4d9b4ea1e0885ef0e2090e54859869d`。因此恢复最终状态虽为 `completed`，但产生了重复副作用；“崩溃恢复幂等/未知结果不得自动重发”判定 `FAIL`。后续必须在恢复接线中先核对已有 Document Task/Work/Execution，已有 Work 时只做验证、读回或结算，不得再次调用 `generate_pptx`。本次仅修改隔离测试数据，未影响真实项目、ThreadFile 写权威或生产 Cutover。
+
 ### 真实会话日志复核：PPT 生成与登记通过（2026-10-11）
 
 负责人确认按日志证据记录本次真实会话。隔离项目 `project-4b9f0e90-8f16-4ca1-81f9-22d66a4a7e33` 的会话 `conversation-6aec886f-08a2-4f78-90d6-6bd4596b3ed6` 在 2026-10-11 04:37 UTC（00:37 EDT）完成真实 Provider PPT 生成。最新 `chat_stream` 返回 HTTP 200，耗时约 1.7 秒；最新 Response Execution `response-execution-2721db30-d7c4-4891-b58a-0c8c9365a977`、Document Runtime `runtime-document-66e3b40b-2b50-4a09-98d5-c9de5a353860` 和 Document Execution `execution-document-7a9b458b-f884-4dc0-9b2a-3f078ab6393f` 均为 `completed`。
