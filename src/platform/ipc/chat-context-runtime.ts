@@ -21,6 +21,7 @@ import {
   ThreadCommandService,
   ThreadProjectionCoordinator,
   ConversationTurnCoordinator,
+  ThreadLegacyProjectionWorker,
   ConversationWebResearchService,
   DocumentTaskRuntimeService,
   ProjectContextRegistryService,
@@ -929,6 +930,9 @@ export function createChatContextRuntime(
     const turnCoordinator = threadCommands && threadProjections
       ? new ConversationTurnCoordinator(threadCommands, threadProjections)
       : undefined;
+    const legacyProjection = threadWriteRepository
+      ? new ThreadLegacyProjectionWorker(threadWriteRepository, projectConversations, now)
+      : undefined;
     const responses: ConversationResponseControllerRuntime = {
       conversationService: service,
       conversations: projectConversations,
@@ -941,6 +945,7 @@ export function createChatContextRuntime(
       workflowService,
       agentRuns,
       ...(turnCoordinator ? { turnCoordinator } : {}),
+      ...(legacyProjection ? { legacyProjection } : {}),
       completion,
       refreshRecovery,
       continuations: { ...continuationRuntime.controller, validate: async input => {

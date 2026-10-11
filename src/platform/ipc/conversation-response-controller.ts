@@ -84,6 +84,7 @@ export interface ConversationResponseControllerRuntime {
   readonly workflowService?: ConversationWorkflowService;
   readonly agentRuns?: ConversationAgentRunRepository;
   readonly turnCoordinator?: ConversationTurnCoordinator;
+  readonly legacyProjection?: { drain(threadId: string): Promise<{ readonly projected: number; readonly pending: number }> };
   readonly completion?: Pick<ConversationCompletionCoordinator, 'settle' | 'canStartNewResponse' | 'inspect' | 'reconcile' | 'acknowledge' | 'waitForOperations'>;
   readonly continuations?: {
     /** Read-only replay and scope checks run before adding another user message. */
@@ -700,6 +701,7 @@ export class ConversationResponseController {
           createdAt: toIsoTimestamp(this.now()),
           clientCommandId: input.clientCommandId
         }));
+        await step(() => runtime.legacyProjection?.drain(String(conversation.id)) ?? Promise.resolve({ projected: 0, pending: 0 }));
       } catch (error) {
         this.dependencies.onError?.(error);
       }

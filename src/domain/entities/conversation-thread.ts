@@ -96,6 +96,25 @@ export interface ItemV1 {
   readonly projectionSource?: ItemProjectionSourceV1;
 }
 
+export interface ThreadProjectionOutboxEventV1 {
+  readonly schemaVersion: 1;
+  readonly eventId: string;
+  readonly threadId: ThreadId;
+  readonly eventType: 'item_upsert';
+  readonly sequence: number;
+  readonly idempotencyKey: string;
+  readonly item: ItemV1;
+  readonly occurredAt: IsoTimestamp;
+}
+
+export interface ThreadProjectionReceiptV1 {
+  readonly schemaVersion: 1;
+  readonly eventId: string;
+  readonly threadId: ThreadId;
+  readonly idempotencyKey: string;
+  readonly projectedAt: IsoTimestamp;
+}
+
 export interface TurnExecutionLinkV1 {
   readonly schemaVersion: 1;
   readonly turnId: TurnId;

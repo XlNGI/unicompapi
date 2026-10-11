@@ -11,12 +11,14 @@ import {
   type ProjectId,
   type ThreadId,
   type ThreadV1,
+  type ThreadProjectionOutboxEventV1,
+  type ThreadProjectionReceiptV1,
   type TurnExecutionLinkV1,
   type TurnV1
 } from '../../domain';
 import { sharedFileWriteCoordinator } from '../storage/file-write-coordinator';
 
-export type ThreadSegmentKind = 'turn' | 'item' | 'turn_execution_link';
+export type ThreadSegmentKind = 'turn' | 'item' | 'turn_execution_link' | 'projection_outbox';
 
 export interface SegmentRecordV1<T = unknown> {
   readonly schemaVersion: 1;
@@ -116,6 +118,7 @@ export interface ThreadAppendInput {
   readonly turns?: readonly TurnV1[];
   readonly items?: readonly ItemV1[];
   readonly executionLinks?: readonly TurnExecutionLinkV1[];
+  readonly projectionOutbox?: readonly ThreadProjectionOutboxEventV1[];
 }
 
 export interface ThreadCommitResult {
@@ -246,6 +249,25 @@ export class ThreadFileRepository {
     return records.map(record => parseTurnExecutionLinkV1(record.payload));
   }
 
+  async readProjectionOutbox(threadId: ThreadId): Promise<readonly ThreadProjectionOutboxEventV1[]> {
+    const manifest = await this.getManifest(threadId);
+    const records = await this.readCommittedRecords<ThreadProjectionOutboxEventV1>(threadId, manifest, 'projection_outbox');
+    return records.map(record => record.payload);
+  }
+
+  async readProjectionReceipts(threadId: ThreadId): Promise<readonly ThreadProjectionReceiptV1[]> {
+    const value = await readJson<{ readonly receipts?: readonly ThreadProjectionReceiptV1[] }>(this.projectionReceiptsPath(threadId));
+    return value?.receipts ?? [];
+  }
+
+  async acknowledgeProjection(receipt: ThreadProjectionReceiptV1): Promise<void> {
+    await this.exclusive(receipt.threadId, async () => {
+      const current = await this.readProjectionReceipts(receipt.threadId);
+      if (current.some(item => item.eventId === receipt.eventId)) return;
+      await atomicWrite(this.projectionReceiptsPath(receipt.threadId), { schemaVersion: 1, receipts: [...current, receipt] });
+    });
+  }
+
   async createSnapshot(threadId: ThreadId): Promise<ThreadSnapshotV1> {
     return this.exclusive(threadId, async () => {
       const manifest = await this.getManifest(threadId);
@@ -301,7 +323,8 @@ export class ThreadFileRepository {
     const entries: readonly PendingRecord[] = [
       ...input.turns?.map(payload => ({ kind: 'turn' as const, payload, sequence: payload.turnSequence })) ?? [],
       ...input.items?.map(payload => ({ kind: 'item' as const, payload, sequence: payload.sequence })) ?? [],
-      ...input.executionLinks?.map(payload => ({ kind: 'turn_execution_link' as const, payload, sequence: payload.linkSequence })) ?? []
+      ...input.executionLinks?.map(payload => ({ kind: 'turn_execution_link' as const, payload, sequence: payload.linkSequence })) ?? [],
+      ...input.projectionOutbox?.map(payload => ({ kind: 'projection_outbox' as const, payload, sequence: payload.sequence })) ?? []
     ];
     const participants = new Map<string, CommitParticipantDraft>();
     const previousHashes = new Map<string, string>();
@@ -332,7 +355,7 @@ export class ThreadFileRepository {
     await syncFile(journal);
     await this.faultAt('after_commit_sync');
     const nextThread = applyThreadDelta(thread, input.thread, input.items ?? [], input.turns ?? [], input.occurredAt);
-    const nextManifest = advanceManifest(manifest, commit, participants.values(), input.items ?? [], input.turns ?? []);
+    const nextManifest = advanceManifest(manifest, commit, participants.values(), input.items ?? [], input.turns ?? [], input.projectionOutbox ?? []);
     await this.faultAt('before_manifest_update');
     await atomicWrite(this.manifestPath(input.threadId), nextManifest);
     await this.faultAt('after_manifest_update');
@@ -358,7 +381,7 @@ export class ThreadFileRepository {
     for (const commit of commits.committedAfterManifest) {
       try {
         await this.verifyCommitParticipants(threadId, commit);
-        current = advanceManifest(current, commit, commit.participants.map(participant => ({ ...participant, recordIds: Array.from(participant.recordIds), recordKind: segmentKindFromId(participant.segmentId), path: this.segmentPath(threadId, participant.segmentId) } as CommitParticipantDraft)), [], []);
+        current = advanceManifest(current, commit, commit.participants.map(participant => ({ ...participant, recordIds: Array.from(participant.recordIds), recordKind: segmentKindFromId(participant.segmentId), path: this.segmentPath(threadId, participant.segmentId) } as CommitParticipantDraft)), [], [], []);
         await atomicWrite(this.manifestPath(threadId), current);
         rolledForward += 1;
       } catch (error) {
@@ -540,23 +563,24 @@ export class ThreadFileRepository {
   private snapshotPath(threadId: ThreadId, snapshotId: string): string { return path.join(this.snapshotsDirectory(threadId), `${snapshotId}.json`); }
   private debtPath(threadId: ThreadId): string { return path.join(this.threadDirectory(threadId), 'projection-debt.v1.jsonl'); }
   private itemIndexPath(threadId: ThreadId): string { return path.join(this.threadDirectory(threadId), 'item-index.v1.json'); }
+  private projectionReceiptsPath(threadId: ThreadId): string { return path.join(this.threadDirectory(threadId), 'projection-receipts.v1.json'); }
 }
 
 export interface ThreadSummaryProjection { readonly threadId: ThreadId; readonly projectId: ProjectId | null; readonly title: string; readonly status: ThreadV1['status']; readonly createdAt: string; readonly updatedAt: string; readonly revision: number; readonly itemCount: number; readonly turnCount: number; readonly lastItemId?: ThreadV1['lastItemId']; }
 export interface RecoveryReport { readonly threadId: ThreadId; readonly severity: 'tail_quarantined' | 'snapshot_invalid' | 'degraded_read_only'; readonly code: string; readonly detail: string; }
 export interface ThreadRecoveryResult { readonly status: 'ready' | 'degraded_read_only'; readonly manifest: ThreadManifestV1; readonly rolledForward: number; readonly reports: readonly RecoveryReport[]; }
 
-interface PendingRecord { readonly kind: ThreadSegmentKind; readonly payload: ItemV1 | TurnV1 | TurnExecutionLinkV1; readonly sequence: number; }
+interface PendingRecord { readonly kind: ThreadSegmentKind; readonly payload: ItemV1 | TurnV1 | TurnExecutionLinkV1 | ThreadProjectionOutboxEventV1; readonly sequence: number; }
 interface CommitParticipantDraft { segmentId: string; startOffset: number; endOffset: number; recordIds: string[]; checksum: string; recordKind: ThreadSegmentKind; path: string; }
 
 function emptyManifest(threadId: ThreadId): ThreadManifestV1 { return { schemaVersion: 1, threadId, generation: 0, committedSequence: 0, committedItemSequence: 0, committedTurnSequence: 0, lastCommitHash: emptyHash, segments: [], revision: 0 }; }
 function makeSegmentRecord(input: Omit<SegmentRecordV1, 'payloadHash' | 'recordHash' | 'schemaVersion'>): SegmentRecordV1 { const payloadHash = sha256Hex(canonicalJson(input.payload)); const base = { schemaVersion: 1 as const, ...input, payloadHash }; return { ...base, recordHash: sha256Hex(canonicalJson(base)) }; }
 function makeCommit(input: Omit<CommitRecordV1, 'schemaVersion' | 'commitHash'>): CommitRecordV1 { const base = { schemaVersion: 1 as const, ...input }; return { ...base, commitHash: sha256Hex(canonicalJson(base)) }; }
-function commandHash(input: ThreadAppendInput): string { return sha256Hex(canonicalJson({ threadId: input.threadId, idempotencyKey: input.idempotencyKey, thread: input.thread ?? {}, turns: input.turns ?? [], items: input.items ?? [], executionLinks: input.executionLinks ?? [] })); }
+function commandHash(input: ThreadAppendInput): string { return sha256Hex(canonicalJson({ threadId: input.threadId, idempotencyKey: input.idempotencyKey, thread: input.thread ?? {}, turns: input.turns ?? [], items: input.items ?? [], executionLinks: input.executionLinks ?? [], projectionOutbox: input.projectionOutbox ?? [] })); }
 function validateCommit(value: unknown): CommitRecordV1 { const item = value as CommitRecordV1; if (!item || item.schemaVersion !== 1 || typeof item.commitHash !== 'string' || item.commitHash !== sha256Hex(canonicalJson({ ...item, commitHash: undefined }))) throw new Error('commit_invalid'); return item; }
 function validateSegmentRecord(value: SegmentRecordV1): SegmentRecordV1 { const payloadHash = sha256Hex(canonicalJson(value.payload)); const base = { schemaVersion: 1 as const, generation: value.generation, sequence: value.sequence, transactionId: value.transactionId, recordId: value.recordId, recordKind: value.recordKind, idempotencyKey: value.idempotencyKey, occurredAt: value.occurredAt, previousRecordHash: value.previousRecordHash, payload: value.payload, payloadHash }; if (value.payloadHash !== payloadHash || value.recordHash !== sha256Hex(canonicalJson(base))) throw new Error(`segment_checksum_mismatch:${value.recordId}`); return value; }
 function validateManifest(value: ThreadManifestV1, threadId: ThreadId): ThreadManifestV1 { if (value.schemaVersion !== 1 || value.threadId !== threadId || value.generation < 0 || value.committedSequence < 0 || value.revision < 0) throw new Error('manifest_invalid'); return value; }
-function advanceManifest(previous: ThreadManifestV1, commit: CommitRecordV1, participants: Iterable<CommitParticipantDraft>, items: readonly ItemV1[], turns: readonly TurnV1[]): ThreadManifestV1 { const map = new Map(previous.segments.map(segment => [segment.segmentId, segment])); for (const participant of participants) map.set(participant.segmentId, { segmentId: participant.segmentId, recordKind: participant.recordKind, committedBytes: participant.endOffset, lastSequence: Math.max(...items.map(item => item.sequence), ...turns.map(turn => turn.turnSequence), previous.committedSequence), checksum: participant.checksum }); return { ...previous, generation: commit.generation, committedSequence: commit.commitSequence, committedItemSequence: Math.max(previous.committedItemSequence, ...items.map(item => item.sequence), 0), committedTurnSequence: Math.max(previous.committedTurnSequence, ...turns.map(turn => turn.turnSequence), 0), lastCommitHash: commit.commitHash, segments: [...map.values()], revision: previous.revision + 1 }; }
+function advanceManifest(previous: ThreadManifestV1, commit: CommitRecordV1, participants: Iterable<CommitParticipantDraft>, items: readonly ItemV1[], turns: readonly TurnV1[], outbox: readonly ThreadProjectionOutboxEventV1[]): ThreadManifestV1 { const map = new Map(previous.segments.map(segment => [segment.segmentId, segment])); for (const participant of participants) map.set(participant.segmentId, { segmentId: participant.segmentId, recordKind: participant.recordKind, committedBytes: participant.endOffset, lastSequence: Math.max(...items.map(item => item.sequence), ...turns.map(turn => turn.turnSequence), ...outbox.map(item => item.sequence), previous.committedSequence), checksum: participant.checksum }); return { ...previous, generation: commit.generation, committedSequence: commit.commitSequence, committedItemSequence: Math.max(previous.committedItemSequence, ...items.map(item => item.sequence), 0), committedTurnSequence: Math.max(previous.committedTurnSequence, ...turns.map(turn => turn.turnSequence), 0), lastCommitHash: commit.commitHash, segments: [...map.values()], revision: previous.revision + 1 }; }
 function applyThreadDelta(thread: ThreadV1, patch: ThreadAppendInput['thread'] | undefined, items: readonly ItemV1[], turns: readonly TurnV1[], updatedAt: string): ThreadV1 { return parseThreadV1({ ...thread, ...patch, updatedAt, generation: thread.generation + 1, itemCount: Math.max(thread.itemCount, ...items.map(item => item.sequence), thread.itemCount), turnCount: Math.max(thread.turnCount, ...turns.map(turn => turn.turnSequence), thread.turnCount), lastItemSequence: Math.max(thread.lastItemSequence, ...items.map(item => item.sequence), thread.lastItemSequence) }); }
 function toSummary(thread: ThreadV1): ThreadSummaryProjection { return { threadId: thread.threadId, projectId: thread.projectId, title: thread.title, status: thread.status, createdAt: thread.createdAt, updatedAt: thread.updatedAt, revision: thread.generation, itemCount: thread.itemCount, turnCount: thread.turnCount, ...(thread.lastItemId ? { lastItemId: thread.lastItemId } : {}) }; }
 function canonicalJson(value: unknown): string { return JSON.stringify(sortValue(value)); }
@@ -569,7 +593,7 @@ async function readJson<T>(file: string): Promise<T | undefined> { try { return 
 async function safeStatSize(file: string): Promise<number> { try { return (await stat(file)).size; } catch (error) { if ((error as NodeJS.ErrnoException).code === 'ENOENT') return 0; throw error; } }
 async function exists(file: string): Promise<boolean> { try { await stat(file); return true; } catch { return false; } }
 async function directoryNames(directory: string): Promise<readonly string[]> { try { return (await import('node:fs/promises')).readdir(directory); } catch (error) { if ((error as NodeJS.ErrnoException).code === 'ENOENT') return []; throw error; } }
-async function generations(directory: string): Promise<readonly number[]> { return (await directoryNames(directory)).flatMap(name => { const match = /(?:commits|items|turns|turn_execution_links)-(\d+)-?/.exec(name); return match ? [Number(match[1])] : []; }).filter((value, index, values) => values.indexOf(value) === index).sort((left, right) => left - right); }
+async function generations(directory: string): Promise<readonly number[]> { return (await directoryNames(directory)).flatMap(name => { const match = /(?:commits|items|turns|turn_execution_links|projection_outboxes)-(\d+)-?/.exec(name); return match ? [Number(match[1])] : []; }).filter((value, index, values) => values.indexOf(value) === index).sort((left, right) => left - right); }
 async function previousRecordHash(file: string, committedBytes: number): Promise<string> { if (!committedBytes) return emptyHash; const text = await readFile(file, 'utf8'); const lines = text.slice(0, committedBytes).trimEnd().split('\n'); return String((JSON.parse(lines.at(-1)!) as { readonly recordHash?: string }).recordHash ?? emptyHash); }
 async function checksumRange(file: string, start: number, end: number): Promise<string> { const bytes = await readFile(file); return sha256Hex(new Uint8Array(bytes.subarray(start, end))); }
 async function parseJsonl<T>(file: string, parser: (value: unknown) => T): Promise<{ readonly records: readonly T[]; readonly lastCompleteOffset: number; readonly tailBytes: number; readonly nonTailCorrupt: boolean }> { const bytes = await readFile(file).catch(error => { if ((error as NodeJS.ErrnoException).code === 'ENOENT') return Buffer.alloc(0); throw error; }); const text = bytes.toString('utf8'); const lines = text.split('\n'); const records: T[] = []; let offset = 0; let lastCompleteOffset = 0; let nonTailCorrupt = false; for (let index = 0; index < lines.length; index += 1) { const raw = lines[index]!; const lineBytes = Buffer.byteLength(raw, 'utf8'); const complete = index < lines.length - 1; if (!raw && !complete) break; try { records.push(parser(JSON.parse(raw))); } catch { if (complete) nonTailCorrupt = true; break; } offset += lineBytes + (complete ? 1 : 0); if (complete) lastCompleteOffset = offset; } return { records, lastCompleteOffset, tailBytes: bytes.length - lastCompleteOffset, nonTailCorrupt }; }
@@ -577,5 +601,5 @@ async function inspectTail(file: string, committedBytes: number): Promise<{ read
 async function copyBytes(source: string, target: string, end: number): Promise<void> { const bytes = await readFile(source); await writeFile(target, bytes.subarray(end)); }
 async function truncateFile(file: string, length: number): Promise<void> { const handle = await open(file, 'r+'); await handle.truncate(length); await handle.sync(); await handle.close(); }
 function assertSafeThreadId(threadId: ThreadId): void { if (!/^[A-Za-z0-9][A-Za-z0-9._-]{0,190}$/.test(String(threadId)) || String(threadId) === '..') throw new Error('unsafe_thread_id'); }
-function segmentKindFromId(segmentId: string): ThreadSegmentKind { if (segmentId.startsWith('turns-')) return 'turn'; if (segmentId.startsWith('turn_execution_links-')) return 'turn_execution_link'; return 'item'; }
+function segmentKindFromId(segmentId: string): ThreadSegmentKind { if (segmentId.startsWith('turns-')) return 'turn'; if (segmentId.startsWith('turn_execution_links-')) return 'turn_execution_link'; if (segmentId.startsWith('projection_outboxes-')) return 'projection_outbox'; return 'item'; }
 function cryptoRandomId(): string { return `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 12)}`; }

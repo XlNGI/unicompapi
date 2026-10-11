@@ -19,7 +19,8 @@ import {
   type ThreadV1,
   type TurnExecutionLinkV1,
   type TurnId,
-  type TurnV1
+  type TurnV1,
+  type ThreadProjectionOutboxEventV1
 } from '../domain';
 import { projectArtifactItem } from './conversation-thread-adapter';
 
@@ -36,6 +37,7 @@ export interface ThreadProjectionRepository {
     readonly turns?: readonly TurnV1[];
     readonly items?: readonly ItemV1[];
     readonly executionLinks?: readonly TurnExecutionLinkV1[];
+    readonly projectionOutbox?: readonly ThreadProjectionOutboxEventV1[];
   }): Promise<{ readonly thread: ThreadV1; readonly alreadyCommitted: boolean }>;
 }
 
@@ -161,7 +163,8 @@ export class ThreadProjectionCoordinator {
       idempotencyKey: `thread-assistant:${input.assistantMessageId}:${input.messageRevision}`,
       occurredAt: input.updatedAt,
       expectedGeneration: thread.generation,
-      items: [item]
+      items: [item],
+      projectionOutbox: [projectionEvent(item, `thread-assistant:${input.assistantMessageId}:${input.messageRevision}`, input.updatedAt)]
     });
     if (!result.alreadyCommitted) return { thread: result.thread, item, alreadyCommitted: false };
     const committed = (await this.repository.readItems(threadId)).find(candidate => candidate.itemId.namespace === 'message' && candidate.itemId.value === input.assistantMessageId && candidate.messageSource?.messageRevision === input.messageRevision);
@@ -198,7 +201,8 @@ export class ThreadProjectionCoordinator {
       idempotencyKey: `thread-artifact:${threadId}:${input.workId}`,
       occurredAt: input.updatedAt,
       expectedGeneration: thread.generation,
-      items: [item]
+      items: [item],
+      projectionOutbox: [projectionEvent(item, `thread-artifact:${threadId}:${input.workId}`, input.updatedAt)]
     });
     if (!result.alreadyCommitted) return { thread: result.thread, item, alreadyCommitted: false };
     const committed = (await this.repository.readItems(threadId)).find(candidate =>
@@ -226,7 +230,8 @@ export class ThreadProjectionCoordinator {
       idempotencyKey: `thread-tool:${threadId}:${input.kind}:${input.toolCallId}`,
       occurredAt: input.updatedAt,
       expectedGeneration: thread.generation,
-      items: [projected]
+      items: [projected],
+      projectionOutbox: [projectionEvent(projected, `thread-tool:${threadId}:${input.kind}:${input.toolCallId}`, input.updatedAt)]
     });
     if (!result.alreadyCommitted) return { thread: result.thread, item: projected, alreadyCommitted: false };
     const committed = (await this.repository.readItems(threadId)).find(candidate =>
@@ -236,6 +241,19 @@ export class ThreadProjectionCoordinator {
     if (!committed) throw new Error('thread_tool_idempotency_record_missing');
     return { thread: result.thread, item: committed, alreadyCommitted: true };
   }
+}
+
+function projectionEvent(item: ItemV1, idempotencyKey: string, occurredAt: IsoTimestamp): ThreadProjectionOutboxEventV1 {
+  return {
+    schemaVersion: 1,
+    eventId: `thread-projection-${sha256Hex(JSON.stringify([item.threadId, item.itemId, idempotencyKey]))}`,
+    threadId: item.threadId,
+    eventType: 'item_upsert',
+    sequence: item.sequence,
+    idempotencyKey,
+    item,
+    occurredAt
+  };
 }
 
 function createToolProjectionItem(input: ProjectToolProjectionInput & { readonly threadId: ThreadId; readonly turnId: TurnId; readonly sequence: number }): ItemV1 {

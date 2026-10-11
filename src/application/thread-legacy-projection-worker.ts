@@ -1,0 +1,94 @@
+import {
+  addCompletedAssistantMessage,
+  addUserMessage,
+  createConversation,
+  toConversationId,
+  toIsoTimestamp,
+  toMessageId,
+  toThreadId,
+  type ProjectConversationRepository,
+  type ThreadProjectionOutboxEventV1,
+  type ThreadProjectionReceiptV1
+} from '../domain';
+import type { ThreadFileRepository } from '../platform/repositories/thread-file-repository';
+
+/**
+ * Replays only committed Thread transcript facts into the Legacy compatibility
+ * view. It never starts a Provider, Tool or Document operation.
+ */
+export class ThreadLegacyProjectionWorker {
+  constructor(
+    private readonly threads: ThreadFileRepository,
+    private readonly conversations: ProjectConversationRepository,
+    private readonly now: () => string = () => new Date().toISOString()
+  ) {}
+
+  async drain(threadId: string): Promise<{ readonly projected: number; readonly pending: number }> {
+    const typedThreadId = toThreadId(threadId);
+    const events = await this.threads.readProjectionOutbox(typedThreadId);
+    const receipts = new Set((await this.threads.readProjectionReceipts(typedThreadId)).map(item => item.eventId));
+    let projected = 0;
+    for (const event of events) {
+      if (receipts.has(event.eventId)) continue;
+      await this.project(event);
+      const receipt: ThreadProjectionReceiptV1 = {
+        schemaVersion: 1,
+        eventId: event.eventId,
+        threadId: event.threadId,
+        idempotencyKey: event.idempotencyKey,
+        projectedAt: toIsoTimestamp(this.now())
+      };
+      await this.threads.acknowledgeProjection(receipt);
+      projected += 1;
+      receipts.add(event.eventId);
+    }
+    return { projected, pending: events.filter(event => !receipts.has(event.eventId)).length };
+  }
+
+  private async project(event: ThreadProjectionOutboxEventV1): Promise<void> {
+    const item = event.item;
+    if (!item.messageSource || !['user_message', 'assistant_message'].includes(item.type)) return;
+    let conversation = await this.conversations.get(toConversationId(String(event.threadId)));
+    if (!conversation) {
+      const thread = await this.threads.getThread(event.threadId);
+      if (!thread) throw new Error('thread_not_found_for_legacy_projection');
+      conversation = createConversation({
+        id: toConversationId(String(event.threadId)),
+        projectId: thread.projectId,
+        title: thread.title,
+        createdAt: toIsoTimestamp(thread.createdAt)
+      });
+      await this.conversations.create(conversation);
+    }
+    const messageId = toMessageId(String(item.messageSource.messageId));
+    const existing = conversation.messages.find(message => message.id === messageId);
+    if (existing) {
+      if (existing.content !== (item.content ?? '') || existing.revision !== item.messageSource.messageRevision) {
+        throw new Error('legacy_projection_message_conflict');
+      }
+      return;
+    }
+    const updated = item.type === 'user_message'
+      ? addUserMessage(conversation, {
+          id: messageId,
+          content: item.content ?? '',
+          createdAt: toIsoTimestamp(item.createdAt)
+        })
+      : addCompletedAssistantMessage(conversation, {
+          id: messageId,
+          content: item.content ?? '',
+          createdAt: toIsoTimestamp(item.createdAt),
+          ...(workflowReply(item.legacyMessageSnapshot) ? { workflowReply: workflowReply(item.legacyMessageSnapshot)! } : {})
+        });
+    await this.conversations.save(updated, conversation.revision);
+  }
+}
+
+function workflowReply(snapshot: Readonly<Record<string, unknown>> | undefined): { readonly workflowId: string; readonly revision: number } | undefined {
+  const value = snapshot?.workflowReply;
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return undefined;
+  const record = value as Record<string, unknown>;
+  return typeof record.workflowId === 'string' && Number.isSafeInteger(record.revision)
+    ? { workflowId: record.workflowId, revision: Number(record.revision) }
+    : undefined;
+}

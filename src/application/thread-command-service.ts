@@ -6,13 +6,15 @@ import {
   toMessageId,
   toThreadId,
   toTurnId,
+  sha256Hex,
   type ItemV1,
   type IsoTimestamp,
   type ProjectId,
   type ThreadId,
   type ThreadV1,
   type TurnId,
-  type TurnV1
+  type TurnV1,
+  type ThreadProjectionOutboxEventV1
 } from '../domain';
 
 export interface ThreadCommandRepository {
@@ -28,6 +30,7 @@ export interface ThreadCommandRepository {
     readonly thread?: Partial<Pick<ThreadV1, 'title' | 'status' | 'lastItemId' | 'lastItemSequence' | 'itemCount' | 'turnCount' | 'generation'>>;
     readonly turns?: readonly TurnV1[];
     readonly items?: readonly ItemV1[];
+    readonly projectionOutbox?: readonly ThreadProjectionOutboxEventV1[];
   }): Promise<{ readonly thread: ThreadV1; readonly alreadyCommitted: boolean }>;
 }
 
@@ -100,13 +103,24 @@ export class ThreadCommandService {
       userItemId: item.itemId,
       provenance: 'native'
     });
+    const projectionEvent: ThreadProjectionOutboxEventV1 = {
+      schemaVersion: 1,
+      eventId: `thread-projection-${sha256Hex(JSON.stringify([threadId, item.itemId, input.clientCommandId]))}`,
+      threadId,
+      eventType: 'item_upsert',
+      sequence: item.sequence,
+      idempotencyKey: `legacy-item:${threadId}:${item.itemId.value}:${item.messageSource?.messageRevision ?? 0}`,
+      item,
+      occurredAt: input.createdAt
+    };
     const result = await this.repository.append({
       threadId,
       idempotencyKey: `thread-turn:${input.clientCommandId}`,
       occurredAt: input.createdAt,
       expectedGeneration: thread.generation,
       turns: [turn],
-      items: [item]
+      items: [item],
+      projectionOutbox: [projectionEvent]
     });
     if (!result.alreadyCommitted) return { thread: result.thread, turn, item, alreadyCommitted: false };
     const storedTurn = (await this.repository.readTurns(threadId)).find(candidate => candidate.turnId === turnId);

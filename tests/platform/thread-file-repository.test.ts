@@ -53,6 +53,26 @@ describe('ThreadFileRepository commit and recovery protocol', () => {
     expect(await readFile(path.join(root, 'entities', 'threads', String(threadId), 'manifest.v1.json'), 'utf8')).toContain('committedSequence');
   });
 
+  it('commits a projection Outbox atomically and acknowledges it idempotently', async () => {
+    const { repository } = await setup();
+    const { turn, item } = records(1);
+    const event = {
+      schemaVersion: 1 as const,
+      eventId: 'projection-event-1',
+      threadId,
+      eventType: 'item_upsert' as const,
+      sequence: item.sequence,
+      idempotencyKey: 'legacy-item:message-1',
+      item,
+      occurredAt: t1
+    };
+    await repository.append({ threadId, idempotencyKey: 'with-outbox', occurredAt: t1, turns: [turn], items: [item], projectionOutbox: [event] });
+    expect(await repository.readProjectionOutbox(threadId)).toEqual([event]);
+    await repository.acknowledgeProjection({ schemaVersion: 1, eventId: event.eventId, threadId, idempotencyKey: event.idempotencyKey, projectedAt: t1 });
+    await repository.acknowledgeProjection({ schemaVersion: 1, eventId: event.eventId, threadId, idempotencyKey: event.idempotencyKey, projectedAt: t1 });
+    expect((await repository.readProjectionReceipts(threadId)).map(item => item.eventId)).toEqual([event.eventId]);
+  });
+
   it('deduplicates the same idempotency key and rejects changed payloads', async () => {
     const { repository } = await setup();
     const { turn, item } = records(1);
