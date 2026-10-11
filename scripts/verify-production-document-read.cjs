@@ -250,6 +250,7 @@ async function inspectOutbound(request, domain, expectedModel) {
     const schema = domain.canonicalToolInputSchema(registry.get(expectedToolId));
     requireCondition(Array.isArray(payload.tools) && payload.tools.length === 1 &&
       payload.tools[0].type === 'function' && payload.tools[0].function?.name === expectedToolId &&
+      payload.tool_choice === 'required' &&
       JSON.stringify(payload.tools[0].function.parameters) === JSON.stringify(schema), 'generation_schema_not_canonical');
     const calls = [];
     const results = new Set();

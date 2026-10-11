@@ -93,6 +93,7 @@ export interface ConversationTextSubmissionRuntimes {
       readonly executionBudget?: HostExecutionBudget;
       readonly cancel?: () => Promise<void>;
       readonly prepareTools: (signal: AbortSignal) => Promise<readonly ControlledProviderToolDefinition[] | undefined>;
+      readonly providerToolChoice?: (tools: readonly ControlledProviderToolDefinition[] | undefined) => string | undefined;
       readonly bridge: ControlledProviderToolBridge;
       readonly close: () => Promise<void>;
     } | undefined>;
@@ -224,6 +225,7 @@ function wrapChatAdapter(input: {
     readonly beforeRequestStarted: () => Promise<void>;
     readonly toolBridge?: ControlledProviderToolBridge;
     readonly prepareTools?: (signal: AbortSignal) => Promise<readonly ControlledProviderToolDefinition[] | undefined>;
+    readonly providerToolChoice?: (tools: readonly ControlledProviderToolDefinition[] | undefined) => string | undefined;
     readonly maxToolRounds?: number;
     readonly signal?: AbortSignal;
     readonly executionBudget?: HostExecutionBudget;
@@ -310,6 +312,7 @@ function wrapChatAdapter(input: {
           signal: requestSignal,
           ...(lifecycle ? { executionLifecycle: lifecycle } : {}),
           ...(prepared?.executionBudget ? { executionBudget: prepared.executionBudget } : {}),
+          ...(prepared?.providerToolChoice ? { providerToolChoice: prepared.providerToolChoice } : {}),
           ...(prepared ? { toolBridge: prepared.bridge, prepareTools: prepared.prepareTools }
             : staticToolCalling ? { toolBridge: staticToolCalling.bridge, maxToolRounds: staticToolCalling.maxRounds } : {})
         });

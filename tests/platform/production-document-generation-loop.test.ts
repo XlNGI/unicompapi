@@ -510,6 +510,7 @@ describe('production NewAPI generation to verified-file read continuation', () =
       expect(data.requests[index].tools).toEqual([{ type: 'function', function: {
         name: contract.toolId, description: contract.description, parameters: canonicalToolInputSchema(contract)
       } }]);
+      expect(data.requests[index].tool_choice).toBe('required');
     }
     expect(data.requests[1].messages.filter(message => message.role === 'assistant').at(-1)?.tool_calls).toEqual([data.generationCall]);
     const final = data.requests[2];

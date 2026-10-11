@@ -315,6 +315,7 @@ export class NewApiChatAdapter {
     readonly signal?: AbortSignal;
     readonly toolBridge?: ControlledProviderToolBridge;
     readonly prepareTools?: (signal: AbortSignal) => Promise<readonly ControlledProviderToolDefinition[] | undefined>;
+    readonly providerToolChoice?: (tools: readonly ControlledProviderToolDefinition[] | undefined) => string | undefined;
     readonly maxToolRounds?: number;
     readonly executionBudget?: HostExecutionBudget;
     readonly executionLifecycle?: ProviderExecutionLifecyclePort;
@@ -410,6 +411,7 @@ export class NewApiChatAdapter {
       }
       const finalization = documentGenerationFinalization(input.toolBridge);
       if (finalization?.phase === 'final') tools = undefined;
+      const providerToolChoice = finalization?.phase === 'final' ? undefined : input.providerToolChoice?.(tools);
       const dispatchMessages: readonly NewApiChatMessageV1[] = finalization?.phase === 'final' ? [{
         role: 'system', content: 'The Host has finished the permitted document tools. Give one final explanation without calling any tool. ' +
           'Describe only these Host delivery facts and the verified tool observations: ' + JSON.stringify(finalization)
@@ -437,7 +439,7 @@ export class NewApiChatAdapter {
             count: Math.max(0, Date.now() - preparationStartedAt) } });
       };
       const body = serializeRequest(route, { ...request, messages: dispatchMessages, tools }, parameterSchema,
-        finalization?.phase === 'final');
+        finalization?.phase === 'final', providerToolChoice);
       await persistProviderExecutionBoundary(input.executionLifecycle && (() => input.executionLifecycle!.modelPrepared({
         round, requestHash: providerExecutionHash(body), messageCount: dispatchMessages.length, toolCount: request.nativeSearch ? 1 : tools?.length ?? 0
       })), input.executionBudget, externalController.signal);
@@ -1258,7 +1260,8 @@ function serializeRequest(
   route: ReturnType<typeof validateRoute>,
   request: NewApiChatDispatchRequestV1,
   schema: ParameterSchemaV2,
-  hostToolFreeFinalization = false
+  hostToolFreeFinalization = false,
+  providerToolChoice?: string
 ): Uint8Array {
   const parameters = validateParameterValues(schema, 'full', request.parameterValues);
   // UniCompAPI / OpenAI-compatible gateways accept temperature and top_p together.
@@ -1349,6 +1352,7 @@ function serializeRequest(
   if (!request.nativeSearch && typeof parameters.tool_choice === 'string' && parameters.tool_choice.trim()) {
     body.tool_choice = parameters.tool_choice.trim();
   }
+  if (providerToolChoice) body.tool_choice = providerToolChoice;
   if (typeof parameters.parallel_tool_calls === 'boolean') {
     body.parallel_tool_calls = parameters.parallel_tool_calls;
   }

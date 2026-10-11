@@ -105,6 +105,7 @@ export type ConversationDocumentToolSelection = ConversationDocumentReadToolSele
 export interface ConversationDocumentToolSession {
   readonly executionBudget?: HostExecutionBudget;
   prepareTools(signal: AbortSignal): Promise<readonly ControlledProviderToolDefinition[] | undefined>;
+  readonly providerToolChoice?: (tools: readonly ControlledProviderToolDefinition[] | undefined) => string | undefined;
   readonly bridge: DocumentFinalizationToolBridge;
   cancel?(): Promise<void>;
   close(): Promise<void>;
@@ -604,6 +605,7 @@ export class ConversationDocumentToolSessionService implements ConversationDocum
       }] });
     const session: ConversationDocumentToolSession = {
       executionBudget,
+      providerToolChoice: tools => tools?.length === 1 ? 'required' : undefined,
       prepareTools: async signal => {
         if (!await executionBudget.run('prepare', child => prepareWithinDeadline(AbortSignal.any([signal, child])), contract.execution.timeoutMs)) {
           // Subsequent requests already carry tool messages. Removing tools
@@ -895,6 +897,7 @@ export class ConversationDocumentToolSessionService implements ConversationDocum
       ] });
     const session: ConversationDocumentToolSession = {
       executionBudget,
+      providerToolChoice: tools => tools?.length === 1 ? 'required' : undefined,
       prepareTools: async signal => {
         try {
           if (!await executionBudget.run('prepare', child => refresh(AbortSignal.any([signal, child])), 30_000)) {
@@ -1126,6 +1129,7 @@ export class ConversationDocumentToolSessionService implements ConversationDocum
       ] });
     const session: ConversationDocumentToolSession = {
       executionBudget,
+      providerToolChoice: tools => tools?.length === 1 ? 'required' : undefined,
       prepareTools: async signal => {
         if (!await prepareWithinDeadline(signal)) {
           if (!input.combined && generatedWorkId && !signal.aborted && !controller.signal.aborted && !closed) readBackUnavailable = true;
@@ -1199,6 +1203,9 @@ export class ConversationDocumentToolSessionService implements ConversationDocum
     let generationPublished = false;
     const session: ConversationDocumentToolSession = {
       executionBudget: generation.executionBudget,
+      providerToolChoice: tools => !mutation && generation.providerToolChoice
+        ? generation.providerToolChoice(tools)
+        : undefined,
       prepareTools: async signal => {
         const generationDefinitions = await generation.prepareTools(signal) ?? [];
         const mutationDefinitions = mutation ? await mutation.prepareTools(signal) ?? [] : [];

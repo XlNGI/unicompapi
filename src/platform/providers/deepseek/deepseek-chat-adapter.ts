@@ -286,6 +286,7 @@ export class DeepSeekChatAdapter {
     readonly signal?: AbortSignal;
     readonly toolBridge?: ControlledProviderToolBridge;
     readonly prepareTools?: (signal: AbortSignal) => Promise<readonly ControlledProviderToolDefinition[] | undefined>;
+    readonly providerToolChoice?: (tools: readonly ControlledProviderToolDefinition[] | undefined) => string | undefined;
     readonly maxToolRounds?: number;
     readonly executionBudget?: HostExecutionBudget;
     readonly executionLifecycle?: ProviderExecutionLifecyclePort;
@@ -342,6 +343,7 @@ export class DeepSeekChatAdapter {
           continuation ? 15_000 : 60_000, input.executionBudget) : request.tools);
       const finalization = documentGenerationFinalization(input.toolBridge);
       if (finalization?.phase === 'final') tools = undefined;
+      const providerToolChoice = finalization?.phase === 'final' ? undefined : input.providerToolChoice?.(tools);
       const dispatchMessages: readonly DeepSeekChatMessageV1[] = finalization?.phase === 'final' ? [{
         role: 'system', content: 'The Host has finished the permitted document tools. Give one final explanation without calling any tool. ' +
           'Describe only these Host delivery facts and the verified tool observations: ' + JSON.stringify(finalization)
@@ -363,7 +365,7 @@ export class DeepSeekChatAdapter {
         if (externalController.signal.aborted) throw new DeepSeekRuntimeError('cancelled', 'not_retryable');
         modelDispatchStarted = true;
       };
-      const body = serializeRequest(route, { ...request, messages: dispatchMessages, tools }, finalization?.phase === 'final');
+      const body = serializeRequest(route, { ...request, messages: dispatchMessages, tools }, finalization?.phase === 'final', providerToolChoice);
       await persistProviderExecutionBoundary(input.executionLifecycle && (() => input.executionLifecycle!.modelPrepared({
         round, requestHash: providerExecutionHash(body), messageCount: dispatchMessages.length, toolCount: tools?.length ?? 0
       })), input.executionBudget, externalController.signal);
@@ -1081,7 +1083,8 @@ function parseDispatchRequest(value: unknown): DeepSeekChatDispatchRequestV1 {
 function serializeRequest(
   route: ReturnType<typeof validateRoute>,
   request: DeepSeekChatDispatchRequestV1,
-  hostToolFreeFinalization = false
+  hostToolFreeFinalization = false,
+  providerToolChoice?: string
 ): Uint8Array {
   const schema = route.productFeature === 'text_chat'
     ? deepSeekChatParameterSchema
@@ -1110,6 +1113,7 @@ function serializeRequest(
     type: tool.type,
     function: { name: tool.function.name, description: tool.function.description, parameters: tool.function.parameters }
   }));
+  if (providerToolChoice) body.tool_choice = providerToolChoice;
   if (hostToolFreeFinalization) { delete body.tools; body.tool_choice = 'none'; }
   const encoded = new TextEncoder().encode(JSON.stringify(body));
   if (encoded.byteLength > 2 * 1024 * 1024) {
