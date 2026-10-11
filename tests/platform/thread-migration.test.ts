@@ -103,6 +103,22 @@ describe('Legacy Thread migration and Shadow Read', () => {
     } finally { await rm(root, { recursive: true, force: true }); }
   });
 
+  it('does not replay a changed Legacy snapshot and lets Shadow Compare block the missing projection', async () => {
+    const root = await mkdtemp(path.join(os.tmpdir(), 'unicomp-thread-migration-changed-source-'));
+    try {
+      const conversation = legacyConversation();
+      const repository = new ThreadFileRepository(root);
+      const migration = new LegacyThreadMigration(root, repository, { migrationId: 'changed-source-test' });
+      await migration.migrate([{ conversation }]);
+      const changed = addUserMessage(conversation, { id: toMessageId('legacy-user-3'), content: 'new request', createdAt: t1 });
+      const retry = await migration.migrate([{ conversation: changed }]);
+      expect(retry.skipped).toBe(1);
+      expect((await repository.readItems(toThreadId(conversation.id))).length).toBe(conversation.messages.length);
+      const shadow = await migration.shadowCompare([{ conversation: changed }]);
+      expect(shadow.differences.some(item => item.kind === 'item_count_mismatch')).toBe(true);
+    } finally { await rm(root, { recursive: true, force: true }); }
+  });
+
   it('blocks readiness for active executions, missing backup or shadow differences', async () => {
     const root = await mkdtemp(path.join(os.tmpdir(), 'unicomp-thread-fence-'));
     try {
