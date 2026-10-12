@@ -35,6 +35,8 @@ import type { ConversationAgentSessionDto, StartResponseRequest } from '../../sr
 import { ThreadFileRepository } from '../../src/platform/repositories/thread-file-repository';
 import { toThreadId } from '../../src/domain';
 import { ThreadLegacyProjectionWorker } from '../../src/application/thread-legacy-projection-worker';
+import { ThreadModelHistorySource } from '../../src/platform/repositories/thread-model-history-source';
+import { conversationToThreadProjection } from '../../src/application/conversation-thread-adapter';
 
 const projectId = toProjectId('project-r45-production');
 const timestamp = toIsoTimestamp('2026-10-04T00:00:00.000Z');
@@ -273,6 +275,32 @@ describe('R04/R05 production Host continuation boundary', () => {
     f.setTime(original.budget.deadlineAt);
     return { original: unbound, child, responseId };
   }
+  it.each(['valid', 'changed', 'unavailable'] as const)('uses committed Thread input pins under the recovery metadata CAS: %s', async mode => {
+    const f = await fixture(), crash = await seedBindingCrash(f, false);
+    const conversation = (await f.conversations.get(f.conversation.id))!;
+    const projection = conversationToThreadProjection(conversation);
+    const source = new ThreadModelHistorySource({ getThread: async () => mode === 'unavailable' ? undefined : projection.thread,
+      readItems: async () => projection.items.map(item => mode === 'changed' && item.type === 'user_message'
+        ? { ...item, content: 'changed input', legacyMessageSnapshot: { ...item.legacyMessageSnapshot, content: 'changed input' } } : item) }, projectId);
+    const read = f.storage.readJsonWithBackup.bind(f.storage);
+    const legacyRead = vi.spyOn(f.storage, 'readJsonWithBackup').mockImplementation((async (location: Parameters<typeof read>[0], parser: Parameters<typeof read>[1]) => {
+      if (location === projectStoragePaths.entities.conversations) throw new Error('Legacy identity read denied');
+      return read(location, parser);
+    }) as typeof f.storage.readJsonWithBackup);
+    const repository = new JsonConversationAgentSessionRepository(f.storage, projectId, f.at, { get: id => source.getConversation(id) });
+    const input = { sessionId: crash.original.id, runId: crash.child.id, responseExecutionId: crash.responseId,
+      expectedRevision: crash.original.revision, expectedLeaseEpoch: crash.original.leaseEpoch };
+    if (mode === 'valid') {
+      const bound = await repository.recordVerifiedResponseBinding(input);
+      expect(bound.childSegments[1].responseExecutionId).toBe(crash.responseId);
+    } else {
+      await expect(repository.recordVerifiedResponseBinding(input)).rejects.toThrow(mode === 'changed' ? 'source pin changed' : 'storage_reconciliation');
+      expect((await repository.get(crash.original.id))?.revision).toBe(crash.original.revision);
+    }
+    expect(legacyRead.mock.calls.some(([location]) => location === projectStoragePaths.entities.conversations)).toBe(false);
+    expect(f.requests).toHaveLength(0);
+    legacyRead.mockRestore();
+  });
   async function seedAuthorizationClaim(f: Awaited<ReturnType<typeof fixture>>, responseId: string, started = false) {
     const response = (await f.executions.get(toConversationResponseExecutionId(responseId)))!;
     const claimId = 'authorization-binding-crash', candidate = response.snapshot.candidate;

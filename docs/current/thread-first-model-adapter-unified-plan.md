@@ -4,6 +4,8 @@
 
 ## 2026-10-12 维护事实复核
 
+`53fcba0` 后的本地维护已将授权/引用、Document Tool 重验、Continuation 预算/重放/恢复绑定和 Workflow/联网确认本地回复接到完整 Thread DTO 与 Commit/Outbox。新增隔离回归证明 Legacy message save 持续失败时仍可只生成一次并完成读回、唯一 Work 与 Thread 收据。恢复直接写入、独立 Office、通用会话 CRUD 和部分 Context 兼容路径仍待迁移；最新验收数量见 PLANS 顶部和源码审计，不将本批视为整体目标全量完成。
+
 后续实际收敛：Thread 读取只消费 manifest 已提交字节；Thread 写模式普通回复的 pending/stream/终态和正式 PPT Assistant 收据先进入 Thread Commit/Outbox，Legacy 故障可独立重放。剩余恢复/授权/Workflow/其他 Office 与 Capability 接线沿当前源码审计继续，未标记全部完成。
 
 兼容 `responses.start` Tool/Artifact 已从现有 Document Runtime 接入 Thread 投影并通过隔离 Mock 验收；跨 Response 重复 stepRef 不再共用 Tool Item。候选和选型令牌新增相关能力证据状态/指纹重验，Legacy Task 历史 evidence 合同保留，费用仍 unknown。最新事实见源码审计和 PLANS 顶部。

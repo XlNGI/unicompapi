@@ -24,6 +24,25 @@ function fixture() {
 }
 
 describe('Thread model history authority', () => {
+  it('retains pinned attachment and display metadata from native User Items before Legacy projection', async () => {
+    const { conversation, projection } = fixture();
+    const user = conversation.messages[0];
+    const items = projection.items.map(item => item.type === 'user_message' ? { ...item,
+      legacyMessageSnapshot: { attachments: user.attachments, displayContent: user.displayContent } } : item);
+    const source = new ThreadModelHistorySource({ getThread: async () => projection.thread, readItems: async () => items }, projectId);
+    expect((await source.getConversation(conversation.id))?.messages[0]).toEqual(user);
+  });
+  it('uses one committed transcript boundary for both revision and input content', async () => {
+    const { projection } = fixture();
+    const threads = { getThread: vi.fn(async () => { throw new Error('split identity read'); }),
+      readItems: vi.fn(async () => { throw new Error('split item read'); }),
+      readTranscript: vi.fn(async () => ({ thread: projection.thread, items: projection.items })) };
+    const result = await new ThreadModelHistorySource(threads, projectId).getConversation(toConversationId(projection.thread.threadId));
+    expect(result).toMatchObject({ revision: projection.thread.generation, messages: [{ content: '真实历史事实' }, { content: '已保存回复' }] });
+    expect(threads.readTranscript).toHaveBeenCalledTimes(1);
+    expect(threads.getThread).not.toHaveBeenCalled();
+    expect(threads.readItems).not.toHaveBeenCalled();
+  });
   it('reads complete committed messages and metadata without consulting a stale Legacy projection or UI page', async () => {
     const { conversation, projection } = fixture();
     const fallback = { getConversation: vi.fn(async () => conversation) };

@@ -74,7 +74,7 @@ import type { ConversationDocumentToolSelection, ConversationDocumentToolSession
 export interface ConversationResponseControllerRuntime {
   readonly nativeSearch?: ConversationNativeSearch;
   readonly conversationService: ConversationApplicationService;
-  readonly conversations: ProjectConversationRepository;
+  readonly conversations: Pick<ProjectConversationRepository, 'projectId' | 'get'>;
   readonly drafts: ConversationResponseDraftRepository;
   readonly contexts: ProjectContextRepository;
   readonly candidates: ProviderFeatureCandidateService;
@@ -623,12 +623,12 @@ export class ConversationResponseController {
         title: input.title,
         messageId,
         content: input.content,
-        ...(attachments ? { legacyMessageSnapshot: { attachments, ...(input.displayContent !== undefined ? { displayContent: input.displayContent } : {}) } } : {}),
+        ...((attachments || input.displayContent !== undefined) ? { legacyMessageSnapshot: { ...(attachments ? { attachments } : {}), ...(input.displayContent !== undefined ? { displayContent: input.displayContent } : {}) } } : {}),
         createdAt: toIsoTimestamp(this.now()),
         clientCommandId: input.clientCommandId
       }));
       preacceptedThreadTurn = true;
-      await step(() => runtime.legacyProjection?.drain(String(conversationId)) ?? Promise.resolve({ projected: 0, pending: 0 }));
+      await step(() => this.drainLegacyProjection(runtime, String(conversationId)));
       conversation = await step(() => runtime.conversationService.get(conversationId));
     } else {
       conversation = await step(() => runtime.conversationService.create({
@@ -671,10 +671,11 @@ export class ConversationResponseController {
           title: conversation.title,
           messageId,
           content: input.content,
+          ...((attachments || input.displayContent !== undefined) ? { legacyMessageSnapshot: { ...(attachments ? { attachments } : {}), ...(input.displayContent !== undefined ? { displayContent: input.displayContent } : {}) } } : {}),
           createdAt: toIsoTimestamp(this.now()),
           clientCommandId: input.clientCommandId
         }));
-        await step(() => runtime.legacyProjection?.drain(String(conversation.id)) ?? Promise.resolve({ projected: 0, pending: 0 }));
+        await step(() => this.drainLegacyProjection(runtime, String(conversation.id)));
         preacceptedThreadTurn = true;
         conversation = await step(() => runtime.conversationService.get(conversation.id));
       } else {
@@ -806,7 +807,7 @@ export class ConversationResponseController {
       const disclosure = localSources
         ? '已检索到本地资料，本次优先使用本地资料制作，不联网搜索；最新公开信息未联网核实。'
         : '本次制作不联网搜索，将依据当前需求、可用资料和模型已有知识生成内容；最新数据、政策等信息未联网核实。';
-      conversation = await step(() => runtime.turnCoordinator && runtime.legacyProjection ? runtime.conversationService.ensureLocalReply(conversation.id,
+      conversation = await step(() => !runtime.conversationService.writesTranscript && runtime.turnCoordinator && runtime.legacyProjection ? runtime.conversationService.ensureLocalReply(conversation.id,
         `sources-${workflow!.id}-${workflow!.revision}`, disclosure, { beforeSave: async message => {
           await runtime.turnCoordinator!.projectAssistantMessage({
             threadId: conversation.id,
@@ -1044,6 +1045,14 @@ export class ConversationResponseController {
       throw error;
     } finally { removeStartedCancellation?.(); }
     });
+  }
+
+  private async drainLegacyProjection(runtime: ConversationResponseControllerRuntime, conversationId: string): Promise<void> {
+    try { await runtime.legacyProjection?.drain(conversationId); }
+    catch (error) {
+      if (!runtime.conversationService.writesTranscript) throw error;
+      this.dependencies.onError?.(error);
+    }
   }
 
   private async requireReadyWorkflow(

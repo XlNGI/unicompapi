@@ -53,15 +53,24 @@ export interface ConversationIdFactory {
   nextMessageId(): MessageId;
 }
 
+/** Committed transcript facts and Host-only Assistant publication. */
+export interface ConversationTranscriptPort {
+  get(conversationId: ConversationId): Promise<Conversation | undefined>;
+  publishAssistant(input: { readonly conversationId: ConversationId; readonly sourceMessageId: MessageId; readonly message: Message }): Promise<void>;
+  publishUser?(input: { readonly conversation: Conversation; readonly message: Message; readonly clientCommandId: string }): Promise<void>;
+}
+
 export class ConversationApplicationService {
   constructor(
     private readonly repository: ConversationRepository,
     private readonly ids: ConversationIdFactory,
-    private readonly now: () => string = () => new Date().toISOString()
+    private readonly now: () => string = () => new Date().toISOString(),
+    private readonly transcript?: ConversationTranscriptPort
   ) {}
 
   nextConversationId(): ConversationId { return this.ids.nextConversationId(); }
   nextMessageId(): MessageId { return this.ids.nextMessageId(); }
+  get writesTranscript(): boolean { return this.transcript !== undefined; }
 
   async create(input: {
     readonly title: string;
@@ -79,11 +88,16 @@ export class ConversationApplicationService {
   }
 
   async get(conversationId: ConversationId): Promise<Conversation> {
+    if (this.transcript) {
+      const conversation = await this.transcript.get(conversationId);
+      if (!conversation) throw new ConversationApplicationError('conversation_not_found', 'Conversation does not exist');
+      return conversation;
+    }
     return this.requireConversation(conversationId);
   }
 
   async ensureWorkflowReply(workflow: ConversationWorkflowV1, options?: { readonly beforeSave?: (message: Message) => Promise<void> }): Promise<Conversation> {
-    const conversation = await this.requireConversation(workflow.conversationId);
+    const conversation = await this.get(workflow.conversationId);
     const content = conversationWorkflowReply(workflow, conversation);
     if (!content || conversation.status !== 'active' || conversation.messages.some((message) =>
       message.workflowReply?.workflowId === workflow.id && message.workflowReply.revision >= workflow.revision)) return conversation;
@@ -93,18 +107,28 @@ export class ConversationApplicationService {
       createdAt: toIsoTimestamp(this.now())
     });
     await options?.beforeSave?.(updated.messages.at(-1)!);
+    if (this.transcript) {
+      await this.transcript.publishAssistant({ conversationId: conversation.id, sourceMessageId: workflow.sourceMessageId, message: updated.messages.at(-1)! });
+      return this.get(conversation.id);
+    }
     await this.repository.save(updated, conversation.revision);
     return updated;
   }
 
   async ensureLocalReply(conversationId: ConversationId, key: string, content: string, options?: { readonly beforeSave?: (message: Message) => Promise<void> }): Promise<Conversation> {
-    const conversation = await this.requireConversation(conversationId);
+    const conversation = await this.get(conversationId);
     if (conversation.messages.some(message => message.workflowReply?.workflowId === key)) return conversation;
     const updated = addCompletedAssistantMessage(conversation, {
       id: this.ids.nextMessageId(), content, workflowReply: { workflowId: key, revision: 0 },
       createdAt: toIsoTimestamp(this.now())
     });
     await options?.beforeSave?.(updated.messages.at(-1)!);
+    if (this.transcript) {
+      const source = [...conversation.messages].reverse().find(message => message.role === 'user' && message.state === 'completed');
+      if (!source) throw new ConversationApplicationError('conversation_not_found', 'Reply source is unavailable');
+      await this.transcript.publishAssistant({ conversationId, sourceMessageId: source.id, message: updated.messages.at(-1)! });
+      return this.get(conversationId);
+    }
     await this.repository.save(updated, conversation.revision);
     return updated;
   }
@@ -157,7 +181,19 @@ export class ConversationApplicationService {
     readonly displayContent?: string;
     readonly attachments?: readonly ConversationAttachmentReference[];
     readonly messageId?: MessageId;
+    readonly clientCommandId?: string;
   }): Promise<Conversation> {
+    if (this.transcript) {
+      if (!this.transcript.publishUser) throw new Error('thread_user_publication_unavailable');
+      const conversation = await this.get(input.conversationId);
+      assertRevision(conversation, input.expectedRevision);
+      const updated = addUserMessage(conversation, { id: input.messageId ?? this.ids.nextMessageId(), content: input.content,
+        ...(input.attachments ? { attachments: input.attachments } : {}),
+        ...(input.displayContent !== undefined ? { displayContent: input.displayContent } : {}), createdAt: toIsoTimestamp(this.now()) });
+      const message = updated.messages.at(-1)!;
+      await this.transcript.publishUser({ conversation, message, clientCommandId: input.clientCommandId ?? `local-message:${message.id}` });
+      return this.get(conversation.id);
+    }
     return this.update(input, (conversation) =>
       addUserMessage(conversation, {
         id: input.messageId ?? this.ids.nextMessageId(),

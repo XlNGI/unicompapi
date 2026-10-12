@@ -160,7 +160,7 @@ export class ConversationDocumentToolSessionService implements ConversationDocum
   constructor(private readonly options: {
     readonly rootDirectory: string;
     readonly projectId: ProjectId;
-  readonly conversations: ProjectConversationRepository;
+    readonly conversations: Pick<ProjectConversationRepository, 'projectId' | 'get'>;
     readonly getCurrentProjectId?: () => ProjectId | undefined;
     /** Host-owned session policy; never populated from Provider or tool arguments. */
     readonly getInheritedExecutionContext?: (responseExecutionId: string) => Promise<{

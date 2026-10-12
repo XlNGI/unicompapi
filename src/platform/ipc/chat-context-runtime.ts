@@ -325,12 +325,39 @@ export function createChatContextRuntime(
           new JsonWorkRepository(storage, session.projectId)
         )
       : undefined;
-    const modelHistory = contextThreadRepository
-      ? new ModelHistoryReader(new ThreadModelHistorySource(contextThreadRepository, session.projectId,
-          dependencies.threadFileWriteEnabled ? undefined : { getConversation: id => projectConversations.get(id) }))
+    const threadConversationSource = contextThreadRepository
+      ? new ThreadModelHistorySource(contextThreadRepository, session.projectId,
+          dependencies.threadFileWriteEnabled ? undefined : { getConversation: id => projectConversations.get(id) })
       : undefined;
+    const modelHistory = threadConversationSource ? new ModelHistoryReader(threadConversationSource) : undefined;
+    const conversationFacts = dependencies.threadFileWriteEnabled && threadConversationSource
+      ? { projectId: session.projectId, get: (id: Parameters<typeof projectConversations.get>[0]) => threadConversationSource.getConversation(id) }
+      : projectConversations;
+    const transcriptService = dependencies.threadFileWriteEnabled
+      ? new ConversationApplicationService(projectConversations, conversationIds, now, {
+          get: id => conversationFacts.get(id),
+          publishUser: async ({ conversation, message, clientCommandId }) => {
+            if (!turnCoordinatorForContinuation) throw new Error('thread_turn_coordinator_unavailable');
+            await turnCoordinatorForContinuation.acceptUserTurn({ threadId: conversation.id, projectId: session.projectId,
+              title: conversation.title, messageId: message.id, messageRevision: message.revision, content: message.content,
+              createdAt: message.createdAt, clientCommandId, legacyMessageSnapshot: message as unknown as Readonly<Record<string, unknown>> });
+            await legacyProjection!.drain(conversation.id).catch(error => dependencies.onError?.(error));
+          },
+          publishAssistant: async ({ conversationId, sourceMessageId, message }) => {
+            if (!turnCoordinatorForContinuation) throw new Error('thread_local_projection_unavailable');
+            await turnCoordinatorForContinuation.projectAssistantMessage({
+              threadId: conversationId, sourceMessageId, assistantMessageId: message.id,
+              messageRevision: message.revision, status: 'completed', content: message.content,
+              createdAt: message.createdAt, updatedAt: message.updatedAt,
+              legacyMessageSnapshot: message as unknown as Readonly<Record<string, unknown>>
+            });
+            await legacyProjection!.drain(conversationId).catch(error => dependencies.onError?.(error));
+          }
+        })
+      : service;
     const ownedRunsByResponse = new Map<string, ConversationAgentRunId>();
-    const sessions = new JsonConversationAgentSessionRepository(storage, session.projectId, executionTimestamp);
+    const sessions = new JsonConversationAgentSessionRepository(storage, session.projectId, executionTimestamp,
+      dependencies.threadFileWriteEnabled ? conversationFacts : undefined);
     let continuationRuntime: ConversationAgentContinuationRuntime;
     let turnCoordinatorForContinuation: ConversationTurnCoordinator | undefined;
     const sessionService = new ConversationAgentSessionService({ repository: sessions, ownerId: sessionOwnerId,
@@ -377,7 +404,7 @@ export function createChatContextRuntime(
     });
     const mutationRenderer = createConfiguredOfficeRenderAdapter();
     const documentTools = new ConversationDocumentToolSessionService({
-      rootDirectory: session.rootDirectory, projectId: session.projectId, conversations: projectConversations,
+      rootDirectory: session.rootDirectory, projectId: session.projectId, conversations: conversationFacts,
       getInheritedExecutionContext: id => continuationRuntime.executionContext(id),
       ...(classifier ? { artDirectionPlanner: async (request) => {
         const active = dependencies.getSession();
@@ -451,10 +478,10 @@ export function createChatContextRuntime(
       },
       now
     );
-    const nativeSearch = new ConversationNativeSearch(storage, providerRegistry, service, now, retrieval);
+    const nativeSearch = new ConversationNativeSearch(storage, providerRegistry, transcriptService, now, retrieval);
     const candidateService = new ProviderFeatureCandidateService(
       new ProjectConversationResponseSubjectResolver(
-        projectConversations,
+        conversationFacts,
         responseDrafts,
         contextRepository,
         documentPages,
@@ -493,11 +520,11 @@ export function createChatContextRuntime(
     const executionCoordinator = new ConversationExecutionCoordinator();
     const ownedResponseIds = new Set<string>();
     continuationRuntime = new ConversationAgentContinuationRuntime({ storage, projectId: session.projectId, sessions, sessionService,
-      agentRuns, conversations: service, now: executionTimestamp, classifier, supportsGeneration: true, supportsMutation: Boolean(mutationRenderer),
+      agentRuns, conversations: transcriptService, now: executionTimestamp, classifier, supportsGeneration: true, supportsMutation: Boolean(mutationRenderer),
       isCurrent: () => { const active = dependencies.getSession(); return active?.projectId === session.projectId && active.rootDirectory === session.rootDirectory; },
       replayExecution: async id => {
         const execution = await responseLifecycle.readModel(toConversationResponseExecutionId(id));
-        return { execution, conversation: { ...toConversationDto(await service.get(toConversationId(execution.conversationId))),
+        return { execution, conversation: { ...toConversationDto(await transcriptService.get(toConversationId(execution.conversationId))),
           agentSessions: await continuationRuntime.list(execution.conversationId) } };
       },
       cancelExecution: async id => { await executionCoordinator.cancel(toConversationResponseExecutionId(id)); },
@@ -1084,8 +1111,8 @@ export function createChatContextRuntime(
       };
     }
     const responses: ConversationResponseControllerRuntime = {
-      conversationService: service,
-      conversations: projectConversations,
+      conversationService: transcriptService,
+      conversations: conversationFacts,
       drafts: responseDrafts,
       contexts: contextRepository,
       candidates: candidateService,
@@ -1123,7 +1150,7 @@ export function createChatContextRuntime(
       const startupSignals = new Map<string, AbortSignal>();
       const artifacts = new ConversationResponseArtifactFactory({
         nativeSearch,
-        conversations: projectConversations,
+        conversations: { projectId: session.projectId, get: id => conversationFacts.get(id), save: (value, revision) => projectConversations.save(value, revision) },
         threadFirst: Boolean(turnCoordinator),
         ...(modelHistory ? { modelHistory } : {}),
         drafts: responseDrafts,
@@ -1426,11 +1453,7 @@ export function createChatContextRuntime(
       attachments,
       documentTools,
       webResearch: {
-        conversationService: new ConversationApplicationService(
-          projectConversations,
-          conversationIds,
-          now
-        ),
+        conversationService: transcriptService,
         workflowService,
         research: webResearchService,
         nativeSearch,
@@ -1617,11 +1640,7 @@ export function createChatContextRuntime(
     getRuntime(session): ConversationWorkflowControllerRuntime {
       const runtime = getProjectRuntime(session);
       return {
-        conversationService: new ConversationApplicationService(
-          runtime.conversationRepository,
-          conversationIds,
-          now
-        ),
+        conversationService: runtime.responses.conversationService,
         workflowService: runtime.workflowService,
         turnCoordinator: runtime.responses.turnCoordinator,
         legacyProjection: runtime.responses.legacyProjection,

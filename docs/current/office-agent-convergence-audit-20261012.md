@@ -32,6 +32,20 @@ Thread 写模式已将 pending Assistant 与流式正文/推理/终态改为先�
 
 模型证据接线追加：新候选使用 Feature Contract 对应的最新模型能力证据，unsupported/unknown 等不再被 verified Profile 掩盖；相关证据完整指纹进入现有选型令牌绑定，证据变更后重验拒绝旧令牌。Profile 引用和会话图片能力证据同时参与绑定，参数/费用来源不变，公开 DTO 不含证据字段。历史 Task 旧 capabilityEvidenceId 继续按 immutable 合同路由；不把这条兼容合同未迁移误报成统一 Route 已全部完成。
 
+## 授权、引用与本地回复后续收敛（2026-10-12，基线 `53fcba0`）
+
+Thread 写模式新增组合层 `conversationFacts`，复用现有完整 Thread DTO Reader。Response Controller/Draft、Subject Resolver、Artifact Factory、Document Tool Session 的选定/准备/执行重验、Continuation 引用/初始预算/重放，以及 Workflow 和联网确认读取同一已提交会话。工具仍从 Work/File/Hash 与现有授权绑定确认正式文件；模型历史不取得文件或权限决定权。Artifact Factory 同时明确核对项目、会话、Draft/User 身份与版本。
+
+`ThreadFileRepository.readTranscript()` 在跨实例共享 Thread 写锁内读取元数据和 manifest 已提交 Item 前缀，避免授权 revision 和消息来自不同提交。完整 snapshot 继续严格解析；原生 User Item 合法的附件/displayContent 简写按受控字段恢复，并保留显式附件选择语义；损坏、越界或缺少权威 Thread 不回退 Legacy。
+
+Application Service 增加可注入的 transcript 端口：本地澄清、Workflow、来源/搜索说明及联网确认 User 回复通过既有 Coordinator/Commit/Outbox 发布；消息 snapshot 保留 workflowReply 幂等标记。Workflow 已有会话的追问也先提交 Thread；Legacy 保存失败只记 Outbox 欠账，恢复投影不增加消息或重发工具。联网授权仍要求当前问题、显式回复、版本、模型/范围与有效期，过期快照不能授权；本批测试仅生成和消费本地授权合同，没有联网调用。
+
+Continuation 重新读取会话后校验 pinned User、项目与状态；恢复器的 `recordVerifiedResponseBinding` 在原 metadata CAS 内读取提交后的 Thread 引用，不再要求 Legacy 投影存在，主 Run/Response WAL、租约、Hash 和预算门禁保留。仅显式 Legacy 回滚模式继续原主文件校验。
+
+隔离 composed Host 复现先得到 `message_not_completed`；修复后所有 Legacy message save 持续拒绝时，Agent 仍只生成一次、读回物理 PPT、登记一个 Work，父任务 completed，Thread 有两组 Call/Result 和正式 Assistant 收据，Legacy 仍为空。其余新增回归覆盖 Thread-only 澄清与续接、引用变更拒绝、已有 PPT 收据的预算、Workflow 回复/重放和联网确认过期快照。本批实际门禁和最终数量以 PLANS 顶部及 `docs/evidence/thread-authorization-convergence-20261012.json` 为准。
+
+尚未完成：启动/中断恢复和 DocumentGeneration 独立 Office 路径仍有直接 Legacy 写入；通用 Conversation CRUD、Context Registry 和部分兼容读取也未在本批统一。Thread 元数据投影债务仍由原恢复协议处理，新增快照读取不替代恢复器。不将本批记为唯一会话事实源已全量达成，也不将离线 Transport 记为真实外部 Provider 通过。
+
 ## 真实 Provider 证据及限制
 
 负责人授权最近成功且仍有效文本模型，一个合成隔离 PPT 生成/读回用例：最多 5 次请求，外层每次最多 1024 输出 token，Art Direction 最多 4096，自动重试 0。实际选中 `kimi-k3`，2 次请求，Content Planning 与 Art Direction 均 HTTP 200，费用无可靠价格证据记 `unknown`。
@@ -46,16 +60,16 @@ Thread 写模式已将 pending Assistant 与流式正文/推理/终态改为先�
 
 | 实际调用方 | 当前用途及剩余问题 | 迁移目标 |
 |---|---|---|
-| `ConversationResponseArtifactFactory` | Thread 写模式 pending 已走 Outbox；仍读取 Legacy revision/user message、工具/附件授权；模型历史已改读 Thread | 保留旧 DTO 合同，授权与引用改从 Thread Reader 获取 |
+| `ConversationResponseArtifactFactory` | Thread 写模式 revision/user、工具/附件授权和模型历史均接入完整 Thread Reader；pending 走 Outbox | 继续审查独立 Office/恢复调用方，保留项目/版本/权限重验 |
 | `conversation-text-submission.createConversationLinkedLifecycle` | Thread 写模式 start/delta/complete/fail/cancel 已由 persisted-event hook 提交 Thread/Outbox；Legacy 回滚路径仍直接保存 | 保留 Completion Journal；继续核对恢复与其他入口 |
 | `chat-context-runtime.projectThreadStreamEvent` | 已从 Response/Thread 构建权威 snapshot；正式 PPT 收据也先提交 Thread；恢复等仍有直接兼容写入 | 继续消除恢复的 Legacy 权威读取/写入，失败只形成 projection debt |
-| `ConversationAgentContinuationRuntime`、`JsonConversationAgentSessionRepository` | 语义历史改读 Thread；输入引用校验、初始预算、重放 DTO、本地澄清回复仍依赖 Legacy | 输入引用与预算判断改读完整 Thread，回复复用 Coordinator/Outbox |
-| `ProjectConversationResponseSubjectResolver`、`ConversationDocumentToolSessionService` | 使用 Legacy Message revision/content/收据选定文件、brief 和授权绑定 | 同一 Thread DTO Reader 保留项目/版本/权限门禁，不从模型历史决定正式 Work |
-| Workflow、Document Generation、Attachment/Page Context、Native Search | 兼容计划/目标/文件读取仍消费 Conversation DTO；Thread-first Workflow 执行已转入现有 Agent | 逐个替换事实读取，保留离线 Legacy 回滚；不新增执行循环 |
+| `ConversationAgentContinuationRuntime`、`JsonConversationAgentSessionRepository` | Thread 写模式引用校验、初始预算、重放 DTO、本地澄清和恢复绑定 CAS 已接入完整 Thread；Run/Response/租约合同保留 | 继续审查恢复终态及其他直接写入 |
+| `ProjectConversationResponseSubjectResolver`、`ConversationDocumentToolSessionService` | Thread 写模式从同一完整 Reader 获取 revision/content/收据、brief 和授权绑定；Work/File/Hash 原门禁保留 | 继续核对变更/撤销/恢复边界，模型不决定正式 Work |
+| Workflow、Document Generation、Attachment/Page Context、Native Search | Workflow/Native Search 的会话读取、本地回复与确认回复已进入 Thread；独立 Document Generation 和部分 Context Registry 仍依赖 Legacy | 逐个替换剩余事实读取/写入，保留离线 Legacy 回滚；不新增执行循环 |
 | `RegistryFeatureCandidateSource` | 已统一候选入口、参数/Route 重验及相关模型证据指纹；无对应模型证据仍沿已批准包合同，不宣称真实能力验证 | 继续审查完整 Profile/Evidence/Route 持久快照，保持费用 unknown，不猜名称或静默换模型 |
 | `ProviderOperationRouter`、旧 image preflight/draft factory | 历史图像/视频执行仍消费 capabilityEvidenceId；新候选路径消费 Feature Contract | 先补两者等价性与未知证据测试，再收敛为同一能力快照 |
 
-后续优先级：兼容响应 Tool 投影缺口与 Legacy 先写失败边界已完成本地复现和主路径修补；继续迁移授权/引用 Reader，收敛 Capability Evidence/Profile/Route 的统一版本与参数来源。外部 Provider 后续验收需另一个明确预算与新隔离项目，未知结果不自动重发。本轮不把所有待处理调用方标为完成，也不扩展成完整 Provider 矩阵通过。
+后续优先级：授权/引用 Reader 和本地回复的 Thread 主路径已完成本地复现与修补；继续迁移恢复、独立 Office、通用会话 CRUD 和剩余 Context 调用方，并收敛 Capability Evidence/Profile/Route 的统一版本与参数来源。外部 Provider 后续验收需另一个明确预算与新隔离项目，未知结果不自动重发。本轮不把所有待处理调用方标为完成，也不扩展成完整 Provider 矩阵通过。
 
 ## 验证
 

@@ -74,7 +74,7 @@ export class ConversationAgentContinuationRuntime {
         if (existing.id !== input.sessionId || existing.projectId !== run.projectId || existing.conversationId !== run.conversationId) throw new ConversationAgentSessionError('scope_mismatch');
         this.preparations.delete(input.sessionId); return;
       }
-      const conversation = await this.options.conversations.get(run.conversationId);
+      const conversation = await this.readConversation(run.conversationId);
       const message = conversation.messages.find(item => item.id === run.sourceMessageId && item.role === 'user');
       if (!message) throw new ConversationAgentSessionError('reference_changed');
       await this.options.sessionService.admitInitialSegment({ sessionId: toConversationAgentRunId(input.sessionId), run,
@@ -97,7 +97,7 @@ export class ConversationAgentContinuationRuntime {
         const runs = await this.options.agentRuns.list(session.conversationId);
         const childIds = new Set(session.childSegments.map(segment => segment.runId));
         if (runs.some(run => (childIds.has(run.id) || run.parentRunId === session.id) && run.responseExecutionId)) throw new ConversationAgentSessionError('continuation_invalid');
-        const conversation = await this.options.conversations.get(session.conversationId);
+        const conversation = await this.readConversation(session.conversationId);
         if (conversation.projectId !== session.projectId || conversation.status !== 'active') throw new ConversationAgentSessionError('scope_mismatch');
         this.assertCurrent();
         const acknowledged = await this.options.sessionService.acknowledgeWithoutResponse({ sessionId: session.id,
@@ -129,7 +129,7 @@ export class ConversationAgentContinuationRuntime {
   async validateReferences(session: ConversationAgentSessionV1, incoming?: ControlledConversationInputReferenceV1): Promise<void> {
     this.assertCurrent();
     if (session.projectId !== this.options.projectId) throw new ConversationAgentSessionError('scope_mismatch');
-    const conversation = await this.options.conversations.get(session.conversationId);
+    const conversation = await this.readConversation(session.conversationId);
     if (conversation.projectId !== session.projectId || conversation.status !== 'active') throw new ConversationAgentSessionError('scope_mismatch');
     for (const reference of [...session.inputReferences, ...(incoming ? [incoming] : [])]) {
       // Root tasks presently resume from pinned user messages. Unsupported inputs are never guessed.
@@ -165,6 +165,7 @@ export class ConversationAgentContinuationRuntime {
 
   private async validate(input: { readonly conversation: Conversation; readonly input: StartResponseRequest; readonly signal: AbortSignal }): Promise<ConversationAgentResponseStartDto | undefined> {
     this.assertCurrent(); input.signal.throwIfAborted();
+    input = { ...input, conversation: await this.readConversation(input.conversation.id) };
     const request = input.input.continuation;
     if (!request) {
       const now = Date.parse(this.options.now());
@@ -211,6 +212,7 @@ export class ConversationAgentContinuationRuntime {
 
   private async prepare(input: { readonly conversation: Conversation; readonly userMessageId: string; readonly input: StartResponseRequest; readonly signal: AbortSignal }) {
     this.assertCurrent(); input.signal.throwIfAborted();
+    input = { ...input, conversation: await this.readConversation(input.conversation.id) };
     const message = input.conversation.messages.find(item => item.id === input.userMessageId && item.role === 'user' && item.state === 'completed');
     if (!message) throw new ConversationAgentSessionError('reference_changed');
     const reference = messageReference(message), request = input.input.continuation;
@@ -288,7 +290,7 @@ export class ConversationAgentContinuationRuntime {
         const localMessageId = this.options.nextMessageId?.();
         await this.options.conversations.ensureLocalReply(input.conversation.id,
           `agent-wait-${session.id}-${waiting.session.waitingVersion}`, question,
-          this.options.projectLocalAssistant && localMessageId ? { beforeSave: assistantMessage => this.options.projectLocalAssistant!({
+          !this.options.conversations.writesTranscript && this.options.projectLocalAssistant && localMessageId ? { beforeSave: assistantMessage => this.options.projectLocalAssistant!({
             threadId: String(input.conversation.id), sourceMessageId: String(message.id), assistantMessageId: String(assistantMessage.id), content: assistantMessage.content, createdAt: String(assistantMessage.createdAt)
           }) } : undefined);
         input.signal.throwIfAborted();
@@ -323,8 +325,14 @@ export class ConversationAgentContinuationRuntime {
       throw error;
     }
   }
+  private async readConversation(conversationId: Conversation['id']): Promise<Conversation> {
+    const conversation = await this.options.conversations.get(conversationId);
+    if (conversation.id !== conversationId || conversation.projectId !== this.options.projectId || conversation.status !== 'active') throw new ConversationAgentSessionError('scope_mismatch');
+    this.assertCurrent();
+    return conversation;
+  }
   private async semanticContext(conversation: Conversation, session: ConversationAgentSessionV1): Promise<ConversationSemanticContext> {
-    if (this.options.modelHistory) {
+    if (this.options.modelHistory && !this.options.conversations.writesTranscript) {
       conversation = await this.options.modelHistory.readConversation({ threadId: toThreadId(conversation.id) });
     }
     let threadItems: readonly { readonly itemId: { readonly namespace: string; readonly value: string }; readonly type: string; readonly content?: string }[] | undefined;

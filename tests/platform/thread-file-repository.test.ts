@@ -44,6 +44,25 @@ function records(sequence: number): { readonly turn: TurnV1; readonly item: Item
 }
 
 describe('ThreadFileRepository commit and recovery protocol', () => {
+  it('reads transcript revision and Items together after an in-flight commit across repository instances', async () => {
+    const { root, repository } = await setup();
+    let release!: () => void, entered!: () => void;
+    const gate = new Promise<void>(resolve => { release = resolve; });
+    const ready = new Promise<void>(resolve => { entered = resolve; });
+    const writer = new ThreadFileRepository(root, { fault: async point => {
+      if (point === 'after_manifest_update') { entered(); await gate; }
+    } });
+    const { item, turn } = records(1);
+    const writing = writer.append({ threadId, idempotencyKey: 'coherent-transcript', occurredAt: t1, items: [item], turns: [turn] });
+    await ready;
+    let settled = false;
+    const reading = repository.readTranscript(threadId).then(snapshot => { settled = true; return snapshot; });
+    try { await new Promise(resolve => setTimeout(resolve, 10)); expect(settled).toBe(false); }
+    finally { release(); await writing; }
+    const snapshot = await reading;
+    expect(snapshot?.thread.generation).toBe(1);
+    expect(snapshot?.items).toEqual([item]);
+  });
   it('reads only the committed UTF-8 prefix while another instance has appended uncommitted Chinese records', async () => {
     const { root, repository } = await setup();
     const first = records(1), second = records(2);

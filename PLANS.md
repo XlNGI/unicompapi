@@ -1,5 +1,17 @@
 # UniComp 开发计划
 
+### 维护收敛：Thread 授权/引用及澄清、Workflow、联网确认回复（2026-10-12）
+
+从 `feature/office-agent-thread-model-convergence@53fcba0` 干净工作区继续统一目标。隔离 composed Host 先复现所有 Legacy message save 拒绝时请求报 `message_not_completed`；修复后在相同故障下完成一次 PPT 生成、物理文件读回、唯一 Work 登记和父任务 completed，Thread 有两组 Call/Result、Artifact 与正式 Assistant 收据，Legacy 仍为空。收费请求 0、未知结果重试 0，真实用户数据未改写。
+
+Thread 写模式的 Response Draft/Controller、Subject Resolver、Artifact Factory、Document Tool Session 重验、Continuation 引用/预算/重放、Workflow 与联网确认统一消费完整已提交 Thread DTO；恢复绑定 CAS 也从 Thread 核对输入 pin，保留主 Run/Response WAL、租约和预算门禁。新增 `readTranscript` 在跨实例共享 Thread 锁内读取 revision 和已提交消息，补齐原生 User Item 附件/displayContent 简写和显式附件选择语义。项目、会话、Draft/User 版本和正式 Work/File/Hash 继续重验。
+
+本地澄清、Workflow/来源/搜索说明和联网确认 User 回复现在通过既有 Coordinator/Commit/Outbox 持久化，保留 workflowReply 幂等标记；Workflow 追问先写 Thread。Legacy 故障只留可恢复投影欠账，不回退正文或重发工具。联网授权仍要求当前问题和明确确认；过期会话快照拒绝，测试只生成/消费本地授权合同，没有联网。
+
+新增 13 项回归；串行全量 Vitest 335 文件、3450/3450 通过，随后最终联网确认补修的 55 项定向（含另 2 个新增项）通过；Node/UI 400/400、typecheck、lint、生产 build 通过。初次默认并发全量 10 项超时在原时限下串行复核 45/45，最终串行全量无超时；中间新附件夹具暴露的简写解析/选择语义缺口已修复并复核。真实 Electron Thread/Legacy 各 3 会话 × 120 消息导航、Agent-native 与兼容 `responses.start` Mock Provider/Office 链路通过，工具读回、唯一 Work、Thread 收据与父任务终态均保留。构建只保留既有 CJS API、大 chunk 与 PDF.js 字体提示。
+
+未完成及下一步：继续迁移启动/中断恢复的直接 Legacy 写入、独立 DocumentGeneration Office 路径、通用会话 CRUD 和部分 Context 兼容读取，再核对剩余 Capability/Profile/Route 历史协议接线。共享 acceptance/base64 写放大和真实外部 Provider 矩阵仍独立记录；不能将本批主路径通过标成整个目标全部完成。详情见 [本轮源码审计](docs/current/office-agent-convergence-audit-20261012.md)，脱敏机器证据见 [Thread 授权收敛验收](docs/evidence/thread-authorization-convergence-20261012.json)。
+
 ### 模型接线修复：能力证据与选型令牌统一重验（2026-10-12）
 
 从 `80dfb3c` 继续。3 个失败复现确认：Profile/Route 未变化时，新增同功能 supported/unsupported/unknown 能力证据不影响候选或已准备令牌。Registry Candidate Source 现消费模型中与 Feature Contract 的 productFeature/internalPurpose 对应的最新能力状态；新选型对明确 unsupported/unknown/restricted/verification_failed 拒绝。证据 ID/版本/参数内容的内部指纹纳入既有 token bindingFingerprint，支持证据更新后也要求重新准备；绑定 profile evidence 与会话图片能力时同样纳入指纹，公开 DTO 不外露证据与路由字段。

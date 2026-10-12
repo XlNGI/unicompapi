@@ -211,6 +211,18 @@ export class ThreadFileRepository {
     return dedupeItems(records.filter(record => readAtSequence === undefined || record.sequence <= readAtSequence).map(record => parseItemV1(record.payload)));
   }
 
+  /** Identity, revision and messages from one committed transcript boundary. */
+  async readTranscript(threadId: ThreadId): Promise<{ readonly thread: ThreadV1; readonly items: readonly ItemV1[] } | undefined> {
+    await this.initialize();
+    return this.exclusive(threadId, async () => {
+      const thread = await this.readThreadMetadata(threadId);
+      if (!thread) return undefined;
+      const manifest = await this.getManifest(threadId);
+      const records = await this.readCommittedRecords<ItemV1>(threadId, manifest, 'item');
+      return { thread, items: dedupeItems(records.map(record => parseItemV1(record.payload))) };
+    });
+  }
+
   async listItemSequences(threadId: ThreadId, readAtSequence?: number): Promise<readonly number[]> {
     const manifest = await this.getManifest(threadId);
     const index = await this.readOrBuildItemIndex(threadId, manifest);

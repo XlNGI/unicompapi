@@ -58,6 +58,7 @@ interface ReadResult { readonly status: string; readonly observation?: { readonl
 
 async function fixture(revokeAfterAdvertisingRead = false, invalidArtDirection = false, agentChatOnly = false, agentConversation = false,
   planningPageGoal?: number, holdProviderResponse = false, flowOptions?: {
+    readonly threadFirst?: boolean;
     readonly staleAfterKnownFailure?: boolean;
     readonly terminalAfterGeneration?: 'failed' | 'cancelled' | 'unknown';
   }) {
@@ -189,6 +190,7 @@ async function fixture(revokeAfterAdvertisingRead = false, invalidArtDirection =
   const newApiRuntime = new NewApiSharedRuntime({ transport });
   const deepSeekRuntime = new DeepSeekSharedRuntime({ transport: { send: async () => { throw new Error('Unexpected provider'); } } });
   const runtime = createChatContextRuntime({ userDataDirectory, providerRegistry: provider.registry, runtimeAuthorization: provider.authorization,
+    ...(flowOptions?.threadFirst ? { threadFileWriteEnabled: true, threadFileReadEnabled: true } : {}),
     getSession: () => ({ projectId, projectName: 'Synthetic generation/read test', rootDirectory }),
     textSubmission: { credentialVault: provider.vault, deepSeekRuntime, newApiRuntime }, now: () => now, onError: error => errors.push(error) });
   cleanups.push(async () => {
@@ -280,10 +282,29 @@ async function fixture(revokeAfterAdvertisingRead = false, invalidArtDirection =
       traces: await new ConversationProductionTraceStore(storage, projectId).list({ conversationId: conversation.id }),
       runtimes: await new JsonDocumentTaskRuntimeRepository(storage, projectId).list() };
   }
-  return { start, run, runAgentConversation, runtime, userDataDirectory, rootDirectory, files, works, requests, providerSignals, artRequests, writes, designSnapshots, errors, render, generationSpy, readSpy, beginSpy, generationCall, readCall };
+  return { start, run, runAgentConversation, runtime, conversations, conversation, userDataDirectory, rootDirectory, files, works, requests, providerSignals, artRequests, writes, designSnapshots, errors, render, generationSpy, readSpy, beginSpy, generationCall, readCall };
 }
 
 describe('production NewAPI generation to verified-file read continuation', () => {
+  it('generates and reads from the committed Thread when all Legacy message saves fail', async () => {
+    const data = await fixture(false, false, false, false, undefined, false, { threadFirst: true });
+    await data.runtime.conversations.list({ readMode: 'full' });
+    const save = vi.spyOn(JsonProjectConversationRepository.prototype, 'save').mockRejectedValue(Object.assign(new Error('Synthetic projection denied'), { code: 'EPERM' }));
+    const { execution } = await data.run(true);
+    expect(execution).toMatchObject({ state: 'completed', parentRun: { state: 'completed', registeredWorkCount: 1 } });
+    expect(data.requests).toHaveLength(3);
+    expect(data.generationSpy).toHaveBeenCalledTimes(1);
+    expect(await data.works.list(projectId)).toHaveLength(1);
+    expect(save).toHaveBeenCalled();
+    const legacy = await data.conversations.get(data.conversation.id);
+    expect(legacy?.messages).toHaveLength(0);
+    const page = await data.runtime.threadReads.getThreadItemsPage({ threadId: data.conversation.id, limit: 100, direction: 'older' });
+    expect(page).toMatchObject({ ok: true });
+    if (!page.ok) throw new Error(page.error.code);
+    expect(page.value.items.filter(item => item.itemType === 'tool_call_projection')).toHaveLength(2);
+    expect(page.value.items.filter(item => item.itemType === 'tool_result_projection')).toHaveLength(2);
+    expect(page.value.items.some(item => item.itemType === 'assistant_message' && item.status === 'completed' && item.message?.documentResult)).toBe(true);
+  });
   it('settles and revokes the owned document session when startup is cancelled after durable Run creation', async () => {
     const data = await fixture(false, false, true);
     const open = ConversationAgentRuntimeService.prototype.open;

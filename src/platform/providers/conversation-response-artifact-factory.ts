@@ -38,7 +38,7 @@ import { buildDocumentGenerationConversationInstruction, isPptGenerationIntent }
 
 export interface ConversationResponseArtifactFactoryDependencies {
   readonly nativeSearch?: ConversationNativeSearch;
-  readonly conversations: ProjectConversationRepository;
+  readonly conversations: Pick<ProjectConversationRepository, 'projectId' | 'get' | 'save'>;
   readonly drafts: ConversationResponseDraftRepository;
   readonly contexts: ProjectContextRepository;
   readonly executions: ConversationResponseExecutionRepository;
@@ -98,17 +98,19 @@ export class ConversationResponseArtifactFactory
       throw new TypeError('Conversation response artifacts require a response draft subject');
     }
     const draft = await this.dependencies.drafts.get(subject.responseDraftId);
-    if (!draft || draft.revision !== subject.responseDraftRevision) {
+    if (!draft || draft.revision !== subject.responseDraftRevision || draft.conversationId !== subject.conversationId ||
+        draft.conversationRevision !== subject.conversationRevision || draft.userMessageId !== subject.userMessageId) {
       throw new TypeError('Conversation response draft is unavailable for artifact creation');
     }
     const startupSignal = this.dependencies.getStartupSignal?.(draft.id);
     assertStartupSignal(startupSignal);
     const conversation = await this.dependencies.conversations.get(subject.conversationId);
-    if (!conversation || conversation.revision !== subject.conversationRevision) {
+    if (!conversation || conversation.id !== subject.conversationId || conversation.projectId !== this.dependencies.conversations.projectId ||
+        conversation.status !== 'active' || conversation.revision !== subject.conversationRevision) {
       throw new TypeError('Conversation revision changed before artifact creation');
     }
     const userMessage = conversation.messages.find((message) => message.id === draft.userMessageId);
-    if (!userMessage || userMessage.role !== 'user' || userMessage.state !== 'completed') {
+    if (!userMessage || userMessage.role !== 'user' || userMessage.state !== 'completed' || userMessage.revision !== draft.userMessageRevision) {
       throw new TypeError('Conversation response user message is unavailable for artifact creation');
     }
     const nativeSearch = await this.dependencies.nativeSearch?.dispatch(draft, input.candidate);

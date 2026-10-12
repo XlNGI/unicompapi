@@ -26,6 +26,9 @@ import { ConversationWorkflowController } from '../../src/platform/ipc/conversat
 import { JsonProjectConversationRepository, JsonConversationWorkflowRepository } from '../../src/platform/repositories';
 import { NodeProjectStorage } from '../../src/platform/storage';
 import { ConversationSemanticClassifier } from '../../src/platform/providers/conversation-semantic-classifier';
+import { ThreadFileRepository } from '../../src/platform/repositories/thread-file-repository';
+import { ThreadModelHistorySource } from '../../src/platform/repositories/thread-model-history-source';
+import { ThreadCommandService, ThreadProjectionCoordinator, ThreadLegacyProjectionWorker, ConversationTurnCoordinator } from '../../src/application';
 
 const roots: string[] = [];
 const semanticCandidate = { candidateId: 'synthetic-selected', productFeature: 'text_chat' as const };
@@ -79,19 +82,29 @@ describe('ConversationWorkflowController', () => {
     } });
     await runtime.waitForMutations();
   });
-  async function semanticFixture(mode: 'unavailable' | 'invalid' | 'invalid_response' | 'timeout' | 'ready' = 'ready') {
+  async function semanticFixture(mode: 'unavailable' | 'invalid' | 'invalid_response' | 'timeout' | 'ready' = 'ready', threadFirst = false) {
     const root = await mkdtemp(path.join(os.tmpdir(), 'unicomp-semantic-failure-'));
     roots.push(root);
     const projectId = toProjectId('project-semantic-failure');
-    const now = () => '2026-09-22T00:00:00.000Z';
+    const now = () => threadFirst ? new Date().toISOString() : '2026-09-22T00:00:00.000Z';
     const storage = new NodeProjectStorage(root);
     const conversations = new JsonProjectConversationRepository(storage, projectId, now);
     const workflows = new JsonConversationWorkflowRepository(storage, projectId, now);
+    const threads = new ThreadFileRepository(root);
+    const source = new ThreadModelHistorySource(threads, projectId);
+    const coordinator = new ConversationTurnCoordinator(new ThreadCommandService(threads), new ThreadProjectionCoordinator(threads));
+    const projection = new ThreadLegacyProjectionWorker(threads, conversations, now);
+    const errors: unknown[] = [];
     let sequence = 0;
     const conversationService = new ConversationApplicationService(conversations, {
       nextConversationId: () => toConversationId('conversation-semantic-failure'),
       nextMessageId: () => toMessageId('message-semantic-' + ++sequence)
-    }, now);
+    }, now, threadFirst ? { get: id => source.getConversation(id), publishAssistant: async ({ conversationId, sourceMessageId, message }) => {
+      await coordinator.projectAssistantMessage({ threadId: conversationId, sourceMessageId, assistantMessageId: message.id,
+        messageRevision: message.revision, status: 'completed', content: message.content, createdAt: message.createdAt, updatedAt: message.updatedAt,
+        legacyMessageSnapshot: message as unknown as Readonly<Record<string, unknown>> });
+      await projection.drain(conversationId).catch(error => errors.push(error));
+    } } : undefined);
     let currentMode = mode;
     const classify = vi.fn(async () => {
       if (currentMode === 'unavailable') throw new Error('synthetic transport failure');
@@ -106,11 +119,37 @@ describe('ConversationWorkflowController', () => {
     }), now, () => toConversationWorkflowId('workflow-semantic-' + ++sequence));
     const makeController = () => new ConversationWorkflowController({
       getSession: () => ({ projectId, projectName: '合成测试', rootDirectory: root }),
-      getRuntime: () => ({ conversationService, workflowService })
+      onError: error => errors.push(error),
+      getRuntime: () => ({ conversationService, workflowService, ...(threadFirst ? { turnCoordinator: coordinator, legacyProjection: projection } : {}) })
     });
-    return { root, projectId, workflows, workflowService, classify, controller: makeController(), makeController,
+    return { root, projectId, conversations, conversationService, workflows, workflowService, threads, projection, errors, classify, controller: makeController(), makeController,
       setMode: (next: typeof mode) => { currentMode = next; } };
   }
+
+  it('keeps Workflow clarification, answers and local reply metadata in Thread despite Legacy projection failures', async () => {
+    const f = await semanticFixture('ready', true);
+    const save = vi.spyOn(f.conversations, 'save').mockRejectedValue(new Error('Legacy projection denied'));
+    const started = await f.controller.start({ clientCommandId: 'thread-workflow-start', conversation: null,
+      title: 'PPT', content: '我想制作一个ppt', semanticCandidate });
+    if (!started.ok) throw new Error(started.error.code + ': ' + f.errors.map(error => error instanceof Error ? error.message : 'unknown').join(';'));
+    expect(started).toMatchObject({ ok: true, value: { workflow: { status: 'needs_clarification' } } });
+    const answered = await f.controller.answer({ clientCommandId: 'thread-workflow-answer',
+      workflowId: started.value.workflow.workflowId, expectedWorkflowRevision: started.value.workflow.revision,
+      expectedConversationRevision: started.value.conversation.revision, content: '三大基本的产品介绍', semanticCandidate });
+    expect(answered).toMatchObject({ ok: true, value: { workflow: { status: 'needs_clarification' } } });
+    if (!answered.ok) throw new Error(answered.error.code);
+    expect(answered.value.conversation.messages.filter(message => message.role === 'user').map(message => message.content))
+      .toEqual(['我想制作一个ppt', '三大基本的产品介绍']);
+    expect(answered.value.conversation.messages.some(message => message.workflowReply?.workflowId === started.value.workflow.workflowId)).toBe(true);
+    const before = (await f.threads.readItems(started.value.conversation.conversationId as never)).length;
+    await f.makeController().getPending({ conversationId: started.value.conversation.conversationId });
+    expect((await f.threads.readItems(started.value.conversation.conversationId as never)).length).toBe(before);
+    expect((await f.conversations.get(toConversationId(started.value.conversation.conversationId)))?.messages).toHaveLength(0);
+    save.mockRestore();
+    expect((await f.projection.drain(started.value.conversation.conversationId)).pending).toBe(0);
+    expect((await f.conversations.get(toConversationId(started.value.conversation.conversationId)))?.messages.map(message => message.id))
+      .toEqual(answered.value.conversation.messages.map(message => message.messageId));
+  });
 
   it.each([
     ['unavailable', 'classification_unavailable', '未能启动模型调用或确认调用状态'],
