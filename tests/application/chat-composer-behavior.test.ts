@@ -178,6 +178,28 @@ describe('chat composer event behavior', () => {
   });
   afterEach(() => { vi.unstubAllGlobals(); vi.restoreAllMocks(); });
 
+  it('binds resize following to the message list when the selected history appears after mount', async () => {
+    initialConversationId = conversation.conversationId;
+    const pending = deferred<unknown>();
+    vi.mocked(window.unicomp!.chatContexts!.listConversations).mockImplementation(() => pending.promise as never);
+    const observe = vi.fn();
+    vi.stubGlobal('ResizeObserver', class { observe = observe; disconnect = vi.fn(); });
+    await settle(12);
+    const pane = find(tree, item => item.props.className === 'uc-chat-page__messages uc-scrollbar');
+    if (!pane) throw new Error('Expected a mounted message pane');
+    const list = {};
+    const ref = (pane as unknown as { ref: { current: unknown } }).ref;
+    ref.current = { querySelector: vi.fn(() => list), firstElementChild: {}, scrollTo: vi.fn(), scrollHeight: 800,
+      scrollTop: 0, clientHeight: 600 };
+    const message = { messageId: 'late-resize-message', conversationId: conversation.conversationId, revision: 0,
+      role: 'assistant' as const, state: 'completed' as const, content: '迟到加载的历史', attachments: [],
+      createdAt: conversation.updatedAt, updatedAt: conversation.updatedAt };
+    vi.mocked(window.unicomp!.chatContexts!.getConversation).mockResolvedValue({ ok: true, value: { ...conversation, messages: [message] } } as never);
+    pending.resolve({ ok: true, value: [{ ...conversation, messages: [message] }] });
+    await settle(24);
+    expect(observe).toHaveBeenCalledWith(list);
+  });
+
   it.each(['summaries', 'items'] as const)('restores Thread messages after a page remount when %s arrive last', async (last) => {
     const message = {
       messageId: 'message-return-to-chat', role: 'assistant' as const, state: 'completed' as const,

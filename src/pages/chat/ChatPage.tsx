@@ -1362,7 +1362,7 @@ export function ChatPage({
   }, [chat, documentGenerationActive, selectedId]);
 
   useEffect(() => {
-    const content = messagesRef.current?.firstElementChild;
+    const content = messagesRef.current?.querySelector('.uc-chat-page__message-list');
     if (!content || typeof ResizeObserver === 'undefined') return;
     const scheduleFollowScroll = () => {
       if (!followOutputRef.current || followScrollFrameRef.current !== undefined) return;
@@ -1385,7 +1385,7 @@ export function ChatPage({
         followScrollFrameRef.current = undefined;
       }
     };
-  }, []);
+  }, [selected?.conversationId, displayMessages.length]);
 
   useEffect(() => () => {
     if (followScrollFrameRef.current !== undefined) {
