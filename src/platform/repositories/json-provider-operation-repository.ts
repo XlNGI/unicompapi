@@ -17,6 +17,7 @@ import {
   type ProjectStorageAdapter
 } from '../storage';
 import { RepositoryDataError } from './repository-data-error';
+import { ProviderResultPayloadStore } from '../storage/provider-result-payload-store';
 
 interface ProviderOperationDocumentV2 {
   readonly schemaVersion: 2;
@@ -31,7 +32,15 @@ interface ProviderOperationDocumentV1 {
 
 export class JsonProviderOperationRepository
   implements ProviderOperationRepository {
-  constructor(private readonly storage: ProjectStorageAdapter) {}
+  private readonly payloads: ProviderResultPayloadStore;
+
+  constructor(private readonly storage: ProjectStorageAdapter) {
+    this.payloads = new ProviderResultPayloadStore(storage);
+  }
+
+  resolveResult(result: Extract<ProviderImmediateResultReference, { kind: 'stored_base64' }>) {
+    return this.payloads.resolve(result);
+  }
 
   async get(
     id: ProviderOperationRecordId
@@ -55,14 +64,14 @@ export class JsonProviderOperationRepository
   }
 
   async save(record: ProviderOperationRecord): Promise<void> {
-    const validated = parseRecord(record);
+    const validated = await this.payloads.externalize(parseRecord(record));
     await this.storage.withExclusiveAccess(
       [projectStoragePaths.entities.providerOperations],
       async () => {
         const document = await this.read();
         const existing = document.records.find((item) => item.id === validated.id);
         if (existing) {
-          if (JSON.stringify(existing) !== JSON.stringify(validated)) {
+          if (JSON.stringify(await this.payloads.externalize(existing)) !== JSON.stringify(validated)) {
             throw new RepositoryDataError(
               projectStoragePaths.entities.providerOperations,
               'provider operation receipts are immutable'
@@ -98,8 +107,30 @@ export class JsonProviderOperationRepository
       projectStoragePaths.entities.providerOperations,
       parseProviderOperationDocument
     );
-    if (!loaded) return { schemaVersion: 2, revision: 0, records: [] };
-    return loaded.value;
+    return loaded?.value ?? { schemaVersion: 2, revision: 0, records: [] };
+  }
+
+  async compactResultHistory(): Promise<void> {
+    return this.storage.withExclusiveAccess([projectStoragePaths.entities.providerOperations], async () => {
+      const loaded = await this.storage.readJsonWithBackup(
+        projectStoragePaths.entities.providerOperations,
+        parseProviderOperationDocument
+      );
+      if (loaded?.source !== 'primary') return;
+      const document = loaded.value;
+      const records: ProviderOperationRecord[] = [];
+      let changed = false;
+      for (const record of document.records) {
+        const compact = await this.payloads.externalize(record);
+        changed ||= compact !== record;
+        records.push(compact);
+      }
+      if (!changed) return;
+      const compact: ProviderOperationDocumentV2 = {
+        ...document, revision: document.revision + 1, records
+      };
+      await this.storage.writeJsonAtomically(projectStoragePaths.entities.providerOperations, compact, { backup: true });
+    });
   }
 }
 
@@ -222,10 +253,10 @@ function parseOutcome(value: unknown): ProviderSubmitOutcome {
 }
 
 function parseImmediateResult(value: unknown): ProviderImmediateResultReference {
-  if (!isRecord(value) || !['remote_url', 'base64', 'file_uri'].includes(String(value.kind))) {
+  if (!isRecord(value) || !['remote_url', 'base64', 'stored_base64', 'file_uri'].includes(String(value.kind))) {
     throw invalidDocument();
   }
-  if (value.kind === 'base64') {
+  if (value.kind === 'base64' || value.kind === 'stored_base64') {
     return {
       kind: value.kind,
       value: String(value.value),

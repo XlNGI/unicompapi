@@ -141,6 +141,11 @@ export type ProviderImmediateResultReference =
       readonly mimeType: string;
     }
   | {
+      readonly kind: 'stored_base64';
+      readonly value: string;
+      readonly mimeType: string;
+    }
+  | {
       readonly kind: 'file_uri';
       readonly value: string;
     };
