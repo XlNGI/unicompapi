@@ -4,7 +4,7 @@
 
 ## 2026-10-12 维护事实复核
 
-页面与启动维护追加：消息切页恢复、Agent command 进度、同步重复提交拦截和 Thread Runtime 控制读回已实现；Response snapshot/分组校验优化及今天工具超时 unknown 现场见 [会话稳定性审查](chat-startup-stability-review-20261012.md)。共享元数据写放大、迟到工具取消及剩余 Legacy/Capability 接线仍是实际待处理项。
+页面与启动维护追加：消息切页恢复、Agent command 进度、同步重复提交拦截和 Thread Runtime 控制读回已实现；Response snapshot/分组校验、共享元数据事务拷贝优化及今天工具超时 unknown 现场见 [会话稳定性审查](chat-startup-stability-review-20261012.md)。共享 acceptance/base64 写放大、迟到工具取消及剩余 Legacy/Capability 接线仍是实际待处理项。
 
 当前基线为 `origin/develop@d863d3f`，已存在 Coordinator、Thread Commit/Outbox、分页/虚拟列表、Tool/Artifact 投影和启动 authority fence，以下旧阶段描述只保留追溯用途。维护分支 `feature/office-agent-thread-model-convergence` 第一批 `c7004af` 修复工具选择、Legacy snapshot 恢复和真实验收分类；第二批接入完整 Thread 模型历史并将候选查询中的 profile 补写移到幂等初始化。实际完成度、验证和剩余 Legacy/Capability 调用方见 [2026-10-12 源码审计](office-agent-convergence-audit-20261012.md) 与 `PLANS.md` 顶部。
 

@@ -2,6 +2,12 @@
 
 ### 维护优化：会话历史持久化开销与整体审查（2026-10-12）
 
+本批继续处理共享 `project-metadata.json` 的重复深拷贝：事务内部改为借用已校验的输入值，仅保留 Draft 建立和提交快照两次隔离；公开解析、`get`、`set`、`entries`、备份、CAS、敏感字段校验和原子写入合同不变。新增 5 组基础隔离/失败/损坏数据回归，存储、锁、Session、Runtime、Completion、Provider 恢复定向共 116 项通过。
+
+隔离 32.4 MB 合成元数据（13 个大结果、1,028 个 canonical event）基准：事务核心中位 79.6→38.3 ms，深拷贝字节 129.2→64.6 MB；包含备份与 JSON 原子落盘的事务中位 295.3→243.0 ms（约 -18%）。证据见 [元数据持久化基准](docs/evidence/chat-metadata-persistence-20261012.json)，仅代表本地合成样本，不代表端到端 Provider 或页面响应时间。`scripts/verify-chat-metadata-persistence.cjs` 为本地隔离脚本，收费请求 0。
+
+当前仍待处理：共享 acceptance/base64 内容造成的全量 JSON 写放大、canonical/Trace 与 Legacy 投影写入频率、工具迟到取消及剩余 Legacy/Capability 接线；本批没有拆分存储格式、裁剪历史、改写真实用户目录或重试未知 Provider 结果。
+
 继续启动/恢复修复 `cc99df9`。Response Lifecycle append 复用可选 committed snapshot，减少一次完整文件读取/校验；Repository 校验按 execution id 分组，避免每个 execution 扫描全部 event。保留原子追加、连续序列、项目/身份/重试校验、备份和 unknown 门禁；并发快照过期继续拒绝冲突，不隐式重试。
 
 隔离合成 165 次执行、22,037 个 event、7,103 个 trace event：5 次样本中位数，纯 Response 校验 101.9→73.2 ms，一次 content append 457.6→247.5 ms（约 -46%），未包含 Thread/Legacy/canonical 回调或真实 Provider。基准脚本和机器证据已保存，不能据此宣称端到端生成耗时减少 46%。用户数据只读审查还发现共享 metadata 33.8 MB、acceptance value 约 31 MB、Provider operation 13 个 base64 值共约 29.34 MB；本轮不裁剪历史或改变存储格式。

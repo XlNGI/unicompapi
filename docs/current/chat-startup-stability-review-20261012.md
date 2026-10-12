@@ -41,6 +41,14 @@ Thread Runtime 读取复用现有恢复和权限边界，作为后台操作不�
 
 ## 本地性能证据
 
+### 共享元数据事务拷贝优化（2026-10-12）
+
+`project-metadata.json` 当前约 33.8 MB，其中 acceptance value 约 31.0 MB。原事务在输入解析、Draft 建立、提交解析和公开返回路径重复深拷贝；本批只在事务内部复用已校验值，把隔离保留在 Draft 建立和提交快照，公开 `parseProjectMetadataDocument` 仍返回完整防御性副本。
+
+新增基础测试覆盖公开解析与 Draft 的所有权隔离、保留 Draft 的晚到修改、事务异常不落盘、损坏无关 entry 拒绝，以及 primary/backup 内容不变。32.4 MB 隔离合成基准（13 个大结果、1,028 个 canonical event）显示：事务核心中位 79.6→38.3 ms，观测到的深拷贝字节 129.2→64.6 MB；包含备份和 JSON 原子写的事务中位 295.3→243.0 ms，约减少 18%。这改善了每次状态更新的本地 CPU/内存压力，完整 JSON 序列化、备份和磁盘写入仍存在，不能推导为端到端生成耗时改善。
+
+证据文件为 [`chat-metadata-persistence-20261012.json`](../evidence/chat-metadata-persistence-20261012.json)，脚本 [`verify-chat-metadata-persistence.cjs`](../../scripts/verify-chat-metadata-persistence.cjs) 只使用临时目录，收费请求为 0。
+
 新增 `scripts/verify-chat-history-persistence.cjs`：隔离合成 165 个 execution/22,037 个 event/7,103 个 trace event，不读用户目录；比较 `78718ed` 实现和本批实现，保持原子落盘和备份。每组 5 次，单机样本不设硬件相关的测试阈值。
 
 | 指标 | 原实现中位数 | 本批中位数 |

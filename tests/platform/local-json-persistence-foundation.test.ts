@@ -15,6 +15,8 @@ import {
   createLegacyJsonReadModel,
   migrateJsonDocument,
   NodeProjectStorage,
+  parseProjectMetadataDocument,
+  ProjectMetadataDraft,
   ProjectMetadataUnitOfWork,
   projectStoragePaths,
   SubmissionIntentJournal,
@@ -111,6 +113,103 @@ describe('local JSON persistence foundation', () => {
     await expect(
       readFile(path.join(root, 'entities', 'project-metadata.json'), 'utf8')
     ).rejects.toMatchObject({ code: 'ENOENT' });
+  });
+
+  it('isolates public metadata parsing, draft inputs and every exposed snapshot', () => {
+    const source = {
+      schemaVersion: 1, revision: 0, updatedAt: t0,
+      entries: [{ key: 'route.snapshot', value: { nested: { status: 'before' } } }]
+    };
+    const parsed = parseProjectMetadataDocument(source);
+    source.entries[0].value.nested.status = 'source-changed';
+    expect(parsed.entries[0].value).toEqual({ nested: { status: 'before' } });
+
+    const draft = new ProjectMetadataDraft(parsed.entries);
+    (parsed.entries[0].value as { nested: { status: string } }).nested.status = 'parsed-changed';
+    const input = { nested: { status: 'accepted' } };
+    draft.set('agent.snapshot', input);
+    input.nested.status = 'input-changed';
+    const read = draft.get('agent.snapshot') as typeof input;
+    read.nested.status = 'get-changed';
+    const exported = draft.entries();
+    (exported[0].value as typeof input).nested.status = 'entries-changed';
+    expect(draft.entries()).toEqual([
+      { key: 'agent.snapshot', value: { nested: { status: 'accepted' } } },
+      { key: 'route.snapshot', value: { nested: { status: 'before' } } }
+    ]);
+  });
+
+  it('freezes the commit snapshot before asynchronous disk writes and preserves the previous backup', async () => {
+    const root = await rootFixture();
+    const baseline = new ProjectMetadataUnitOfWork(new NodeProjectStorage(root), () => t0);
+    await baseline.transact(0, draft => draft.set('provider.acceptance', { result: { content: 'preserved' } }));
+    let retained: ProjectMetadataDraft | undefined;
+    const storage = new NodeProjectStorage(root, {
+      onAtomicWriteStage: ({ stage, targetPath }) => {
+        if (stage === 'before_replace' && targetPath.endsWith('project-metadata.json')) {
+          // A retained callback draft may still be used while the writer awaits I/O.
+          retained!.set('agent.snapshot', { status: 'late-change' });
+          retained!.delete('provider.acceptance');
+        }
+      }
+    });
+    const unit = new ProjectMetadataUnitOfWork(storage, () => t1);
+    const committed = await unit.transact(1, draft => {
+      retained = draft;
+      draft.set('agent.snapshot', { status: 'accepted' });
+      const external = draft.get('provider.acceptance') as { result: { content: string } };
+      external.result.content = 'must-not-change-backup';
+    });
+    expect(committed.entries).toEqual([
+      { key: 'agent.snapshot', value: { status: 'accepted' } },
+      { key: 'provider.acceptance', value: { result: { content: 'preserved' } } }
+    ]);
+    const persisted = await unit.load();
+    expect(persisted.document).toEqual(committed);
+    expect(JSON.parse(await readFile(path.join(root, 'entities/project-metadata.json.bak'), 'utf8')))
+      .toEqual({ schemaVersion: 1, revision: 1, updatedAt: t0,
+        entries: [{ key: 'provider.acceptance', value: { result: { content: 'preserved' } } }] });
+    (committed.entries[0].value as { status: string }).status = 'return-changed';
+    (persisted.document.entries[0].value as { status: string }).status = 'load-changed';
+    expect((await unit.load()).document.entries[0].value).toEqual({ status: 'accepted' });
+    expect(retained!.get('agent.snapshot')).toEqual({ status: 'late-change' });
+  });
+
+  it('leaves primary and backup byte-for-byte intact when mutation fails after editing the draft', async () => {
+    const root = await rootFixture();
+    const unit = new ProjectMetadataUnitOfWork(new NodeProjectStorage(root), () => t0);
+    await unit.transact(0, draft => draft.set('provider.acceptance', { result: { content: 'preserved' } }));
+    await unit.transact(1, draft => draft.set('agent.snapshot', { status: 'before' }));
+    const primaryPath = path.join(root, 'entities/project-metadata.json');
+    const backupPath = `${primaryPath}.bak`;
+    const previous = await Promise.all([readFile(primaryPath, 'utf8'), readFile(backupPath, 'utf8')]);
+    await expect(unit.transact(2, draft => {
+      draft.delete('provider.acceptance');
+      draft.set('agent.snapshot', { status: 'after' });
+      throw new Error('mutation rejected');
+    })).rejects.toThrow('mutation rejected');
+    expect(await Promise.all([readFile(primaryPath, 'utf8'), readFile(backupPath, 'utf8')])).toEqual(previous);
+  });
+
+  it.each([
+    { label: 'sensitive unrelated value', entries: [{ key: 'provider.acceptance', value: { token: 'synthetic-forbidden' } }] },
+    { label: 'duplicate unrelated key', entries: [{ key: 'provider.acceptance', value: {} }, { key: 'provider.acceptance', value: {} }] },
+    { label: 'unexpected unrelated field', entries: [{ key: 'provider.acceptance', value: {}, unexpected: true }] }
+  ])('rejects $label before calling the transaction callback', async ({ entries }) => {
+    const root = await rootFixture();
+    const storage = new NodeProjectStorage(root);
+    await storage.writeJsonAtomically(projectStoragePaths.entities.metadataUnit,
+      { schemaVersion: 1, revision: 1, updatedAt: t0, entries });
+    const primaryPath = path.join(root, 'entities/project-metadata.json');
+    const previous = await readFile(primaryPath, 'utf8');
+    let invoked = false;
+    await expect(new ProjectMetadataUnitOfWork(storage, () => t1).transact(1, draft => {
+      invoked = true;
+      draft.delete('provider.acceptance');
+    })).rejects.toBeInstanceOf(JsonDocumentDataError);
+    expect(invoked).toBe(false);
+    expect(await readFile(primaryPath, 'utf8')).toBe(previous);
+    await expect(readFile(`${primaryPath}.bak`, 'utf8')).rejects.toMatchObject({ code: 'ENOENT' });
   });
 
   it('preserves the previous file when atomic replacement is interrupted', async () => {
