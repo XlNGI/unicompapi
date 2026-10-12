@@ -140,7 +140,9 @@ async function fixture(revokeAfterAdvertisingRead = false, invalidArtDirection =
       return { status: 200, headers: { 'content-type': 'text/event-stream' },
         stream: (async function* () { yield await stopped; })() };
     }
-    if (agentChatOnly) return stream(provider.modelKey, { content: '可以把冲突提前，让场景一更有张力。' }, 'stop');
+    if (agentChatOnly) {
+      return stream(provider.modelKey, { content: '可以把冲突提前，让场景一更有张力。' }, 'stop');
+    }
     if (agentConversation) {
       if (requests.length <= 3) return stream(provider.modelKey, { content: '这个方向已经清楚了，我们继续细化人物和冲突。' }, 'stop');
       if (requests.length === 4) return stream(provider.modelKey, { tool_calls: [{ index: 0, ...generationCall }] }, 'tool_calls');
@@ -689,6 +691,7 @@ describe('production NewAPI generation to verified-file read continuation', () =
     expect(execution.state).toBe('completed');
     expect(execution.content).toContain('场景一');
     expect(data.requests).toHaveLength(1);
+    expect(data.requests[0].tool_choice).toBeUndefined();
     expect(data.requests[0].messages.some(message => message.role === 'assistant' && message.tool_calls)).toBe(false);
     expect(await data.works.list(projectId)).toHaveLength(0);
     expect(data.generationSpy).not.toHaveBeenCalled();

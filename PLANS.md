@@ -1,5 +1,15 @@
 # UniComp 开发计划
 
+### Office Agent 会话/模型维护第一批：工具选择、Legacy 投影与真实验收分类（2026-10-12）
+
+重新核对执行基线：初始 `HEAD = develop = origin/develop = d863d3f4a7fdc850880d493ee146d7b7d1a27420`，工作区干净；当前独立分支 `feature/office-agent-thread-model-convergence`。属于既定功能收口后的维护治理，复用已存在的 Thread Coordinator/Outbox/分页/虚拟列表、Agent Runtime、Document Runtime 和 Completion Journal，历史计划中的阶段状态不覆盖真实源码。
+
+本批修复：成功读取 Observation 后取消 `providerToolChoice=required` 的重复强制，保留读取权限/版本重验；普通 Agent 讨论和待澄清请求不被工具可用性强制转为生成，明确批准生成和必要读回保留门禁。Legacy Outbox 首次恢复完整 Message snapshot，保留 streaming/failed/cancelled、reasoning/附件/文档收据，并修复相同 revision 的元数据缺失。真实生成验收依据 Tool Receipt、Art Direction、Trace 和 Work 计数区分本地拦截、工具/未知、渲染、校验、登记及重复 Work，取消笼统 `expected_one_generated_work` 诊断；后续真实用例保留隔离项目。
+
+真实 Provider 验收按负责人预算使用最近有效 `kimi-k3`：最多 5 次请求、外层 1024 输出 token、Art Direction 4096、自动重试 0，实际 2 次请求均 HTTP 200，费用 `unknown`。Content Planning 和 Art Direction 已执行，`generate_pptx` failed，Trace `document_check failed`，Work=0，判定生成/校验链路 `FAIL`，不能断言模型未调用工具。后续失败反馈被验收脚本本地阻断，外层 `newapi.network_error` 不覆盖前面的真实失败。旧清理已经删除本次隔离项目，仅报告保留；保留修复在调用之后生效，未重发收费请求。具体校验原因仍 unknown，真实连续读回/Provider 矩阵未通过。脱敏证据见 [Provider 验收记录](docs/evidence/office-agent-convergence-provider-20261012.json)。
+
+验证：文档生成/读取/Session 与 Legacy Worker 共 109 项定向回归通过；证据分类 Node 4/4；Node/UI 全量 400/400、typecheck、lint、生产 build、Thread-first Electron Mock Provider/Office 链路通过。生成验收 dry-run 通过（0 请求、未解密凭证），脚本语法和 `git diff --check` 通过。前一检查点串行全量 Vitest 3389/3389 通过；新增模型历史/profile 收敛门禁在下一批单独记录。用户数据和源分支保留。
+
 ### Thread-first 写入收敛实施（2026-10-11）
 
 已完成：Thread Commit + Durable Projection Outbox、Legacy 幂等投影 Worker、普通 Agent/已有会话/直接 IPC/Workflow 的 Thread-first User Turn、Assistant Stream 同一 Item 状态投影、Tool/Artifact 状态更新和 Agent Continuation 的 Thread Context Reader 接线。新增提交从 `c4c4f63` 到 `75755c2`，typecheck、lint、build 及新增定向回归通过。最终 Authority Fence 已接入，真实项目在下一次打开时按启动屏障完成切换；外部 Provider 矩阵仍是独立验收项。

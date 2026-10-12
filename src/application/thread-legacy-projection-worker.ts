@@ -69,21 +69,39 @@ export class ThreadLegacyProjectionWorker {
     }
     const messageId = toMessageId(String(item.messageSource.messageId));
     const existing = conversation.messages.find(message => message.id === messageId);
+    const snapshot = item.legacyMessageSnapshot;
+    if (!existing && snapshot?.schemaVersion === 1) {
+      const projected = parseMessage(snapshot);
+      if (projected.id !== messageId || projected.conversationId !== conversation.id ||
+          projected.role !== (item.type === 'user_message' ? 'user' : 'assistant') ||
+          projected.revision !== item.messageSource.messageRevision) {
+        throw new Error('legacy_projection_message_conflict');
+      }
+      // The first replay may already be streaming/failed/cancelled or carry a
+      // formal document receipt. Restoring it as completed text loses facts.
+      await this.conversations.save({ ...conversation, revision: conversation.revision + 1,
+        updatedAt: projected.updatedAt > conversation.updatedAt ? projected.updatedAt : conversation.updatedAt,
+        messages: [...conversation.messages, projected] }, conversation.revision);
+      return;
+    }
     if (existing) {
       // Stream replay can encounter events older than a direct Legacy
       // compatibility write. They are already represented by a newer
       // revision and can be acknowledged safely.
-      if (existing.revision >= item.messageSource.messageRevision) return;
-      const snapshot = item.legacyMessageSnapshot;
+      if (existing.revision > item.messageSource.messageRevision) return;
+      if (existing.revision === item.messageSource.messageRevision &&
+          (!snapshot || JSON.stringify(existing) === JSON.stringify(parseMessage(snapshot)))) return;
       if (snapshot) {
         const projected = parseMessage(snapshot);
-        if (projected.id !== messageId || projected.conversationId !== conversation.id || projected.revision < existing.revision) {
+        if (projected.id !== messageId || projected.conversationId !== conversation.id ||
+            projected.role !== (item.type === 'user_message' ? 'user' : 'assistant') ||
+            projected.revision !== item.messageSource.messageRevision || projected.updatedAt < existing.updatedAt) {
           throw new Error('legacy_projection_message_conflict');
         }
         await this.conversations.save({
           ...conversation,
           revision: conversation.revision + 1,
-          updatedAt: projected.updatedAt,
+          updatedAt: projected.updatedAt > conversation.updatedAt ? projected.updatedAt : conversation.updatedAt,
           messages: conversation.messages.map(message => message.id === messageId ? projected : message)
         }, conversation.revision);
         return;

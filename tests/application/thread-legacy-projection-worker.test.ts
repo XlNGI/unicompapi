@@ -2,7 +2,7 @@ import { mkdtemp, rm } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
-import { createItemV1, createTurnV1, toIsoTimestamp, toMessageItemId, toMessageId, toProjectId, toThreadId, toTurnId } from '../../src/domain';
+import { createItemV1, createTurnV1, parseMessage, toIsoTimestamp, toMessageItemId, toMessageId, toProjectId, toThreadId, toTurnId } from '../../src/domain';
 import { ThreadLegacyProjectionWorker } from '../../src/application/thread-legacy-projection-worker';
 import { ThreadFileRepository } from '../../src/platform/repositories/thread-file-repository';
 import { JsonProjectConversationRepository } from '../../src/platform/repositories/json-project-conversation-repository';
@@ -15,6 +15,60 @@ const t1 = toIsoTimestamp('2026-10-11T00:00:01.000Z');
 afterEach(async () => { await Promise.all(roots.splice(0).map(root => rm(root, { recursive: true, force: true }))); });
 
 describe('ThreadLegacyProjectionWorker', () => {
+  it('recovers missing snapshot metadata at the same Message revision', async () => {
+    const root = await mkdtemp(path.join(os.tmpdir(), 'unicomp-thread-metadata-'));
+    roots.push(root);
+    const projectId = toProjectId('project-metadata');
+    const threadId = toThreadId('thread-metadata');
+    const message = parseMessage({ schemaVersion: 1, id: 'assistant-metadata', conversationId: threadId, role: 'assistant',
+      state: 'completed', revision: 4, content: '已完成正文', reasoningContent: '已保存推理', attachments: [], streamSequence: 1,
+      createdAt: t0, updatedAt: t1, completedAt: t1 });
+    const threads = new ThreadFileRepository(root);
+    await threads.createThread({ threadId, projectId, title: 'Metadata', createdAt: t0 });
+    const conversations = new JsonProjectConversationRepository(new NodeProjectStorage(root), projectId);
+    const item = createItemV1({ itemId: toMessageItemId(message.id), threadId, sequence: 1, type: 'assistant_message', status: 'completed',
+      content: message.content, createdAt: t0, updatedAt: t1, messageSource: { messageId: message.id, messageRevision: message.revision },
+      legacyMessageSnapshot: message as unknown as Readonly<Record<string, unknown>> });
+    await threads.append({ threadId, idempotencyKey: 'metadata', occurredAt: t1, items: [item],
+      projectionOutbox: [{ schemaVersion: 1, eventId: 'metadata-event', threadId, eventType: 'item_upsert', sequence: 1,
+        idempotencyKey: 'metadata', item, occurredAt: t1 }] });
+    const { createProjectConversation } = await import('../../src/domain');
+    const empty = createProjectConversation({ id: threadId as never, projectId, title: 'Metadata', createdAt: t0 });
+    await conversations.create(empty);
+    await conversations.save({ ...empty, revision: 1, updatedAt: t1,
+      messages: [parseMessage(Object.fromEntries(Object.entries(message).filter(([key]) => key !== 'reasoningContent')))] }, empty.revision);
+    const worker = new ThreadLegacyProjectionWorker(threads, conversations, () => t1);
+    await expect(worker.drain(String(threadId))).resolves.toMatchObject({ projected: 1, pending: 0 });
+    expect((await conversations.get(threadId as never))?.messages).toEqual([message]);
+    await expect(worker.drain(String(threadId))).resolves.toMatchObject({ projected: 0, pending: 0 });
+  });
+  it.each(['streaming', 'failed', 'cancelled', 'completed'] as const)('restores the first %s Assistant snapshot with its metadata after projection loss', async state => {
+    const root = await mkdtemp(path.join(os.tmpdir(), 'unicomp-thread-snapshot-'));
+    roots.push(root);
+    const projectId = toProjectId('project-snapshot');
+    const threadId = toThreadId('thread-snapshot');
+    const message = parseMessage({ schemaVersion: 1, id: 'assistant-snapshot', conversationId: threadId,
+      role: 'assistant', state, revision: 4, content: '真实回复片段', reasoningContent: '已保存的推理文本',
+      attachments: [], streamSequence: 1, createdAt: t0, updatedAt: t1,
+      ...(state === 'streaming' ? { startedAt: t0 } : state === 'failed' ? { failedAt: t1, failureReason: 'interrupted' }
+        : state === 'cancelled' ? { cancelledAt: t1 } : { completedAt: t1,
+          documentResult: { kind: 'ppt', workId: 'work-snapshot', fileName: 'snapshot.pptx', sizeBytes: 123 } }) });
+    const repository = new ThreadFileRepository(root);
+    await repository.createThread({ threadId, projectId, title: 'Snapshot', createdAt: t0 });
+    const item = createItemV1({ itemId: toMessageItemId(message.id), threadId, sequence: 1, type: 'assistant_message',
+      status: state, content: message.content, createdAt: t0, updatedAt: t1,
+      messageSource: { messageId: message.id, messageRevision: message.revision },
+      legacyMessageSnapshot: message as unknown as Readonly<Record<string, unknown>> });
+    await repository.append({ threadId, idempotencyKey: 'snapshot', occurredAt: t1, items: [item],
+      projectionOutbox: [{ schemaVersion: 1, eventId: 'snapshot-event', threadId, eventType: 'item_upsert',
+        sequence: 1, idempotencyKey: 'snapshot', item, occurredAt: t1 }] });
+    const conversations = new JsonProjectConversationRepository(new NodeProjectStorage(root), projectId);
+    const worker = new ThreadLegacyProjectionWorker(repository, conversations, () => t1);
+    await expect(worker.drain(String(threadId))).resolves.toMatchObject({ projected: 1, pending: 0 });
+    expect((await conversations.get(threadId as never))?.messages).toEqual([message]);
+    await expect(worker.drain(String(threadId))).resolves.toMatchObject({ projected: 0, pending: 0 });
+  });
+
   it('projects a committed User Item once and resumes from a durable receipt', async () => {
     const root = await mkdtemp(path.join(os.tmpdir(), 'unicomp-thread-legacy-worker-'));
     roots.push(root);

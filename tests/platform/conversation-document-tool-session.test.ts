@@ -42,7 +42,7 @@ afterEach(async () => {
   await Promise.all(roots.splice(0).map(root => rm(root, { recursive: true, force: true })));
 });
 
-async function fixture(texts = ['封面：验收演示文稿', '第二页独有事实：预算为二百万元', '第三页独有事实：计划为三百万元']) {
+async function fixture(texts = ['封面：验收演示文稿', '第二页独有事实：预算为二百万元', '第三页独有事实：计划为三百万元'], mutation = false) {
   const rootDirectory = await mkdtemp(path.join(os.tmpdir(), 'unicomp-document-read-session-'));
   roots.push(rootDirectory);
   const storage = new NodeProjectStorage(rootDirectory);
@@ -51,7 +51,8 @@ async function fixture(texts = ['封面：验收演示文稿', '第二页独有�
   const works = new JsonWorkRepository(storage, projectId);
   let currentProjectId: ProjectId | undefined = projectId;
   const service = new ConversationDocumentToolSessionService({ rootDirectory, projectId, conversations,
-    getCurrentProjectId: () => currentProjectId });
+    getCurrentProjectId: () => currentProjectId,
+    ...(mutation ? { mutation: { renderPreview: async () => ({ previewCount: 3, diagnostics: [] }) } } : {}) });
   services.push(service);
   let conversation: Conversation = createProjectConversation({ id: toConversationId('read-session-conversation'),
     projectId, title: '真实 PPT 查询', createdAt: now });
@@ -113,6 +114,28 @@ function execute(session: ConversationDocumentToolSession, args: Record<string, 
 }
 
 describe('production registered document read sessions', () => {
+  it.each([false, true])('requires the requested read only until a successful observation is delivered (identity tools: %s)', async mutation => {
+    const data = await fixture(undefined, mutation);
+    const { session } = await data.session();
+    const signal = new AbortController().signal;
+    expect(session.providerToolChoice?.(await session.prepareTools(signal))).toBe('required');
+    expect(await execute(session, { scope: 'document' })).toMatchObject({ status: 'success' });
+    const tools = await session.prepareTools(signal);
+    expect(tools).toHaveLength(1);
+    expect(session.providerToolChoice?.(tools)).toBeUndefined();
+  });
+
+  it.each([['讨论一下演示文稿的方向', false], ['制作一份新的PPT', false], ['立即生成新的PPT', true]] as const)
+  ('pins the generation requirement separately from Agent tool availability: %s', async (query, generationRequired) => {
+    const data = await fixture();
+    const request = await data.question(query);
+    const message = request.conversation.messages.at(-1)!;
+    const draft = createConversationResponseDraft({ id: toConversationResponseDraftId('required-gate'), projectId,
+      conversationId: request.conversation.id, conversationRevision: request.conversation.revision,
+      userMessageId: message.id, userMessageRevision: message.revision, agentNative: true, productFeature: 'text_chat', createdAt: now });
+    expect(await data.service.prepare({ conversation: request.conversation, draft })).toMatchObject({ kind: 'agent', generationRequired });
+  });
+
   it('admits a legacy whole-document regeneration with a parent Work as an independent first identity', async () => {
     const data = await fixture();
     await data.works.save({ ...data.first.work, parentWorkId: toWorkId('legacy-prior-version') });

@@ -97,6 +97,7 @@ export interface ConversationAgentToolSelection {
   readonly userMessageRevision: number;
   readonly bindingHash: string;
   readonly generation: ConversationDocumentGenerationToolSelection;
+  readonly generationRequired: boolean;
   readonly mutation?: ConversationDocumentMutationToolSelection;
 }
 
@@ -268,6 +269,9 @@ export class ConversationDocumentToolSessionService implements ConversationDocum
     }
     if (draft.imageQuery !== undefined) return undefined;
     if (draft.agentNative) {
+      const query = message.displayContent ?? message.content;
+      const generationRequired = (isPptGenerationIntent(query) || isPptGenerationConfirmation(conversation, message.id)) &&
+        isPptGenerationApproved(conversation, message.id, query);
       const generation = Object.freeze({
         kind: 'generation' as const,
         projectId: this.options.projectId,
@@ -296,8 +300,9 @@ export class ConversationDocumentToolSessionService implements ConversationDocum
         conversationId: generation.conversationId,
         currentUserMessageId: generation.currentUserMessageId,
         userMessageRevision: generation.userMessageRevision,
-        bindingHash: hash(JSON.stringify([generation.bindingHash, mutation?.bindingHash])),
+        bindingHash: hash(JSON.stringify([generation.bindingHash, mutation?.bindingHash, generationRequired])),
         generation,
+        generationRequired,
         ...(mutation ? { mutation } : {}),
       });
       this.issued.add(selection);
@@ -605,7 +610,10 @@ export class ConversationDocumentToolSessionService implements ConversationDocum
       }] });
     const session: ConversationDocumentToolSession = {
       executionBudget,
-      providerToolChoice: tools => tools?.length === 1 ? 'required' : undefined,
+      // A successful read Observation is terminal for this read request. Keep
+      // the tool available for the current transcript, but do not force the
+      // provider to call it again on a follow-up clarification/final answer.
+      providerToolChoice: tools => !observationDelivered && tools?.length === 1 ? 'required' : undefined,
       prepareTools: async signal => {
         if (!await executionBudget.run('prepare', child => prepareWithinDeadline(AbortSignal.any([signal, child])), contract.execution.timeoutMs)) {
           // Subsequent requests already carry tool messages. Removing tools
@@ -821,7 +829,6 @@ export class ConversationDocumentToolSessionService implements ConversationDocum
               })) }));
             const recentAddition = await lastAddedElement(current);
             if (!await authorized() || ctx.abortSignal.aborted) return failed('authorization_or_revision_invalid');
-            observationDelivered = true;
             return { schemaVersion: 1, status: 'success', observation: { scope: args.scope, totalPages: current.identity.pages.length,
               structureUnit: 'physical_page', source: 'verified_pptx_objects', ...(args.scope === 'page' ? { page: pages[0] } : { pages }),
               ...(recentAddition && selectedPages.some(page => page.pageId === recentAddition.pageId) ? { lastAddedElement: recentAddition } : {}) } };
@@ -897,7 +904,7 @@ export class ConversationDocumentToolSessionService implements ConversationDocum
       ] });
     const session: ConversationDocumentToolSession = {
       executionBudget,
-      providerToolChoice: tools => tools?.length === 1 ? 'required' : undefined,
+      providerToolChoice: tools => !observationDelivered && tools?.length === 1 ? 'required' : undefined,
       prepareTools: async signal => {
         try {
           if (!await executionBudget.run('prepare', child => refresh(AbortSignal.any([signal, child])), 30_000)) {
@@ -907,7 +914,13 @@ export class ConversationDocumentToolSessionService implements ConversationDocum
         } catch (error) { eligible = false; writable = false; if (observationDelivered) throw error; return undefined; }
         return bridge.tools.length ? bridge.tools : undefined;
       },
-      bridge: { execute: request => bridge.bridge.execute(request) },
+      bridge: { execute: async request => {
+        const result = await bridge.bridge.execute(request);
+        if (request.call.name === 'read_document_structure' && result.status === 'success' && result.observation !== undefined) {
+          observationDelivered = true;
+        }
+        return result;
+      } },
       cancel: async () => { epoch += 1; eligible = false; writable = false; executionBudget.cancel('cancelled'); controller.abort(); },
       close: async () => {
         if (closed) return;
@@ -1186,6 +1199,9 @@ export class ConversationDocumentToolSessionService implements ConversationDocum
 
   private async createAgentSession(input: { readonly selection: ConversationAgentToolSelection; readonly responseExecutionId: string;
     readonly signal?: AbortSignal; readonly executionBudget?: HostExecutionBudget }): Promise<ConversationDocumentToolSession> {
+    // Tool availability authorizes the Agent to choose a tool; it does not
+    // turn an ordinary discussion into an explicit generation command.
+    const generationRequired = input.selection.generationRequired;
     const generation = await this.createGenerationSession({ selection: input.selection.generation, responseExecutionId: input.responseExecutionId, signal: input.signal,
       combined: Boolean(input.selection.mutation), executionBudget: input.executionBudget });
     let mutation: ConversationDocumentToolSession | undefined;
@@ -1203,7 +1219,7 @@ export class ConversationDocumentToolSessionService implements ConversationDocum
     let generationPublished = false;
     const session: ConversationDocumentToolSession = {
       executionBudget: generation.executionBudget,
-      providerToolChoice: tools => !mutation && generation.providerToolChoice
+      providerToolChoice: tools => !mutation && (generationRequired || generationPublished) && generation.providerToolChoice
         ? generation.providerToolChoice(tools)
         : undefined,
       prepareTools: async signal => {
