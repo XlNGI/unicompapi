@@ -1,5 +1,13 @@
 # UniComp 开发计划
 
+### 维护优化：会话历史持久化开销与整体审查（2026-10-12）
+
+继续启动/恢复修复 `cc99df9`。Response Lifecycle append 复用可选 committed snapshot，减少一次完整文件读取/校验；Repository 校验按 execution id 分组，避免每个 execution 扫描全部 event。保留原子追加、连续序列、项目/身份/重试校验、备份和 unknown 门禁；并发快照过期继续拒绝冲突，不隐式重试。
+
+隔离合成 165 次执行、22,037 个 event、7,103 个 trace event：5 次样本中位数，纯 Response 校验 101.9→73.2 ms，一次 content append 457.6→247.5 ms（约 -46%），未包含 Thread/Legacy/canonical 回调或真实 Provider。基准脚本和机器证据已保存，不能据此宣称端到端生成耗时减少 46%。用户数据只读审查还发现共享 metadata 33.8 MB、acceptance value 约 31 MB、Provider operation 13 个 base64 值共约 29.34 MB；本轮不裁剪历史或改变存储格式。
+
+累计不同定向测试 159 项、UI 合同 27/27，typecheck、lint、生产 build 通过；Electron Thread/Legacy 导航与 Mock Provider/Office 保持通过。Legacy Electron 有一次末条显示等待超时，新增页面状态诊断后复跑通过，原因仍未证实，保留风险记录。整体问题、今天现场时间线、已修复与剩余优先级见 [会话稳定性审查](docs/current/chat-startup-stability-review-20261012.md)，性能证据见 [合成持久化基准](docs/evidence/chat-history-persistence-20261012.json)。下一批先量化共享元数据/canonical 写放大及迟到工具取消，再继续剩余 Legacy/Capability 接线；本轮收费请求 0、未知结果自动重试 0。
+
 ### 维护修复：Agent 启动反馈与切页执行控制恢复（2026-10-12）
 
 在 `feature/office-agent-thread-model-convergence@78718ed` 的干净工作区继续审查。今天现场取证已从项目内 Response Execution/Production Trace/Document Runtime 补齐：14:42 建立执行、14:46 因 `newapi.tool_loop_unknown_result` 失败，已调用生成工具和 Art Direction；Agent/Document 为 `needs_reconciliation`，Observation 为空且未新增正式 Work。`renderer-trace.log` 停在 10 月 10 日并不表示今天没有执行记录；HTTP 200 不是整条流完成。

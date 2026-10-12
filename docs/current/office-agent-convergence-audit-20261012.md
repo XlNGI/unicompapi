@@ -2,6 +2,8 @@
 
 日期：2026-10-12。基线：`develop = origin/develop = d863d3f4a7fdc850880d493ee146d7b7d1a27420`。实施分支：`feature/office-agent-thread-model-convergence`。初始工作区干净；不依据旧阶段状态重建已有能力。
 
+追加维护：`78718ed` 修复切页消息恢复，`cc99df9` 修复 Agent 启动反馈、同步重复发送及 Thread Runtime 控制恢复。后续 Response snapshot/事件分组优化、今天工具超时未知结果与共享 metadata/base64 写放大详见 [会话稳定性审查](chat-startup-stability-review-20261012.md)；这些修复不代表下文剩余 Legacy/Capability 调用方已全部收敛。
+
 ## 已存在且继续复用
 
 `ConversationTurnCoordinator`、Thread Commit/Projection Outbox、`ThreadLegacyProjectionWorker`、Thread Summary/Page、虚拟列表、Assistant 同一 Item 更新、Tool/Artifact 投影及启动迁移屏障已经存在。默认 Electron 启动通过 Legacy 备份、迁移 Ledger 和 Shadow Compare 后激活 Thread authority；`UNICOMP_THREAD_FIRST=0` 保留回滚。Agent Runtime、Response Execution、Document Runtime、Work/File/Hash 和 Completion Journal 仍分别拥有执行、文档与结算事实。本轮没有替换这些实现，也没有直接打开真实用户项目执行迁移。

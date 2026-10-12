@@ -264,19 +264,18 @@ export function parseConversationResponseExecutionDocument(
   ) {
     throw invalidDocument();
   }
-  for (const execution of executions) {
-    const timeline = events
-      .filter((event) => event.responseExecutionId === execution.id)
-      .sort((left, right) => left.sequence - right.sequence);
-    projectConversationResponseExecution({ execution, events: timeline });
-    assertRetry(executions, execution);
+  const executionsById = new Map(executions.map(execution => [execution.id, execution]));
+  const eventsByExecution = new Map<ConversationResponseExecutionId, ConversationResponseStreamEventV1[]>();
+  for (const event of events) {
+    if (!executionsById.has(event.responseExecutionId)) throw invalidDocument();
+    const timeline = eventsByExecution.get(event.responseExecutionId) ?? [];
+    timeline.push(event);
+    eventsByExecution.set(event.responseExecutionId, timeline);
   }
-  if (
-    events.some((event) =>
-      !executions.some((execution) => execution.id === event.responseExecutionId)
-    )
-  ) {
-    throw invalidDocument();
+  for (const execution of executions) {
+    const timeline = (eventsByExecution.get(execution.id) ?? []).sort((left, right) => left.sequence - right.sequence);
+    projectConversationResponseExecution({ execution, events: timeline });
+    assertRetry(executionsById, execution);
   }
   return {
     schemaVersion: 1,
@@ -287,11 +286,13 @@ export function parseConversationResponseExecutionDocument(
 }
 
 function assertRetry(
-  executions: readonly ConversationResponseExecutionV1[],
+  executions: readonly ConversationResponseExecutionV1[] | ReadonlyMap<ConversationResponseExecutionId, ConversationResponseExecutionV1>,
   execution: ConversationResponseExecutionV1
 ): void {
   if (!execution.retryOfExecutionId) return;
-  const previous = executions.find((item) => item.id === execution.retryOfExecutionId);
+  const previous = Array.isArray(executions)
+    ? executions.find(item => item.id === execution.retryOfExecutionId)
+    : (executions as ReadonlyMap<ConversationResponseExecutionId, ConversationResponseExecutionV1>).get(execution.retryOfExecutionId);
   if (
     !previous ||
     !['failed', 'cancelled', 'interrupted'].includes(previous.state) ||
