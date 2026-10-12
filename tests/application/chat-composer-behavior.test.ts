@@ -364,6 +364,86 @@ describe('chat composer event behavior', () => {
     expect(cancelResponseExecution).toHaveBeenCalledWith(execution.responseExecutionId);
   });
 
+  it.each([true, false])('keeps a persisted document draft preview after navigation without hiding ordinary JSON (document: %s)', async document => {
+    initialConversationId = conversation.conversationId;
+    const outline = JSON.stringify({ kind: 'ppt', title: '测试演示文稿', sections: [
+      { heading: '演示概述', blocks: [{ type: 'paragraph', text: '仍保留的文档内容' }] }
+    ] });
+    const messages = [
+      { messageId: 'source-1', role: 'user', content: '帮我生成一个测试ppt' },
+      ...(document ? [{ messageId: 'disclosure-1', role: 'assistant', content: '本次制作不联网搜索',
+        workflowReply: { workflowId: 'sources-workflow-1-0', revision: 0 } }] : []),
+      { messageId: 'assistant-1', role: 'assistant', content: outline }
+    ].map(message => ({ ...message, conversationId: conversation.conversationId, revision: 1, state: 'completed',
+      attachments: [], createdAt: conversation.updatedAt, updatedAt: conversation.updatedAt }));
+    const summary = { ...conversation, threadId: conversation.conversationId, messageCount: messages.length,
+      turnCount: 1, hasActiveDocumentGeneration: false };
+    Object.assign(window.unicomp!.chatContexts!, {
+      listThreadSummaries: vi.fn(async () => ({ ok: true, value: { items: [summary], hasMore: false, readAtSequence: 1 } })),
+      getThreadItemsPage: vi.fn(async () => ({ ok: true, value: { ...summary, items: messages.map((message, sequence) => ({
+        itemId: { namespace: 'message', value: message.messageId }, itemType: `${message.role}_message`, message,
+        threadId: conversation.conversationId, status: 'completed', createdAt: conversation.updatedAt, sequence
+      })), hasMore: false, readAtSequence: messages.length } })),
+      getThread: vi.fn(async () => ({ ok: true, value: { ...summary, parentRuns: [], agentSessions: [] } }))
+    });
+    for (let visit = 0; visit < 2; visit += 1) {
+      await settle(32);
+      const reply = find(tree, item => item.type === 'li' && item.key === 'assistant-1');
+      const progress = find(reply, item => typeof item.type === 'function' && (item.type as { name?: string }).name === 'DocumentProgress');
+      const markdown = find(reply, item => item.props.content === outline && 'streaming' in item.props);
+      if (document) {
+        expect(progress?.props.bodyContent).toBe(outline);
+        expect(progress?.props.detail).toBe('文档内容已接收，尚未生成可交付文件。');
+        expect(markdown).toBeUndefined();
+      } else {
+        expect(markdown?.props.content).toBe(outline);
+      }
+      unmount();
+    }
+    expect(startResponse).not.toHaveBeenCalled();
+  });
+
+  it.each(['word', 'excel', 'ppt'] as const)('restores the local %s file generation owner and stop control from persisted status', async kind => {
+    initialConversationId = conversation.conversationId;
+    const message = { messageId: 'local-file-assistant', conversationId: conversation.conversationId, revision: 2,
+      role: 'assistant', state: 'completed', content: '# 本地文件正文', attachments: [],
+      documentGenerationStatus: { state: 'generating_file', kind }, createdAt: conversation.updatedAt, updatedAt: conversation.updatedAt };
+    const summary = { ...conversation, revision: 3, threadId: conversation.conversationId, messageCount: 1, turnCount: 1,
+      hasActiveDocumentGeneration: true };
+    const cancelGeneration = vi.fn(async () => ({ ok: true, value: { cancelled: true } }));
+    const generateFromMessage = vi.fn();
+    const reconcileGeneration = vi.fn();
+    Object.assign(window.unicomp!, { documentGeneration: { cancelGeneration, generateFromMessage, reconcileGeneration } });
+    Object.assign(window.unicomp!.chatContexts!, {
+      listThreadSummaries: vi.fn(async () => ({ ok: true, value: { items: [summary], hasMore: false, readAtSequence: 1 } })),
+      getThreadItemsPage: vi.fn(async () => ({ ok: true, value: { ...summary, items: [{
+        itemId: { namespace: 'message', value: message.messageId }, itemType: 'assistant_message', message,
+        threadId: conversation.conversationId, status: 'completed', createdAt: conversation.updatedAt, sequence: 1
+      }], hasMore: false, readAtSequence: 1 } })),
+      getConversation: vi.fn(async () => ({ ok: true, value: { ...conversation, revision: 3, messages: [message] } })),
+      getThread: vi.fn(async () => ({ ok: true, value: { ...summary, parentRuns: [], agentSessions: [] } }))
+    });
+    await settle(32);
+    const recovered = find(tree, item => item.type === 'li' && item.key === message.messageId);
+    expect(recovered).toBeDefined();
+    const draft = find(tree, item => typeof item.type === 'function' && (item.type as { name?: string }).name === 'ChatDraftField');
+    expect(draft?.props.documentGenerationActive).toBe(true);
+    expect(element('停止文档生成')).toBeDefined();
+    unmount();
+    await settle(32);
+    await type('不要重复发送');
+    await send('enter');
+    expect(startWorkflow).not.toHaveBeenCalled();
+    expect(startResponse).not.toHaveBeenCalled();
+    (element('停止文档生成').props.onClick as () => void)();
+    await settle(12);
+    expect(cancelGeneration).toHaveBeenCalledWith({ conversationId: conversation.conversationId, expectedRevision: 3,
+      messageId: message.messageId });
+    expect(generateFromMessage).not.toHaveBeenCalled();
+    expect(reconcileGeneration).not.toHaveBeenCalled();
+    unmount();
+  });
+
   it('does not plan with a selected model that is no longer available', async () => {
     candidateEnabled = false;
     await settle();

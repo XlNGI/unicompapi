@@ -6,7 +6,7 @@ import JSZip from 'jszip';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
   addCompletedAssistantMessage, addUserMessage, archiveConversation, attachDocumentResultToMessage,
-  createConversationResponseDraft, createProjectConversation,
+  createConversationResponseDraft, createProjectConversation, createConversationWorkflow, parseConversationIntentPlan, toConversationWorkflowId,
   toConversationId, toConversationResponseDraftId, toExecutionId, toFileReferenceId,
   toIsoTimestamp, toMessageId, toProjectId, toTaskId, toWorkId,
   type Conversation, type ConversationResponseDraftV1, type FileReference, type ProjectId, type Work
@@ -134,6 +134,35 @@ describe('production registered document read sessions', () => {
       conversationId: request.conversation.id, conversationRevision: request.conversation.revision,
       userMessageId: message.id, userMessageRevision: message.revision, agentNative: true, productFeature: 'text_chat', createdAt: now });
     expect(await data.service.prepare({ conversation: request.conversation, draft })).toMatchObject({ kind: 'agent', generationRequired });
+  });
+
+  it('requires creation authorized by a ready Host workflow even with an existing PPT and ordinary wording', async () => {
+    const data = await fixture(undefined, true);
+    const service = new ConversationDocumentToolSessionService({ rootDirectory: data.rootDirectory, projectId,
+      conversations: data.conversations, mutation: { renderPreview: async () => ({ previewCount: 3, diagnostics: [] }) },
+      generatePptx: { compiler: { compile: () => { throw new Error('unused'); }, recover: () => { throw new Error('unused'); } },
+        executor: { run: async () => { throw new Error('unused'); } }, revalidateAuthorization: async () => true } });
+    services.push(service);
+    const request = await data.question('帮我生成一个测试ppt');
+    const message = request.conversation.messages.at(-1)!;
+    const draft = createConversationResponseDraft({ id: toConversationResponseDraftId('workflow-required'), projectId,
+      conversationId: request.conversation.id, conversationRevision: request.conversation.revision,
+      userMessageId: message.id, userMessageRevision: message.revision, agentNative: true, productFeature: 'text_chat', createdAt: now });
+    const workflow = createConversationWorkflow({ id: toConversationWorkflowId('confirmed-create-ppt'), projectId,
+      conversationId: request.conversation.id, sourceMessageId: message.id, createdAt: now,
+      plan: parseConversationIntentPlan({ schemaVersion: 1, kind: 'document', action: 'create', documentKind: 'ppt',
+        parameters: {}, sourcePolicy: 'none', missing: [], ambiguities: [], confidence: 'high', needsConfirmation: false }) });
+    const selection = await service.prepare({ conversation: request.conversation, draft, workflow });
+    expect(selection).toMatchObject({ kind: 'agent', generationRequired: true });
+    expect(selection).not.toHaveProperty('mutation');
+    const session = await service.createSession({ selection: selection!, responseExecutionId: 'confirmed-workflow-execution' });
+    sessions.push(session);
+    const definitions = await session.prepareTools(new AbortController().signal);
+    expect(definitions?.map(tool => tool.function.name)).toEqual(['generate_pptx']);
+    expect(session.providerToolChoice?.(definitions)).toBe('required');
+    await expect(service.prepare({ conversation: request.conversation,
+      draft: { ...draft, id: toConversationResponseDraftId('wrong-workflow-source') },
+      workflow: { ...workflow, sourceMessageId: toMessageId('other-request') } })).rejects.toThrow();
   });
 
   it('admits a legacy whole-document regeneration with a parent Work as an independent first identity', async () => {

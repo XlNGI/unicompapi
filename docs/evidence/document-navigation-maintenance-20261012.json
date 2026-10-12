@@ -1,0 +1,71 @@
+{
+  "schemaVersion": 1,
+  "date": "2026-10-12",
+  "status": "verified_maintenance_scope",
+  "branch": "feature/office-agent-thread-model-convergence",
+  "externalRequests": 0,
+  "unknownOutcomeRetries": 0,
+  "realUserProjectWrites": 0,
+  "userApplicationRestarted": false,
+  "originalIncident": {
+    "responseState": "completed",
+    "outlineCharacters": 1101,
+    "documentRuntimeState": "paused",
+    "documentToolCalls": 0,
+    "formalDocumentReceiptObserved": false,
+    "navigationCausedPersistedCancellation": "not_proven"
+  },
+  "checks": {
+    "relatedRegression": {
+      "command": "pnpm exec vitest run tests/platform/conversation-document-tool-session.test.ts tests/platform/conversation-response-controller.test.ts tests/platform/production-document-generation-loop.test.ts tests/platform/r04-r05-production-continuation.test.ts tests/application/chat-composer-behavior.test.ts tests/application/virtual-message-list.test.tsx --maxWorkers=1 --minWorkers=1 --fileParallelism=false",
+      "files": 6,
+      "passed": 244,
+      "failed": 0,
+      "skipped": 0,
+      "report": "outputs/document-navigation/final-regression.log"
+    },
+    "finalComposerAfterEnterGuard": { "passed": 61, "failed": 0, "skipped": 0, "report": "outputs/document-navigation/chat-final.log" },
+    "nodeUi": { "passed": 401, "failed": 0, "skipped": 0, "report": "outputs/document-navigation/node-ui.log" },
+    "typecheck": "passed",
+    "lint": "passed",
+    "productionBuild": "passed",
+    "fullSerialBeforeFixtureCorrection": {
+      "files": 337,
+      "passed": 3482,
+      "failed": 3,
+      "total": 3485,
+      "failure": "New local-file control fixtures expected the response stop label instead of the existing local document stop label.",
+      "correction": "Fixtures now assert the local document stop label, restored original owner, no repeat generation, and Enter suppression. Entire composer file and relevant regression pass.",
+      "report": "outputs/document-navigation/vitest-final-full.log",
+      "rewrittenAsAllPassed": false
+    },
+    "electronInFlightNavigation": {
+      "command": "pnpm exec electron scripts/verify-agent-provider-mock-electron.cjs --ui-navigation",
+      "status": "passed",
+      "boundary": "Isolated real React ChatPage, Electron preload, IPC, controlled in-process Provider transport, production Tool runtime and physical PPT generation.",
+      "visits": 3,
+      "responseStateDuringVisits": "streaming",
+      "parentStateDuringVisits": "executing_tool",
+      "stopControlRestored": true,
+      "generationCount": 1,
+      "registeredWorkCount": 1,
+      "completedReceiptRestoredAfterNavigation": true,
+      "report": "outputs/document-navigation/electron-navigation.json"
+    },
+    "electronLayout": {
+      "longOutlineSections": 15,
+      "textareaHeightPx": 180,
+      "composerHeightPx": 258,
+      "clearancePx": 282,
+      "lastMessageBottomPx": 472.984375,
+      "composerTopPx": 497,
+      "measuredRowGapsPx": [24.40625, 24.8125],
+      "rawOutlineJsonVisible": false,
+      "undeliveredStatusVisible": true,
+      "screenshot": "outputs/document-navigation/draft-layout.png"
+    },
+    "historyNavigation": { "thread": "passed", "legacy": "passed", "conversations": 3, "messagesPerConversation": 120 }
+  },
+  "notRun": ["New paid Provider requests", "Original task regeneration", "macOS hardware", "Real external Provider navigation matrix"],
+  "applicationRequirement": "Start a new main process to load backend fixes; current user process was preserved."
+}

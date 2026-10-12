@@ -1,5 +1,15 @@
 # UniComp 开发计划
 
+### 维护修复：文档生成切页恢复、PPT 执行确认与正文遮挡（2026-10-12）
+
+针对本轮用户截图继续维护，未新增付费请求。只读记录确认原 PPT Response 已收到大纲 JSON，但 Document Runtime 没有工具调用和正式 Work；后续取消记录不能单独证明由切页触发。修复 ready PPT Workflow 仍发送“仅 JSON、禁止工具”的旧提示，以及工具必须执行只判断原 User 措辞的问题。Agent 工具 prepare 消费应用校验的 ready 计划，确认 create/PPT 后固定生成和读回，禁止用修改旧 PPT 代替新建；结算从绑定 execution 的持久 Workflow 保留要求。同 Root 连续澄清允许保留原需求来源，仍校验项目、会话、来源顺序；普通讨论及旧 Outline 路径保持。
+
+切页返回现在从已保存的来源说明恢复文档草稿正文预览；只有大纲时显示“尚未生成可交付文件”，不把回复完成记成文件交付。本地 validating_outline/generating_file 恢复原会话/消息的停止控制和有限轮询，Word/Excel/PPT 三类回归均通过；不重发生成，不因页面挂载写 interrupted，生成期间回车不会重复发送。虚拟消息偏移补齐 24px 间距，输入框遮挡留白按实际高度更新，跟随输出时同步滚动。
+
+隔离真实 Electron + React + preload + IPC + Mock Provider 连续三次卸载/返回，Response streaming / Parent executing_tool 均保持，停止按钮恢复；释放本地执行后仅生成一次、登记一个 Work，完成后再次切页正式卡片仍可恢复。15 节长正文与加高输入框验收，末条消息距输入框约 24px、无原始大纲 JSON、状态如实保留。Thread/Legacy 各 3 会话 × 120 消息历史导航也通过。
+
+最终相关 6 文件 **244/244**，最新 ChatPage **61/61**、Node/UI **401/401**，typecheck、lint、生产 build 通过。中间全量曾发现来源校验过严，已修复并复核；随后全量 **3482/3485**，3 个新增夹具按钮名期待错误，修正为“停止文档生成”后整文件及相关回归通过。原失败日志保留，不把中间全量改写为一次全部通过。本轮外部请求 **0**、未知结果重试 **0**，原用户任务不自动补生成、不伪造交付；未主动重启用户应用。后台修复需要新主进程加载，macOS 实机与真实 Provider 切页矩阵未运行。工程说明见 [切页维护记录](docs/current/document-navigation-maintenance-20261012.md)，验收见 [机器证据](docs/evidence/document-navigation-maintenance-20261012.json)。
+
 ### 持续维护收敛：共享 Thread 仓储、恢复/Office/CRUD 与真实交付核验（2026-10-12）
 
 从 `d589426` 继续，未以单批提交作为整体停点。新增 `ThreadConversationRepository` 实现原 Conversation 仓储合同，所有写入仍经过唯一 Turn Coordinator/Thread Commit。默认 Thread 模式的创建、消息、改名、归档/恢复/删除、取消后编辑、Context Registry、最近项目摘要、本地恢复以及独立 Office 读写均已接入；Legacy 保留为首次迁移、只读兼容、Outbox 投影和显式回滚。元数据 Outbox 与消息同一 Commit，metadata 投影中断时仍能读回已提交标题/状态/revision；已切换 fence 的重启先恢复 Thread，不重新拿滞后 Legacy 做权威准入。投影遇到失败保留顺序欠账，不重发 Provider/工具。

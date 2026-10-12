@@ -724,7 +724,7 @@ function ChatDraftField({
         onKeyDown={(event) => {
           if (event.key === 'Enter' && !event.shiftKey && !event.nativeEvent.isComposing) {
             event.preventDefault();
-            if (!responseInProgress && !cancelRequested && !busy) onSubmit();
+            if (!showStop && !cancelRequested && !busy) onSubmit();
           }
         }}
         onPaste={(event: ClipboardEvent<HTMLTextAreaElement>) => {
@@ -911,6 +911,7 @@ export function ChatPage({
   const [candidateReloadVersion, setCandidateReloadVersion] = useState(0);
   const attachmentInputRef = useRef<HTMLInputElement>(null);
   const messagesRef = useRef<HTMLDivElement>(null);
+  const composerRegionRef = useRef<HTMLDivElement>(null);
   const followScrollFrameRef = useRef<number>();
   const dragDepthRef = useRef(0);
   const cancelRequestedRef = useRef(false);
@@ -1087,6 +1088,18 @@ export function ChatPage({
     }
     return previousUserById;
   }, [selected?.messages]);
+  const documentSourceIds = useMemo(() => {
+    const ids = new Set<string>();
+    for (const message of selected?.messages ?? []) {
+      // This local disclosure is persisted only for an Application-validated
+      // document workflow. Keep the display identity when React remounts.
+      if (message.workflowReply?.workflowId.startsWith('sources-')) {
+        const source = previousUserByMessageId.get(message.messageId);
+        if (source) ids.add(source.messageId);
+      }
+    }
+    return ids;
+  }, [selected?.messages, previousUserByMessageId]);
   const displayMessages = useMemo(() => {
     return productionProjection.messages.map((message) => {
       if (!responseExecution || message.messageId !== responseExecution.assistantMessageId) {
@@ -1345,6 +1358,21 @@ export function ChatPage({
   }, [conversations, session?.projectId]);
 
   useEffect(() => {
+    if (!selected || documentGenerationInFlightRef.current) return;
+    const localFileMessage = selected.messages.find(message => message.role === 'assistant' &&
+      ['validating_outline', 'generating_file'].includes(message.documentGenerationStatus?.state ?? ''));
+    if (localFileMessage) {
+      activeDocumentGenerationRef.current = { conversationId: selected.conversationId,
+        expectedRevision: selected.revision, messageId: localFileMessage.messageId };
+      setDocumentGenerationActive(true);
+    } else if (activeDocumentGenerationRef.current?.conversationId === selected.conversationId) {
+      activeDocumentGenerationRef.current = undefined;
+      setDocumentGenerationActive(false);
+      setDocumentCancelRequested(false);
+    }
+  }, [selected?.conversationId, selected?.revision, selected?.messages]);
+
+  useEffect(() => {
     if (!documentGenerationActive || !chat || !selectedId) return;
     let active = true;
     let timer: ReturnType<typeof setTimeout>;
@@ -1386,6 +1414,22 @@ export function ChatPage({
       }
     };
   }, [selected?.conversationId, displayMessages.length]);
+
+  useEffect(() => {
+    const composer = composerRegionRef.current;
+    const messages = messagesRef.current;
+    if (!composer || !messages) return;
+    const reserveComposer = () => {
+      messages.style.setProperty('--uc-chat-composer-clearance', `${Math.ceil(composer.getBoundingClientRect().height) + 24}px`);
+      // The clearance changes scrollHeight without resizing the message list.
+      // Preserve following before the browser emits the resulting scroll event.
+      if (followOutputRef.current) messages.scrollTo({ top: messages.scrollHeight, behavior: 'auto' });
+    };
+    reserveComposer();
+    const observer = typeof ResizeObserver === 'undefined' ? undefined : new ResizeObserver(reserveComposer);
+    observer?.observe(composer);
+    return () => { observer?.disconnect(); messages.style.removeProperty('--uc-chat-composer-clearance'); };
+  }, []);
 
   useEffect(() => () => {
     if (followScrollFrameRef.current !== undefined) {
@@ -1891,7 +1935,7 @@ export function ChatPage({
   }
 
   function startNewConversation() {
-    if (responseInProgress || busy || documentGenerationInFlightRef.current) {
+    if (responseInProgress || busy || documentGenerationActive || documentGenerationInFlightRef.current) {
       setNotice('请先停止当前回复，再开始新的对话。');
       return;
     }
@@ -2124,6 +2168,8 @@ export function ChatPage({
       !inputValueRef.current.trim() ||
       cancelRequested ||
       responseInProgress ||
+      documentGenerationActive ||
+      documentResponseActive ||
       startingClientCommandIdRef.current ||
       busy
     ) {
@@ -4442,13 +4488,16 @@ export function ChatPage({
                     item.messageId === editableCancelledUserMessage?.messageId &&
                     !responseInProgress &&
                     !cancelRequested;
+                  const persistedDocumentDraft = item.role === 'assistant' &&
+                    Boolean(sourceMessage && documentSourceIds.has(sourceMessage.messageId)) &&
+                    isMachineReadableDocumentOutline(item.content);
                   const isDocumentDraftMessage =
                     item.role === 'assistant' &&
                     (Boolean(item.documentResult || item.retainedDocumentResult) ||
-                      Boolean(item.documentGenerationStatus) || (isCurrentAssistant && documentResponseActive));
+                      Boolean(item.documentGenerationStatus) || persistedDocumentDraft || (isCurrentAssistant && documentResponseActive));
                   const hideDocumentDraftContent =
                     item.role === 'assistant' &&
-                    (isCurrentAssistant || documentResponseActive ||
+                    (isDocumentDraftMessage || isCurrentAssistant || documentResponseActive ||
                       Boolean(item.documentGenerationStatus) ||
                       (documentResponseActive && ['pending', 'streaming'].includes(item.state))) &&
                     isMachineReadableDocumentOutline(item.content);
@@ -4463,12 +4512,18 @@ export function ChatPage({
                   const generationState = item.documentGenerationStatus?.state;
                   const generationTerminal = generationState === 'completed' || generationState === 'failed' ||
                     generationState === 'cancelled' || generationState === 'interrupted' ? generationState : undefined;
+                  const undeliveredDocumentDraft = persistedDocumentDraft && item.state === 'completed' &&
+                    !item.documentResult && !generationTerminal &&
+                    (!isCurrentAssistant || responseExecution?.state === 'completed') &&
+                    !['running', 'executing_tool', 'needs_reconciliation'].includes(parentRun?.state ?? '');
                   const progressDetail = item.documentResult
                     ? '文档已生成并保存。'
                     : isDocumentStopping
                       ? '已请求停止，正在确认任务状态…'
                       : isGeneratingFile
                         ? '正在生成本地文档文件…'
+                        : undeliveredDocumentDraft
+                          ? '文档内容已接收，尚未生成可交付文件。'
                         : generationTerminal
                           ? documentGenerationMessage(item.documentGenerationStatus)
                           : isCurrentAssistant && responseExecution?.state === 'completed'
@@ -4530,15 +4585,17 @@ export function ChatPage({
                               terminalDetail={item.documentResult ? '文档已生成并保存。'
                                 : parentRun?.state === 'needs_reconciliation' ? '执行结果需要核对。'
                                   : parentRun?.acknowledged ? '本次任务已关闭，未知结果记录保留。'
-                                    : generationTerminal ? documentGenerationMessage(item.documentGenerationStatus) : undefined}
+                                    : generationTerminal ? documentGenerationMessage(item.documentGenerationStatus)
+                                      : undeliveredDocumentDraft ? progressDetail : undefined}
                               terminalStatus={item.documentResult ? 'completed'
                                 : parentRun?.state === 'needs_reconciliation' ? 'interrupted'
                                   : parentRun?.acknowledged ? 'cancelled'
-                                    : item.retainedDocumentResult ? item.state === 'cancelled' ? 'cancelled' : 'failed' : generationTerminal}
+                                    : item.retainedDocumentResult ? item.state === 'cancelled' ? 'cancelled' : 'failed'
+                                      : undeliveredDocumentDraft ? 'failed' : generationTerminal}
                               genericTerminalFailure={!item.documentResult && item.documentGenerationStatus?.state === 'failed' &&
                                 ['generation_failed', 'response_failed'].includes(item.documentGenerationStatus.errorCode ?? '')}
                               activeDetail={isGeneratingFile || isDocumentStopping ? progressDetail : undefined}
-                              preferDetail={Boolean(item.documentResult || generationTerminal || isGeneratingFile || isDocumentStopping ||
+                              preferDetail={Boolean(item.documentResult || generationTerminal || persistedDocumentDraft || isGeneratingFile || isDocumentStopping ||
                                 (isCurrentAssistant && responseExecution &&
                                   ['completed', 'failed', 'cancelled', 'interrupted'].includes(responseExecution.state)))}
                               developerMode={developerMode}
@@ -4741,7 +4798,7 @@ export function ChatPage({
           ) : null}
         </div>
 
-        <div className="uc-chat-page__composer-region">
+        <div className="uc-chat-page__composer-region" ref={composerRegionRef}>
           <section
             aria-labelledby="chat-composer-title"
             className="uc-chat-page__composer"

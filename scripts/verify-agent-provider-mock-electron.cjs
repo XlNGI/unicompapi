@@ -132,6 +132,12 @@ async function run() {
   const candidateResult = await js('window.unicomp.chatContexts.listTextCandidates("text_chat")');
   if (!candidateResult?.ok || !candidateResult.value?.length) throw new Error(`No synthetic candidate: ${JSON.stringify(candidateResult)}`);
   const candidateId = candidateResult.value[0].candidateId;
+  if (process.argv.includes('--ui-navigation')) {
+    const result = await require('./lib/verify-document-navigation.cjs')({ browserWindow, lifecycle,
+      session: sessions.get(), candidateId, setTransportMode: mode => { transportMode = mode; } });
+    process.stdout.write(`${JSON.stringify(result)}\n`);
+    return;
+  }
   const request = (id, content) => ({ clientCommandId: id, conversation: null, title: 'Agent mock Electron', content,
     productFeature: 'text_chat', candidateId, contextSelections: [], parameterValues: {} });
   const normal = await js(`window.unicomp.chatContexts.startAgentResponse(${JSON.stringify(request('mock-normal', '普通聊天'))})`);

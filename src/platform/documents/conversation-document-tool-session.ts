@@ -2,7 +2,7 @@ import { createHash } from 'node:crypto';
 import path from 'node:path';
 import {
   parseDocumentIR, presentationPlanningTotalPages, toDocumentTaskRuntimeId, toWorkId,
-  type Conversation, type ConversationId, type ConversationResponseDraftV1,
+  type Conversation, type ConversationId, type ConversationResponseDraftV1, type ConversationWorkflowV1,
   type DocumentIR, type FileReferenceId, type MessageId, type ProjectConversationRepository,
   type ProjectId, type WorkId, type Work
 } from '../../domain';
@@ -17,6 +17,7 @@ import { DocumentTaskRuntimeService } from '../../application/document-task-runt
 import { HostExecutionBudget, ExecutionBudgetError, type ExecutionBudgetPolicy } from '../../application/execution-budget';
 import type { DocumentTaskRuntime } from '../../domain/entities/document-task-runtime';
 import { JsonDocumentTaskRuntimeRepository } from '../repositories/json-document-task-runtime-repository';
+import { JsonConversationWorkflowRepository } from '../repositories/json-conversation-workflow-repository';
 import { JsonFileReferenceRepository, JsonWorkRepository } from '../repositories/json-repositories';
 import { DocumentIdentityIndexStore } from './document-identity-index-store';
 import { DocumentIdentityUnavailableError, hasControlledDocumentVersionEvidence } from './document-controlled-version-evidence';
@@ -115,7 +116,9 @@ export interface ConversationDocumentToolSession {
 export interface ConversationDocumentToolSessionPort {
   select(input: { readonly conversation: Conversation; readonly currentUserMessageId: MessageId;
     readonly query: string }): Promise<ConversationDocumentReadToolSelection | undefined>;
-  prepare(input: { readonly conversation: Conversation; readonly draft: ConversationResponseDraftV1; readonly signal?: AbortSignal }): Promise<ConversationDocumentToolSelection | undefined>;
+  prepare(input: { readonly conversation: Conversation; readonly draft: ConversationResponseDraftV1;
+    /** Application-validated ready workflow, never supplied by the model. */
+    readonly workflow?: ConversationWorkflowV1; readonly signal?: AbortSignal }): Promise<ConversationDocumentToolSelection | undefined>;
   pinDraft(input: { readonly draft: ConversationResponseDraftV1; readonly selection: ConversationDocumentToolSelection; readonly signal?: AbortSignal }): Promise<void>;
   registerExecution(input: { readonly selection: ConversationDocumentToolSelection; readonly responseExecutionId: string; readonly signal?: AbortSignal }): Promise<void>;
   forExecution(input: { readonly responseExecutionId: string; readonly signal?: AbortSignal }): Promise<ConversationDocumentToolSession | undefined>;
@@ -270,7 +273,14 @@ export class ConversationDocumentToolSessionService implements ConversationDocum
     if (draft.imageQuery !== undefined) return undefined;
     if (draft.agentNative) {
       const query = message.displayContent ?? message.content;
-      const generationRequired = (isPptGenerationIntent(query) || isPptGenerationConfirmation(conversation, message.id)) &&
+      const workflow = input.workflow;
+      const workflowSourceIndex = workflow ? conversation.messages.findIndex(item => item.id === workflow.sourceMessageId &&
+        item.role === 'user' && item.state === 'completed') : -1;
+      if (workflow && (workflow.status !== 'ready' || workflow.projectId !== this.options.projectId ||
+          workflow.conversationId !== conversation.id || workflowSourceIndex < 0 ||
+          workflowSourceIndex > conversation.messages.indexOf(message))) throw unavailable();
+      const approvedCreation = workflow?.plan.kind === 'document' && workflow.plan.action === 'create' && workflow.plan.documentKind === 'ppt';
+      const generationRequired = approvedCreation || (isPptGenerationIntent(query) || isPptGenerationConfirmation(conversation, message.id)) &&
         isPptGenerationApproved(conversation, message.id, query);
       const generation = Object.freeze({
         kind: 'generation' as const,
@@ -286,7 +296,10 @@ export class ConversationDocumentToolSessionService implements ConversationDocum
         bindingHash: hash(JSON.stringify([conversation.id, message.id, message.revision, 'agent-native']))
       });
       let mutation: ConversationDocumentMutationToolSelection | undefined;
-      if (this.options.mutation) {
+      // An approved creation must produce a new Work, including when the
+      // conversation already contains a presentation. Do not offer mutations
+      // of that older Work as an alternative to the confirmed creation.
+      if (this.options.mutation && !generationRequired) {
         const selected = await this.select({
           conversation,
           currentUserMessageId: message.id,
@@ -300,7 +313,7 @@ export class ConversationDocumentToolSessionService implements ConversationDocum
         conversationId: generation.conversationId,
         currentUserMessageId: generation.currentUserMessageId,
         userMessageRevision: generation.userMessageRevision,
-        bindingHash: hash(JSON.stringify([generation.bindingHash, mutation?.bindingHash, generationRequired])),
+        bindingHash: hash(JSON.stringify([generation.bindingHash, mutation?.bindingHash, generationRequired, workflow?.id, workflow?.revision])),
         generation,
         generationRequired,
         ...(mutation ? { mutation } : {}),
@@ -428,6 +441,10 @@ export class ConversationDocumentToolSessionService implements ConversationDocum
     if (!/^[A-Za-z0-9_.:-]{1,256}$/u.test(responseExecutionId)) throw unavailable();
     const runtimes = (await new JsonDocumentTaskRuntimeRepository(this.storage, this.options.projectId).list())
       .filter(runtime => runtime.executionId === responseExecutionId);
+    // Completion and restart must retain the same confirmed requirement used
+    // at submission, rather than inferring it again from the original wording.
+    const workflows = runtimes.some(runtime => runtime.operation === 'create')
+      ? await new JsonConversationWorkflowRepository(this.storage, this.options.projectId).list() : [];
     const documentTasks = await Promise.all(runtimes.map(async runtime => {
       const writeReceipt = [...runtime.observations].reverse().find(item => item.ok && typeof item.data?.registeredWorkId === 'string');
       const readReceipt = [...runtime.observations].reverse().find(item => item.ok && item.toolId === 'read_document_structure');
@@ -450,8 +467,13 @@ export class ConversationDocumentToolSessionService implements ConversationDocum
       const request = sourceIndex >= 0 ? conversation!.messages[sourceIndex].displayContent ?? conversation!.messages[sourceIndex].content : '';
       const required = runtime.operation === 'analyze' || runtime.operation === 'edit' && isMutationRequest(request) ||
         runtime.operation === 'create' && Boolean(conversation &&
-          (isPptGenerationIntent(request) || isPptGenerationConfirmation(conversation, runtime.sourceMessageId)) &&
-          isPptGenerationApproved(conversation, runtime.sourceMessageId, request));
+          ((isPptGenerationIntent(request) || isPptGenerationConfirmation(conversation, runtime.sourceMessageId)) &&
+          isPptGenerationApproved(conversation, runtime.sourceMessageId, request) ||
+          workflows.some(workflow => workflow.projectId === runtime.projectId && workflow.conversationId === runtime.conversationId &&
+            conversation.messages.some((message, index) => index <= sourceIndex && message.id === workflow.sourceMessageId &&
+              message.role === 'user' && message.state === 'completed') && workflow.plan.kind === 'document' && workflow.plan.action === 'create' &&
+            (workflow.executionId === responseExecutionId && workflow.plan.documentKind === 'ppt' ||
+              workflow.deliveries?.some(delivery => delivery.executionId === responseExecutionId && delivery.kind === 'ppt')))));
       const deliveryConfirmed = Boolean(registeredWork && sourceIndex >= 0 && conversation?.messages.slice(sourceIndex + 1)
         .some(message => message.role === 'assistant' && message.state === 'completed' && message.documentResult?.workId === registeredWork.id));
       return { runtime, active, required, ...(registeredWork ? { registeredWork } : {}), readBackConfirmed, deliveryConfirmed };

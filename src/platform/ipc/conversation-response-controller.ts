@@ -833,7 +833,7 @@ export class ConversationResponseController {
       ...(workflow
         ? {
             promptContent: workflow.plan.kind === 'document'
-              ? buildDocumentGenerationPrompt(input.content, workflow.plan)
+              ? buildDocumentGenerationPrompt(input.content, workflow.plan, Boolean(input.agentNative))
               : input.content
           }
         : {}),
@@ -875,7 +875,7 @@ export class ConversationResponseController {
       draft = contextualized;
     }
     if (runtime.documentTools?.prepare) {
-      toolSelection = await step(() => runtime.documentTools!.prepare!({ conversation, draft, signal })) ?? toolSelection;
+      toolSelection = await step(() => runtime.documentTools!.prepare!({ conversation, draft, workflow, signal })) ?? toolSelection;
     }
     if (toolSelection) await step(() => runtime.documentTools!.pinDraft({ draft, selection: toolSelection!, signal }));
     if (workflow && runtime.nativeSearch && prepareNativeSearch) {
@@ -1271,7 +1271,8 @@ async function waitForResponseStart<T>(operation: () => Promise<T>, signal: Abor
  */
 function buildDocumentGenerationPrompt(
   rawText: string,
-  plan: ConversationIntentPlan
+  plan: ConversationIntentPlan,
+  agentNative = false
 ): string {
   const operation = plan.action === 'revise'
     ? 'edit'
@@ -1300,8 +1301,14 @@ function buildDocumentGenerationPrompt(
     JSON.stringify(contract),
     '【当前用户需求】',
     rawText,
-    buildDocumentOutlinePrompt(outlineKind),
-    '【输出要求】不要输出路径、凭证、Provider、模型选择、工具调用、权限或 JSON 之外的解释。正文内容必须服从上述合同；合同未提供的事实不得臆造。'
+    ...(agentNative && plan.documentKind === 'ppt' ? [
+      '【执行要求】应用已确认此计划。新建 PPT 必须调用 generate_pptx，生成后通过 read_document_structure 读取实际文件并核对；修改 PPT 使用当前获准的修改工具。',
+      '不要用大纲 JSON 代替文件交付。只有工具确认本地文件校验、作品登记与读回后才能声明文档已交付；失败或未知结果须如实说明，不得自动重发。',
+      '正文内容必须服从上述合同；合同未提供的事实不得臆造。不得输出路径、凭证、Provider、模型选择或权限信息。'
+    ] : [
+      buildDocumentOutlinePrompt(outlineKind),
+      '【输出要求】不要输出路径、凭证、Provider、模型选择、工具调用、权限或 JSON 之外的解释。正文内容必须服从上述合同；合同未提供的事实不得臆造。'
+    ])
   ].join('\n');
 }
 

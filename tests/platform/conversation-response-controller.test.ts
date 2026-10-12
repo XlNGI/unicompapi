@@ -215,6 +215,24 @@ function deferred<T>() {
 }
 
 describe('ConversationResponseController', () => {
+  it('passes a confirmed PPT workflow to Agent tools without the legacy JSON-only prompt', async () => {
+    const value = fixture(undefined, '帮我生成一个测试ppt');
+    const workflow = { ...value.readyWorkflow, plan: { ...value.readyWorkflow.plan,
+      kind: 'document' as const, action: 'create' as const, documentKind: 'ppt' as const } };
+    value.workflowService.get.mockResolvedValue(workflow);
+    const prepare = vi.fn(async () => undefined);
+    Object.assign(value.runtime, { documentTools: { prepare, pinDraft: vi.fn(), select: vi.fn() } });
+    const result = await value.controller.start({ ...startRequest('confirmed-ppt-agent'), agentNative: true,
+      conversation: { conversationId: workflow.conversationId, expectedRevision: 2, editedMessageId: null },
+      content: '帮我生成一个测试ppt', workflow: { workflowId: workflow.id, expectedRevision: workflow.revision } });
+    expect(result).toMatchObject({ ok: true });
+    expect(prepare).toHaveBeenCalledWith(expect.objectContaining({ workflow }));
+    const draft = (value.draftRepository.create.mock.calls as unknown as [ { promptContent?: string } ][])[0][0];
+    expect(draft.promptContent).toContain('generate_pptx');
+    expect(draft.promptContent).not.toContain('JSON 之外的解释');
+    expect(draft.promptContent).not.toContain('不要输出路径、凭证、Provider、模型选择、工具调用');
+  });
+
   it.each(['failed', 'cancelled', 'interrupted'] as const)('waits for the %s owner before checking whether a new request may start', async state => {
     const value = fixture();
     let terminalSelected = false;
