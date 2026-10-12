@@ -57,7 +57,7 @@ export class ProjectMetadataDraft {
 
 export class ProjectMetadataUnitOfWork {
   constructor(
-    private readonly storage: ProjectStorageAdapter,
+    readonly storage: ProjectStorageAdapter,
     private readonly now: () => string = () => new Date().toISOString()
   ) {}
 

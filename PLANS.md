@@ -1,5 +1,17 @@
 # UniComp 开发计划
 
+### 生成历史功能恢复验证（2026-10-12；自动验证通过，已批准合并）
+
+后续负责人明确授权“合并到develop”。执行前重新 fetch，确认远程 develop 仍为 `d863d3f`，无新增提交；按已验证范围提交恢复分支、合入并推送 develop，保留原功能分支及恢复分支。下方“等待决定”“未提交”等描述为自动验收结束时的状态，实际交付结果以 Git 提交及远程引用为准。
+
+负责人批准从最新 `develop@d863d3f` 建立 `feature/restore-generation-history-scroll`，恢复此前由 `b1d01c7` 撤回的 `feature/generation-history-scroll@a8348ee` 改动。原功能分支保留；本轮只恢复原有范围并处理整合问题，不合入或推送 develop。唯一文本冲突为本文件顶部的独立维护记录，双方内容均保留。下方 2026-10-10 的验收授权及结果是历史记录，不代表本次组合已验收或已获合并授权。
+
+验证结果：定向 Vitest 122/122、扩展回归串行复核 189/189、UI 合同 25/25、类型检查、全仓 lint、生产构建及平台审计通过。扩展回归初跑发生一次测试临时目录清理 ENOTEMPTY，单文件 51/51 和整组串行重跑通过，未修改无关业务代码或测试。恢复的实现与测试文件逐一核对，内容与原功能分支一致；只整合本文件与验收说明。
+
+隔离 Electron 验证通过：五种图片/视频历史模式、导航保留、60 次生成状态变化期间的图片历史滚轮输入；图片/视频提交与旧历史 Worker 整理性能对照；Thread-first/Legacy 双模式会话重启恢复；活跃 Mock Provider 会话期间完成 Worker 准备、等待取消落盘、打开目标项目并按队列关闭；服务商单层滚动六场景。图片本地提交 9.17–9.40 秒降至 0.61–0.63 秒，视频 7.54–7.64 秒降至 0.48–0.52 秒。详情与复现入口见[提交历史存储性能验收](docs/current/provider-result-history-performance-validation.md)。
+
+边界：本轮未执行全量测试、真实收费生成、用户原项目迁移或 macOS 实机。视频提交进度保留由定向测试覆盖，未以真实服务商完成回调作端到端证明。既有 Agent Mock 脚本虽通过，但 PPT artifactRegistered=false，不计为 PPT 生成验收；Word/Excel 文件登记通过。改动保留在恢复分支工作区，未创建新提交、推送或合入 develop，等待负责人决定。
+
 ### Thread-first 写入收敛实施（2026-10-11）
 
 已完成：Thread Commit + Durable Projection Outbox、Legacy 幂等投影 Worker、普通 Agent/已有会话/直接 IPC/Workflow 的 Thread-first User Turn、Assistant Stream 同一 Item 状态投影、Tool/Artifact 状态更新和 Agent Continuation 的 Thread Context Reader 接线。新增提交从 `c4c4f63` 到 `75755c2`，typecheck、lint、build 及新增定向回归通过。最终 Authority Fence 已接入，真实项目在下一次打开时按启动屏障完成切换；外部 Provider 矩阵仍是独立验收项。
@@ -61,6 +73,23 @@
 ### 新会话系统安全整合计划（2026-10-10；隔离 Electron/Mock Provider 验收完成）
 
 以 `develop@b1d01c7f5f346cd2ff170ab77ad1de930267257a` 为当前执行基线，以 `feature/conversation-phase0` 和 `feature/conversation-e2e-completion` 为目标 Thread 架构来源。阶段 0 已完成三方 SHA/祖先关系、只读合并模拟、复用范围、架构边界和测试基线冻结；当前 Node/UI 为 396/396，Vitest 为 3300/3315，15 项失败，核心聊天定向复核 116/116，文档生成循环 30 秒独立复核 17/17。阶段 1 已接入 Thread/Turn/Item 合同、ThreadFile Repository/迁移工具、Thread Query DTO/parser、只读 IPC/preload 和 Runtime 选择器，并在显式 `VITE_UNICOMP_THREAD_READ_PATH=1` 下让 ChatPage 读取 Thread Summary、首屏 Item Page 和更早消息分页；默认 Legacy 路径不变。阶段 2 已把现有消息行包进可切换的 `VirtualMessageList`，并保留默认 Legacy 列表；真实 Electron 已完成 ThreadFile/Legacy 读取、分页、虚拟行和项目切换验收。阶段 3 已新增 `ThreadCommandService` 和 `ThreadProjectionCoordinator`，在显式 `UNICOMP_THREAD_FILE_WRITE_PATH=1` 下为 Agent 消息写入 Shadow Thread Turn/User Item、Agent Run Execution Link 和终态 Assistant Item；默认生产路径关闭该 flag，未切换权威。阶段 4 已增加持久化 Item sequence/offset index 和按序列范围读取，隔离 Node 性能基线已通过；Mock Provider + 真实 Electron 已通过普通 Agent、取消起始、单次 Tool Calling、PPT Work、Word/Excel 物理文件生成。真实外部 Provider、连续 Tool Calling 恢复、历史迁移和 Cutover 尚未完成。后续采用“低冲突新增代码复用、高冲突页面/IPC 局部适配”的混合整合方式；保留 Agent Runtime、Response Execution、Document Runtime、Tool Bridge、Work/Hash 门禁和当前 `readMode: fast`/RAF 流式行为。Legacy Conversation 继续作为生产权威，ThreadFile 先用于隔离读取、Shadow Read 和候选存储，未授权生产 Cutover。详细范围、复用清单、阶段门禁和回滚条件见 [新会话系统安全整合计划](docs/current/conversation-thread-integration-plan.md)。
+### 负责人验收与交付授权（2026-10-10）
+
+负责人确认当前分支验收通过，授权上传 `feature/generation-history-scroll`，模拟合并到最新 `develop`；若无冲突直接合并，若有冲突则提供解决方案待审核。此次交付覆盖生成历史滚动/缩略图稳定性、视频提交进度及页面切换恢复、图片/视频提交结果外置与旧历史整理、连接管理模型面板单层滚动。下方“待人工验收”为当时记录，本次确认覆盖其待验收状态。保留本地和远程功能分支，不纳入工作区中的 Windows 缓存、个人工具记忆及临时测试输出。
+
+### 维护实施：连接管理模型面板单层滚动（2026-10-10；待人工验收）
+
+负责人根据截图确认右侧模型目录存在内外两条纵向滚动条，批准按方案局部调整 UI。仅修改连接管理的模型列表样式：列表按内容自然展开，右侧模型面板统一滚动；左侧连接列表、连接/凭证标签页原滚动规则保留。没有修改生成、存储或服务商业务逻辑，保留此前工作区改动。
+
+验证：服务商页面 UI 合同 17/17 通过；Electron 使用生产 CSS 和同结构合成长列表，1293×819、1024×600、800×700 各覆盖设置/手动登记表单展开与收起，共六场景确认右侧仅一个可滚动容器、最后一个模型可见、左侧独立滚动。此为布局夹具验证，不冒充真实连接数据人工验收。证据 `outputs/provider-single-scroll/report.json`、`outputs/provider-single-scroll/after.png`；待用户在当前页面检查正常滚动及展开内容可达性。代码未提交、推送或合并。
+
+### 维护实施：图片/视频提交历史大结果外置（2026-10-10；自动验收完成，待人工验收）
+
+负责人批准在当前 `feature/generation-history-scroll` 分支按提交卡顿方案实施。本轮修改本地结果存储和必要的 Electron 项目打开接线；保留既有 UI 未提交改动。图片 base64 结果改存内容寻址独立文件，两份不同 ID 的回执只保存小引用；保持原授权、请求开始、结果登记持久化顺序，未采纳未经恢复证明的“三次落盘”合并。旧历史通过后台 Worker 显式整理，普通读取不迁移；先写结果并读回验证，再原子替换账本。备份来源跳过整理；整理失败保留旧格式可读，不重新提交。项目变更串行，整理后再等待旧操作完成后切换。
+
+验收：定向 Vitest 345 项、UI/IPC 合同 9 项通过，最终 typecheck、变更范围 lint、生产 build、平台审计通过。可见 Electron 同规模合成历史对照：视频本地提交 8.37–8.40 秒→0.51–0.53 秒，图片 9.34–9.43 秒→0.61–0.62 秒；主线程最大延迟分别 688–741→30–31 毫秒、646–656→27–28 毫秒。真实仓储/编排与程序化滚轮验证通过，服务商为合成返回且外发 0；不把主线程定时器指标称作物理鼠标延迟。首次后台整理约 3.75–3.93 秒，主线程最大延迟 8–15 毫秒。
+
+边界：未运行真实收费生成、未修改用户原项目数据、未重启用户应用、未做 macOS 实机；仍待用户重启当前开发版并人工验收。未提交、推送或合并。范围、源码说明、失败边界、复现脚本与人工清单见 [提交历史存储性能验收](docs/current/provider-result-history-performance-validation.md)。
 
 ### 维护立项：会话与 Agent 业务架构性能治理计划（2026-10-08；计划阶段，未实施）
 
