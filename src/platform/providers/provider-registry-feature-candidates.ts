@@ -1,4 +1,5 @@
 import { supportsConversationImageInput } from './conversation-image-input';
+import { latestCapabilityEvidenceByCapability, pinCapabilityEvidence } from './model-capability-selection';
 import { createHash } from 'node:crypto';
 import {
   parseUsageSchema,
@@ -162,10 +163,8 @@ export class RegistryFeatureCandidateSource implements FeatureCandidateSourcePor
           const modelEvidence = snapshot.capabilities.filter(evidence => evidence.modelId === model.id);
           const featureEvidence = modelEvidence.filter(evidence => evidence.capability === feature.productFeature ||
             feature.internalPurpose !== undefined && evidence.capability === feature.internalPurpose);
-          const latestEvidence = new Map<string, typeof featureEvidence[number]>();
-          for (const evidence of featureEvidence) {
-            if ((latestEvidence.get(evidence.capability)?.revision ?? -1) < evidence.revision) latestEvidence.set(evidence.capability, evidence);
-          }
+          const latestEvidence = latestCapabilityEvidenceByCapability(featureEvidence);
+          const routeEvidence = latestEvidence.get(feature.internalPurpose ?? '') ?? latestEvidence.get(feature.productFeature);
           const imageEvidence = subject.surface === 'conversation' && subject.imageCount > 0
             ? modelEvidence.filter(evidence => evidence.capability === 'image_understanding') : [];
           const pinnedEvidence = modelEvidence.filter(evidence => profile.evidenceIds.includes(evidence.id) ||
@@ -208,6 +207,7 @@ export class RegistryFeatureCandidateSource implements FeatureCandidateSourcePor
               schemasInterpretable: true
             },
             routeTemplate: {
+              ...(routeEvidence ? { capabilityEvidencePin: pinCapabilityEvidence(routeEvidence) } : {}),
               packageId: profile.packageId,
               packageVersion: connection.packageVersion ?? provider.packageVersion ?? 'unavailable',
               adapterKey: profile.adapterKey,

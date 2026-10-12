@@ -50,6 +50,13 @@ export const routeSnapshotFixture = () => createProviderExecutionRouteSnapshot({
 });
 
 describe('provider execution route snapshot contract', () => {
+  it('retains the exact capability pin and rejects malformed or secret-bearing pin fields', () => {
+    const pin = { id: 'capability-pin', revision: 2, fingerprint: 'a'.repeat(64) };
+    const snapshot = parseProviderExecutionRouteSnapshot({ ...routeSnapshotFixture(), capabilityEvidencePin: pin });
+    expect(parseProviderExecutionRouteSnapshot(JSON.parse(JSON.stringify(snapshot))).capabilityEvidencePin).toEqual(pin);
+    expect(() => parseProviderExecutionRouteSnapshot({ ...snapshot, capabilityEvidencePin: { ...pin, fingerprint: 'invalid' } })).toThrow();
+    expect(() => parseProviderExecutionRouteSnapshot({ ...snapshot, capabilityEvidencePin: { ...pin, token: 'forbidden' } })).toThrow('unsupported fields');
+  });
   it('freezes every routing and schema revision without storing endpoint or credential material', () => {
     const snapshot = routeSnapshotFixture();
     expect(snapshot).toMatchObject({

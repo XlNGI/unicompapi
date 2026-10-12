@@ -52,6 +52,18 @@ afterEach(async () => {
 });
 
 describe('registry-backed feature candidates', () => {
+  it('pins the latest exact capability revision into the admitted route without changing the profile', async () => {
+    const f = await candidateFixture();
+    const original = createModelCapabilityEvidence({ id: toCapabilityEvidenceId('route-pin-original'), modelId: toModelId('model-candidate-official'),
+      revision: 1, capability: 'image_generation', state: 'verified_supported', source: 'system_observed', recordedAt: now });
+    const latest = createModelCapabilityEvidence({ ...original, id: toCapabilityEvidenceId('route-pin-latest'), revision: 2, supersedesEvidenceId: original.id });
+    await f.registry.mutate(snapshot => ({ snapshot: { ...snapshot, capabilities: [...snapshot.capabilities, original, latest] }, result: undefined }));
+    const value = (await f.source.list(resolvedSubject())).find(candidate => candidate.routeTemplate.modelId === original.modelId)!;
+    expect(value.routeTemplate.capabilityEvidencePin).toMatchObject({ id: latest.id, revision: 2, fingerprint: expect.stringMatching(/^[a-f0-9]{64}$/) });
+    const publicValues = await f.service.listFeatureCandidates(subject);
+    expect(JSON.stringify(publicValues)).not.toContain('route-pin-latest');
+    expect(JSON.stringify(publicValues)).not.toContain('capabilityEvidencePin');
+  });
   it('blocks new image selection after current evidence supersedes a supported profile receipt', async () => {
     const fixture = await candidateFixture();
     const original = createModelCapabilityEvidence({ id: toCapabilityEvidenceId('candidate-old-evidence'),

@@ -5,6 +5,7 @@ import { afterEach, describe, expect, it } from 'vitest';
 import {
   createEmptyImageWorkspaceDraft,
   createImageWorkspaceDraft,
+  createModelCapabilityEvidence,
   toCapabilityEvidenceId,
   toConnectionId,
   toDraftId,
@@ -27,6 +28,7 @@ import {
   type JsonProviderRegistryStore,
   type ResolvedFeatureCandidateV1
 } from '../../src/platform';
+import { pinCapabilityEvidence } from '../../src/platform/providers/model-capability-selection';
 
 const roots: string[] = [];
 const projectId = toProjectId('project-image-artifacts');
@@ -37,7 +39,7 @@ afterEach(async () => {
 });
 
 describe('ImageDraftArtifactFactory', () => {
-  it('creates task/execution and includes identities in dispatch request', async () => {
+  it.each(['legacy', 'pinned', 'tampered'] as const)('creates task/execution with the admitted evidence snapshot (%s)', async mode => {
     const root = await mkdtemp(path.join(os.tmpdir(), 'unicomp-image-artifacts-'));
     roots.push(root);
     const storage = new NodeProjectStorage(root);
@@ -56,11 +58,16 @@ describe('ImageDraftArtifactFactory', () => {
             capabilityEvidenceId: toCapabilityEvidenceId('evidence-vidu-image-generation')
           }],
           capabilities: [
-            {
+            createModelCapabilityEvidence({
               id: toCapabilityEvidenceId('evidence-vidu-image-generation'),
               modelId: toModelId('model-vidu'),
-              capability: 'image_generation'
-            },
+              capability: 'image_generation', revision: 1, state: 'verified_supported', source: 'system_observed', recordedAt: t0
+            }),
+            createModelCapabilityEvidence({
+              id: toCapabilityEvidenceId('evidence-vidu-image-generation-new'),
+              modelId: toModelId('model-vidu'), supersedesEvidenceId: toCapabilityEvidenceId('evidence-vidu-image-generation'),
+              capability: 'image_generation', revision: 2, state: 'verified_supported', source: 'system_observed', recordedAt: t0
+            }),
             {
               id: toCapabilityEvidenceId('evidence-vidu-reference-to-image'),
               modelId: toModelId('model-vidu'),
@@ -97,7 +104,10 @@ describe('ImageDraftArtifactFactory', () => {
       nextExecutionId: () => toExecutionId('execution-image-1')
     });
 
-    const built = await factory.create({
+    const selected = candidate();
+    const evidence = (await registry.load()).capabilities.find(item => item.id === 'evidence-vidu-image-generation-new')!;
+    const capabilityEvidencePin = pinCapabilityEvidence(evidence);
+    const input = {
       subject: {
         projectId,
         subject: {
@@ -115,12 +125,19 @@ describe('ImageDraftArtifactFactory', () => {
         materialReferences: [],
         contextContentHashes: []
       },
-      candidate: candidate(),
+      candidate: mode === 'legacy' ? selected : { ...selected, routeTemplate: { ...selected.routeTemplate,
+        capabilityEvidencePin: mode === 'tampered' ? { ...capabilityEvidencePin, fingerprint: '0'.repeat(64) } : capabilityEvidencePin } },
       routeSnapshotId: 'route-1' as never,
       invocationAttemptId: toProviderInvocationAttemptId('attempt-1'),
       authorizationClaimId: 'claim-1',
       createdAt: t0
-    });
+    } as Parameters<ImageDraftArtifactFactory['create']>[0];
+    if (mode === 'tampered') {
+      await expect(factory.create(input)).rejects.toThrow('route_capability_evidence_changed');
+      expect(await tasks.list(projectId)).toHaveLength(0);
+      return;
+    }
+    const built = await factory.create(input);
 
     expect(built.subjectArtifacts).toMatchObject({
       kind: 'media',
@@ -130,7 +147,7 @@ describe('ImageDraftArtifactFactory', () => {
         submission: {
           image: {
             purpose: 'image_generation',
-            capabilityEvidenceId: 'evidence-vidu-image-generation'
+            capabilityEvidenceId: mode === 'legacy' ? 'evidence-vidu-image-generation' : 'evidence-vidu-image-generation-new'
           }
         }
       },

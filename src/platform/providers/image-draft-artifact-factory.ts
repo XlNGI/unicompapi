@@ -24,6 +24,7 @@ import type {
 } from '../repositories';
 import type { JsonProviderRegistryStore } from './provider-registry';
 import type { SubmissionArtifactFactoryPort } from './provider-submission-orchestrator';
+import { resolvePinnedCapabilityEvidence } from './model-capability-selection';
 
 export interface ImageDraftArtifactFactoryDependencies {
   readonly drafts: ImageWorkspaceRepository;
@@ -76,8 +77,9 @@ export class ImageDraftArtifactFactory implements SubmissionArtifactFactoryPort 
     const routePurpose =
       input.candidate.routeTemplate.internalPurpose ?? purpose;
     const capabilities = registry.capabilities ?? [];
-    const evidence =
-      capabilities.find(
+    const evidence = input.candidate.routeTemplate.capabilityEvidencePin
+      ? resolvePinnedCapabilityEvidence(capabilities, input.candidate.routeTemplate.capabilityEvidencePin, model.id, [routePurpose, input.subject.productFeature])
+      : capabilities.find(
         (item) =>
           item.modelId === model.id && item.capability === routePurpose
       ) ??

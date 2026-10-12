@@ -24,6 +24,7 @@ import type {
 } from '../repositories';
 import type { JsonProviderRegistryStore } from './provider-registry';
 import type { SubmissionArtifactFactoryPort } from './provider-submission-orchestrator';
+import { resolvePinnedCapabilityEvidence } from './model-capability-selection';
 
 export interface VideoDraftArtifactFactoryDependencies {
   readonly drafts: VideoWorkspaceRepository;
@@ -65,7 +66,9 @@ export class VideoDraftArtifactFactory implements SubmissionArtifactFactoryPort 
     const provider = registry.providers.find(
       (item) => item.id === input.candidate.routeTemplate.providerId
     );
-    const evidenceId = model?.capabilityEvidenceId;
+    const pin = input.candidate.routeTemplate.capabilityEvidencePin;
+    const evidenceId = pin && model ? resolvePinnedCapabilityEvidence(registry.capabilities, pin, model.id,
+      [input.candidate.routeTemplate.internalPurpose ?? 'video_generation', input.subject.productFeature]).id : model?.capabilityEvidenceId;
     if (!model || !provider || !evidenceId) {
       throw new TypeError('Video route model capability evidence is unavailable');
     }

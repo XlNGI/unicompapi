@@ -19,6 +19,7 @@ import { toIsoTimestamp, type IsoTimestamp } from '../timestamps';
 import { parseProductFeature, type ProductFeature } from './product-feature';
 
 export interface ProviderExecutionRouteSnapshotV1 {
+  readonly capabilityEvidencePin?: { readonly id: string; readonly revision: number; readonly fingerprint: string };
   readonly schemaVersion: 1;
   readonly id: ProviderExecutionRouteSnapshotId;
   readonly projectId: ProjectId;
@@ -112,7 +113,8 @@ export function parseProviderExecutionRouteSnapshot(
       'providerDisplayName',
       'connectionDisplayName',
       'providerModelKey',
-      'modelDisplayName'
+      'modelDisplayName',
+      'capabilityEvidencePin'
     ],
     'provider execution route snapshot'
   );
@@ -173,6 +175,7 @@ export function parseProviderExecutionRouteSnapshot(
     ),
     productFeature: parseProductFeature(item.productFeature),
     ...(internalPurpose ? { internalPurpose } : {}),
+    ...(item.capabilityEvidencePin === undefined ? {} : { capabilityEvidencePin: parseEvidencePin(item.capabilityEvidencePin) }),
     featureMappingVersion: positiveInteger(
       item.featureMappingVersion,
       'route.featureMappingVersion'
@@ -208,6 +211,12 @@ export function parseProviderExecutionRouteSnapshot(
     ),
     createdAt: toIsoTimestamp(String(item.createdAt))
   };
+}
+
+function parseEvidencePin(value: unknown): NonNullable<ProviderExecutionRouteSnapshotV1['capabilityEvidencePin']> {
+  const pin = exactRecord(value, ['id', 'revision', 'fingerprint'], [], 'route capability pin');
+  if (typeof pin.fingerprint !== 'string' || !/^[a-f0-9]{64}$/.test(pin.fingerprint)) throw new InvariantViolationError('route capability pin fingerprint is invalid');
+  return { id: opaqueId(pin.id, 'route capability pin id'), revision: positiveInteger(pin.revision, 'route capability pin revision'), fingerprint: pin.fingerprint };
 }
 
 function exactRecord(

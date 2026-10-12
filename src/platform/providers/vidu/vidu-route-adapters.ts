@@ -1,4 +1,5 @@
 import { createHash, randomUUID } from 'node:crypto';
+import { resolvePinnedCapabilityEvidence } from '../model-capability-selection';
 import { Readable } from 'node:stream';
 import {
   createProviderUsageObservation,
@@ -131,7 +132,9 @@ export class ViduRegistryExecutionRouteResolver
         candidate.usageSchemaId === route.usageSchemaId &&
         candidate.constraintSetId === route.constraintSetId
     );
-    const evidence = selectRouteCapabilityEvidence(
+    const evidence = route.capabilityEvidencePin && model
+      ? resolvePinnedCapabilityEvidence(snapshot.capabilities, route.capabilityEvidencePin, model.id, [route.internalPurpose ?? route.productFeature])
+      : selectRouteCapabilityEvidence(
       snapshot.capabilities,
       model,
       route.internalPurpose,
