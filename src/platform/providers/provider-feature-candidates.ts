@@ -88,6 +88,8 @@ export interface ResolvedFeatureCandidateV1 {
   readonly cost: FeatureCandidateCostFactV1;
   readonly eligibility: FeatureCandidateEligibilityV1;
   readonly routeTemplate: ProviderExecutionRouteTemplateV1;
+  /** Internal selection pin; never serialized into the public candidate DTO. */
+  readonly capabilityEvidenceFingerprint?: string;
 }
 
 export interface FeatureCandidateSourcePort {
@@ -471,6 +473,7 @@ function bindingFingerprint(
       usageSchema: candidate.usageSchema,
       cost: candidate.cost,
       eligibility: candidate.eligibility,
+      capabilityEvidenceFingerprint: candidate.capabilityEvidenceFingerprint,
       recipientName: candidate.recipientName,
       outboundScope: candidate.outboundScope,
       contentCategories: candidate.contentCategories

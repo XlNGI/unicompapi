@@ -30,6 +30,8 @@ Thread 写模式已将 pending Assistant 与流式正文/推理/终态改为先�
 
 兼容 Tool 缺口已补接：没有 Agent Runtime 时读取 Document Runtime 持久 Call/Observation，仅投影受控状态；在 Session close 结算后补 Call/Result、已验证 Artifact/Assistant 收据，避免 acceptance 早返回留下旧 streaming。隔离 Electron `responses.start` + Mock Transport 通过生成/读回及两种工具 Items，外部 Provider 不因此自动记 PASS。另修复同 Thread 不同 Response 步骤编号复用造成的 Tool Item 串写；投影身份包含执行/来源/工具，旧同执行记录继续幂等更新。
 
+模型证据接线追加：新候选使用 Feature Contract 对应的最新模型能力证据，unsupported/unknown 等不再被 verified Profile 掩盖；相关证据完整指纹进入现有选型令牌绑定，证据变更后重验拒绝旧令牌。Profile 引用和会话图片能力证据同时参与绑定，参数/费用来源不变，公开 DTO 不含证据字段。历史 Task 旧 capabilityEvidenceId 继续按 immutable 合同路由；不把这条兼容合同未迁移误报成统一 Route 已全部完成。
+
 ## 真实 Provider 证据及限制
 
 负责人授权最近成功且仍有效文本模型，一个合成隔离 PPT 生成/读回用例：最多 5 次请求，外层每次最多 1024 输出 token，Art Direction 最多 4096，自动重试 0。实际选中 `kimi-k3`，2 次请求，Content Planning 与 Art Direction 均 HTTP 200，费用无可靠价格证据记 `unknown`。
@@ -50,7 +52,7 @@ Thread 写模式已将 pending Assistant 与流式正文/推理/终态改为先�
 | `ConversationAgentContinuationRuntime`、`JsonConversationAgentSessionRepository` | 语义历史改读 Thread；输入引用校验、初始预算、重放 DTO、本地澄清回复仍依赖 Legacy | 输入引用与预算判断改读完整 Thread，回复复用 Coordinator/Outbox |
 | `ProjectConversationResponseSubjectResolver`、`ConversationDocumentToolSessionService` | 使用 Legacy Message revision/content/收据选定文件、brief 和授权绑定 | 同一 Thread DTO Reader 保留项目/版本/权限门禁，不从模型历史决定正式 Work |
 | Workflow、Document Generation、Attachment/Page Context、Native Search | 兼容计划/目标/文件读取仍消费 Conversation DTO；Thread-first Workflow 执行已转入现有 Agent | 逐个替换事实读取，保留离线 Legacy 回滚；不新增执行循环 |
-| `RegistryFeatureCandidateSource` | 已统一候选入口及参数/Route 重验；能力证据仍主要经 profile/包合同表达，未完全统一具体模型的证据版本 | 明确 Profile/Evidence 绑定与 stale/unknown 合同，保持费用 unknown，不猜名称或静默换模型 |
+| `RegistryFeatureCandidateSource` | 已统一候选入口、参数/Route 重验及相关模型证据指纹；无对应模型证据仍沿已批准包合同，不宣称真实能力验证 | 继续审查完整 Profile/Evidence/Route 持久快照，保持费用 unknown，不猜名称或静默换模型 |
 | `ProviderOperationRouter`、旧 image preflight/draft factory | 历史图像/视频执行仍消费 capabilityEvidenceId；新候选路径消费 Feature Contract | 先补两者等价性与未知证据测试，再收敛为同一能力快照 |
 
 后续优先级：兼容响应 Tool 投影缺口与 Legacy 先写失败边界已完成本地复现和主路径修补；继续迁移授权/引用 Reader，收敛 Capability Evidence/Profile/Route 的统一版本与参数来源。外部 Provider 后续验收需另一个明确预算与新隔离项目，未知结果不自动重发。本轮不把所有待处理调用方标为完成，也不扩展成完整 Provider 矩阵通过。

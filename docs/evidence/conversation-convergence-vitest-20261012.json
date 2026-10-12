@@ -1,0 +1,19 @@
+{
+  "schemaVersion": 1,
+  "date": "2026-10-12",
+  "command": "pnpm exec vitest run tests/application tests/domain tests/platform validation tests/evaluation --maxWorkers=1 --minWorkers=1",
+  "testFiles": 733,
+  "testFilesPassed": 733,
+  "tests": 3439,
+  "testsPassed": 3439,
+  "testsFailed": 0,
+  "durationMs": {
+    "Count": 335,
+    "Average": null,
+    "Sum": null,
+    "Maximum": null,
+    "Minimum": 1791799974578.5112,
+    "StandardDeviation": null,
+    "Property": "endTime"
+  }
+}

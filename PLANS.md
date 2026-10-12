@@ -1,5 +1,11 @@
 # UniComp 开发计划
 
+### 模型接线修复：能力证据与选型令牌统一重验（2026-10-12）
+
+从 `80dfb3c` 继续。3 个失败复现确认：Profile/Route 未变化时，新增同功能 supported/unsupported/unknown 能力证据不影响候选或已准备令牌。Registry Candidate Source 现消费模型中与 Feature Contract 的 productFeature/internalPurpose 对应的最新能力状态；新选型对明确 unsupported/unknown/restricted/verification_failed 拒绝。证据 ID/版本/参数内容的内部指纹纳入既有 token bindingFingerprint，支持证据更新后也要求重新准备；绑定 profile evidence 与会话图片能力时同样纳入指纹，公开 DTO 不外露证据与路由字段。
+
+参数继续来自同一 Feature Contract/Parameter Schema，价格无可信证据继续 unknown；查询不补写 Profile，也不根据模型名猜能力。历史 Legacy Task 的 immutable capabilityEvidenceId 合同保持，旧任务支持证据的路由回归仍通过；本批修复新候选/准备/提交链路，不把历史协议迁移记为全部完成。新增 5 个证据测试覆盖新增状态、旧支持证据被 supersede 和无关能力更新不使当前令牌失效；模型管理、候选、图片/视频及包安装共 64 项定向通过，typecheck、lint 和生产 build 通过，完整本地门禁继续执行。
+
 ### 维护收敛：兼容 Tool/Artifact 投影与跨执行步骤身份（2026-10-12）
 
 从 `3173882` 继续。新增失败复现：同一 Thread 两次 Response 使用相同 `provider-tool-0-0` 时第二次 Tool Item 被旧幂等匹配吞掉。工具身份现在包含来源、Response/Agent 身份、toolId 和 stepRef；相同执行重放保持幂等，旧同执行投影继续可更新，不跨执行复用 Item。
