@@ -28,6 +28,10 @@
 
 后续按统一目标继续修复时，隔离发送测试出现 Thread manifest `EPERM` 和上一 JSONL 记录读取失败。仓储扫描会越过 manifest 的已提交字节前缀，把完整但尚未 Commit 的记录作为会话事实读出；上一 Hash 的截取又混用 UTF-8 字节偏移和字符串索引。现已统一到字节前缀，并在 JSON 读取和原子替换间共用文件锁、使用唯一临时文件。旧版/新版离线对照：[Thread 前缀证据](../evidence/thread-committed-prefix-20261012.json)。该证据来自隔离项目，不把它倒推成用户现场全部卡顿的唯一原因。
 
+回复主链路复现另确认，持久 Response 增量到达后 Thread 曾从滞后的 Legacy 取正文，且 Legacy 的 streaming 写失败会阻断回复。Thread 写模式现从 Response 事实构建正文/推理/终态，保留 Thread Host 元数据；pending/流式/终态与正式 PPT 收据先提交 Thread/Outbox，终态再投影不从 Legacy 取正文。Legacy 故障用例最终仍只有一条 Assistant Item、一次 Provider 请求，解除本地故障后只重放兼容投影。其他恢复/授权与 Office 路径仍见 [接线审计](office-agent-convergence-audit-20261012.md)。
+
+本批扩展 Electron Mock 验收要求 Thread Assistant 正式收据与 Artifact Work 一致，并且对应父任务为 `completed`。该断言发现本批新增收据补写的终态时间戳错误，已同步更新 `completedAt`/`failedAt`/`cancelledAt` 并通过。脚本的 Thread 模式判断与 main 默认保持一致，失败通过 `app.exit(1)` 返回非零，避免只有错误文本而退出码仍为 0。Thread 显式启用和 Legacy 显式回滚分别验收；不能用没有设置环境变量的默认 Thread 运行冒充 Legacy 验收。
+
 | 优先级 | 问题与实际触发 | 本批处理 |
 |---|---|---|
 | P1 | Agent start 等 IPC 返回后才绑定会话，启动阶段没有按 command 订阅进度；欢迎页和草稿长期不变 | 共用 Workflow/Agent command 进度订阅；首个持久事件后快读绑定会话和已接受 User Item，保留草稿直到接受/停止结果；不等待完整 Legacy 终态读取 |

@@ -5,6 +5,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
   createConversationResponseExecution,
   createConversationResponseStreamEvent,
+  parseMessage,
   toConnectionId,
   toConversationId,
   toConversationResponseDraftId,
@@ -29,6 +30,7 @@ import {
   NodeProjectStorage
 } from '../../src/platform';
 import { parseConversationResponseExecutionDocument } from '../../src/platform/repositories/json-conversation-response-execution-repository';
+import { threadResponseMessage } from '../../src/platform/providers/thread-response-message';
 
 const roots: string[] = [];
 const projectId = toProjectId('project-response-stream');
@@ -124,6 +126,28 @@ function ids() {
 }
 
 describe('conversation response execution repository', () => {
+  it.each(['complete', 'fail', 'confirmCancelled', 'interrupt'] as const)('builds the Thread snapshot from Response facts through %s, retaining Host metadata', async terminal => {
+    const { repository } = await fixture();
+    const item = execution({ productFeature: 'text_reasoning' });
+    await repository.create(item, createdEvent(item.id));
+    const lifecycle = new ConversationResponseExecutionLifecycle(repository, ids(), undefined, () => t1);
+    await lifecycle.start(item.id);
+    await lifecycle.appendDeltas(item.id, [{ kind: 'reasoning', delta: '持久推理摘要' }, { kind: 'content', delta: '当前回复' }]);
+    const stale = parseMessage({ schemaVersion: 1, id: item.snapshot.assistantMessageId,
+      conversationId: item.snapshot.conversationId, role: 'assistant', revision: 0, state: 'pending',
+      content: '', attachments: [], createdAt: t0, updatedAt: t0,
+      documentGenerationStatus: { state: 'generating_file', kind: 'ppt' } });
+    const event = terminal === 'fail' ? await lifecycle.fail(item.id, 'newapi.tool_loop_unknown_result')
+      : terminal === 'interrupt' ? await lifecycle.interrupt(item.id, 'application_shutdown')
+        : await lifecycle[terminal](item.id);
+    const model = await lifecycle.readModel(item.id);
+    const snapshot = threadResponseMessage(model, event, stale);
+    expect(snapshot).toMatchObject({ content: '当前回复', reasoningContent: '持久推理摘要', revision: 0,
+      documentGenerationStatus: stale.documentGenerationStatus,
+      state: terminal === 'complete' ? 'completed' : terminal === 'confirmCancelled' ? 'cancelled' : 'failed' });
+    if (terminal === 'fail' || terminal === 'interrupt') expect(snapshot).toMatchObject({ failureReason: terminal === 'fail' ? 'unknown' : 'interrupted' });
+    expect(() => threadResponseMessage({ ...model, responseExecutionId: toConversationResponseExecutionId('foreign-execution') }, event)).toThrow('scope_mismatch');
+  });
   it('validates interleaved histories and rejects orphan events, duplicate identities and invalid retry predecessors', () => {
     const first = execution();
     const second = execution({ id: 'second-history', attemptId: 'second-attempt', assistantMessageId: 'second-assistant' });

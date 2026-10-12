@@ -1,0 +1,26 @@
+{
+  "schemaVersion": 1,
+  "date": "2026-10-12",
+  "boundary": "real Electron BrowserWindow + production preload + production IPC + controlled in-process Provider transport",
+  "paidRequests": 0,
+  "unknownOutcomeRetries": 0,
+  "distinctTargetedTests": 270,
+  "nodeUiTests": 400,
+  "syntheticProviderRequests": 7,
+  "thread": {
+    "runtimeControls": true,
+    "assistantDocumentReceipt": true,
+    "artifactRegistered": true,
+    "parentState": "completed"
+  },
+  "officeKinds": [
+    "ppt",
+    "word",
+    "excel"
+  ],
+  "sourceReportSha256": "ceb11dccec1bc2ccaed4757dc36c848a752ec6ee3b0b3e0a6a2b7ad54c0cfdd9",
+  "limitations": [
+    "Controlled Mock Transport only; no external Provider acceptance",
+    "Recovery, authorization and other Office compatibility paths remain under audit"
+  ]
+}

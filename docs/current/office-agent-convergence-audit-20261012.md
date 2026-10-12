@@ -24,6 +24,10 @@
 - 文本、图片、视频、文档 Agent 已复用 `RegistryFeatureCandidateSource`/`ProviderFeatureCandidateService`。原图片/视频候选查询每次调用 `registry.mutate()`，即使无变化也推进 revision 并改写备份；现在将包合同 profile 补齐放在图片/视频 Runtime 初始化屏障，查询只消费已提交注册表。模型启用命令同时补齐 reference image profile。
 - `mutateIfChanged()` 在同一写锁内校验并比较快照，无变化不写文件、不推进 revision；有变化继续保留原有 Capability 历史校验、原子写与备份。初始化沿用既有包合同，不新增真实 Provider 能力验证声明。
 
+## 回复主路径后续收敛（2026-10-12）
+
+Thread 写模式已将 pending Assistant 与流式正文/推理/终态改为先提交 Thread snapshot，再由 Durable Outbox 投影 Legacy。`projectThreadStreamEvent` 从已提交 Response Execution 取正文和状态，Host 元数据从完整 Thread Reader 保留，停止读取滞后的 Legacy 正文；正式 PPT 交付收据在 Work/File/Hash 重验后也先提交 Thread。终态投影读取 Thread，Legacy 故障保持待投影事件，恢复重放不调用 Provider。Legacy 显式回滚模式保持原实现。授权、引用与 revision 的 Legacy 兼容读取、恢复/澄清/其他 Office 写入尚未在本批全部迁移。
+
 ## 真实 Provider 证据及限制
 
 负责人授权最近成功且仍有效文本模型，一个合成隔离 PPT 生成/读回用例：最多 5 次请求，外层每次最多 1024 输出 token，Art Direction 最多 4096，自动重试 0。实际选中 `kimi-k3`，2 次请求，Content Planning 与 Art Direction 均 HTTP 200，费用无可靠价格证据记 `unknown`。
@@ -38,9 +42,9 @@
 
 | 实际调用方 | 当前用途及剩余问题 | 迁移目标 |
 |---|---|---|
-| `ConversationResponseArtifactFactory` | 仍读取 Legacy revision/user message、工具/附件授权，并直接写 pending Assistant；模型历史已改读 Thread | 保留旧 DTO 合同，授权与创建消息改从 Thread Reader/Outbox 获取 |
-| `conversation-text-submission.createConversationLinkedLifecycle` | start/delta/complete/fail/cancel 仍直接保存 Legacy，随后 Runtime 投影 Thread | 从 Runtime 事实先提交 Thread snapshot，再仅通过 Outbox 更新 Legacy；保留 Completion Journal |
-| `chat-context-runtime.projectThreadStreamEvent` | 为构建 snapshot 仍读取 Legacy Assistant；恢复和文档收据结算也有直接 Legacy 写入 | 从 Response/Document Runtime 构建权威 snapshot，失败只形成 projection debt |
+| `ConversationResponseArtifactFactory` | Thread 写模式 pending 已走 Outbox；仍读取 Legacy revision/user message、工具/附件授权；模型历史已改读 Thread | 保留旧 DTO 合同，授权与引用改从 Thread Reader 获取 |
+| `conversation-text-submission.createConversationLinkedLifecycle` | Thread 写模式 start/delta/complete/fail/cancel 已由 persisted-event hook 提交 Thread/Outbox；Legacy 回滚路径仍直接保存 | 保留 Completion Journal；继续核对恢复与其他入口 |
+| `chat-context-runtime.projectThreadStreamEvent` | 已从 Response/Thread 构建权威 snapshot；正式 PPT 收据也先提交 Thread；恢复等仍有直接兼容写入 | 继续消除恢复的 Legacy 权威读取/写入，失败只形成 projection debt |
 | `ConversationAgentContinuationRuntime`、`JsonConversationAgentSessionRepository` | 语义历史改读 Thread；输入引用校验、初始预算、重放 DTO、本地澄清回复仍依赖 Legacy | 输入引用与预算判断改读完整 Thread，回复复用 Coordinator/Outbox |
 | `ProjectConversationResponseSubjectResolver`、`ConversationDocumentToolSessionService` | 使用 Legacy Message revision/content/收据选定文件、brief 和授权绑定 | 同一 Thread DTO Reader 保留项目/版本/权限门禁，不从模型历史决定正式 Work |
 | Workflow、Document Generation、Attachment/Page Context、Native Search | 兼容计划/目标/文件读取仍消费 Conversation DTO；Thread-first Workflow 执行已转入现有 Agent | 逐个替换事实读取，保留离线 Legacy 回滚；不新增执行循环 |

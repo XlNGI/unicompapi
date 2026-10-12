@@ -1,5 +1,13 @@
 # UniComp 开发计划
 
+### 维护收敛：Thread 回复正文与正式文档收据优先提交（2026-10-12）
+
+从 `061e878` 继续。两项 composed Host 定向复现确认：Response 已保存增量时 Thread 曾读取旧 Legacy 正文；Legacy streaming 写入失败又阻断普通回复。Thread 写模式现从已提交 Response 构建当前正文/推理/终态，从 Thread snapshot 保留 Host 元数据；pending、start、delta、complete、fail、cancel 不再直接写 Legacy，统一走 Thread Commit/Outbox。正式 PPT 收据在本地 Work/File/Hash 重验后先附到 Thread Assistant；终态补投影也读取 Thread 正文。Legacy 回滚模式保留原路径，Legacy 故障只形成可重放投影欠账，不重发 Provider。
+
+回归新增 Thread 故障/正常流、同一个 Assistant Item、失败/取消/中断与 reasoning/Host 元数据、pending 两种模式，以及本地异常 safe code 正规化。`EPERM` 等大写代码转为可持久的受控代码，非法字符串回退，避免原故障再被 invocation safe code 校验遮盖。当前本轮 270 项定向、Node/UI 400/400、typecheck、lint、build 与 Thread/Legacy Electron 导航及 Mock Provider/Office 均通过；正式收据可从 Thread 页读取且 PPT 父任务为 `completed` 的追加断言通过。验收脚本同步修复默认 Thread 模式判断和 Electron 失败退出码，新增断言曾发现本批收据补写未同步终态时间戳，修正后通过。收费请求 0、未知结果重试 0，真实数据未改写。
+
+仍未完成：恢复器、澄清回复、Workflow 与其他 Office 路径存在兼容写入；授权/引用/revision 仍有 Legacy 读取；兼容 `responses.start` 的 Tool facts 与具体 Capability/Profile/Route 版本接线待继续。不能将本批主回复路径收敛记成所有会话事实源已经统一。
+
 ### 维护修复：Thread 提交可见性与 Windows 原子读写（2026-10-12）
 
 从 `feature/office-agent-thread-model-convergence@cf1d724` 干净工作区继续按统一目标修复。离线发送回归抓到 manifest 替换的 Windows `EPERM`，其后中文 JSONL 读取又失败；不是外部 Provider 无响应的证据。仓储实际还会读取 manifest 之后的未提交完整记录：隔离旧版/新版对照在第二次 Commit 前分别看到 2/1 条 Item，提交后均为 2 条，证据见 [Thread 已提交前缀](docs/evidence/thread-committed-prefix-20261012.json)。

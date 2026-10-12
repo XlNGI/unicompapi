@@ -11,7 +11,6 @@ import {
   toProviderInvocationAttemptId,
   toProviderInvocationEventId,
   toSubmissionIntentId,
-  type MessageFailureReason,
   type ParameterSchemaV2,
   type Conversation,
   type ConversationResponseExecutionId,
@@ -73,6 +72,7 @@ import type { ControlledProviderToolBridge, ControlledProviderToolDefinition, Pr
 import type { ExecutionStopReason, HostExecutionBudget } from '../../application/execution-budget';
 import { bindProductionTraceAssistant, emitProductionEvent, getProductionTraceScope,
   withProductionTrace, type ProductionTraceScope } from '../conversation-production-trace';
+import { failureReasonFromSafeCode } from './thread-response-message';
 
 export interface ConversationTextSubmissionRuntimes {
   readonly nativeSearch?: ConversationNativeSearch;
@@ -99,7 +99,6 @@ export interface ConversationTextSubmissionRuntimes {
     } | undefined>;
   };
 }
-
 export function createConversationTextSubmissionIdFactory(): ProviderSubmissionOrchestrationIdFactory {
   return {
     nextSubmissionIntentId: () => toSubmissionIntentId(`intent-${randomUUID()}`),
@@ -123,6 +122,8 @@ export function createConversationTextDispatchBridge(
       counters?: { readonly toolCallsUsed: number; readonly costUnitsUsed: number }, reason?: ExecutionStopReason) => Promise<void>;
     readonly executionLifecycle?: (id: ConversationResponseExecutionId) => Promise<ProviderExecutionLifecyclePort | undefined>;
     readonly executionSignal?: (id: ConversationResponseExecutionId) => Promise<AbortSignal | undefined>;
+    /** Persisted-event hook owns Thread commits and the Legacy Outbox projection. */
+    readonly threadFirst?: boolean;
     now?: () => string;
   }
 ): ProviderSubmissionDispatchBridge {
@@ -136,7 +137,8 @@ export function createConversationTextDispatchBridge(
   const linkedLifecycle = createConversationLinkedLifecycle(
     options.lifecycle,
     options.conversations,
-    now
+    now,
+    { threadFirst: options.threadFirst }
   );
   const deepSeekAdapter = new DeepSeekChatAdapter(
     options.deepSeekRuntime,
@@ -395,7 +397,8 @@ function dispatchFailureSafeCode(adapterKey: string, error: unknown): string {
     error &&
     typeof error === 'object' &&
     'safeCode' in error &&
-    typeof (error as { safeCode: unknown }).safeCode === 'string'
+    typeof (error as { safeCode: unknown }).safeCode === 'string' &&
+    /^[a-z0-9][a-z0-9_.-]{0,127}$/.test((error as { safeCode: string }).safeCode)
   ) {
     return (error as { safeCode: string }).safeCode;
   }
@@ -403,9 +406,10 @@ function dispatchFailureSafeCode(adapterKey: string, error: unknown): string {
     error &&
     typeof error === 'object' &&
     'code' in error &&
-    typeof (error as { code: unknown }).code === 'string'
+    typeof (error as { code: unknown }).code === 'string' &&
+    /^[A-Za-z0-9][A-Za-z0-9_.-]{0,80}$/.test((error as { code: string }).code)
   ) {
-    return `${adapterKey}.${(error as { code: string }).code}`;
+    return `${adapterKey}.${(error as { code: string }).code.toLowerCase()}`;
   }
   return `${adapterKey}.failed_before_submission`;
 }
@@ -436,7 +440,6 @@ export function createRegistryCredentialResolver(
     }
   };
 }
-
 export function createRegistryConnectionResolver(
   registry: JsonProviderRegistryStore
 ): NewApiConnectionResolverPort {
@@ -467,7 +470,8 @@ export function createTextParameterSchemaResolver(): NewApiParameterSchemaResolv
 export function createConversationLinkedLifecycle(
   lifecycle: ConversationResponseExecutionLifecycle,
   conversations: ProjectConversationRepository,
-  now: () => string
+  now: () => string,
+  options: { readonly threadFirst?: boolean } = {}
 ): DeepSeekConversationLifecyclePort & NewApiConversationLifecyclePort {
   // The response lifecycle already batches deltas. A shorter compatibility
   // projection window keeps streaming text responsive without turning every
@@ -606,8 +610,10 @@ export function createConversationLinkedLifecycle(
       if (segment.kind === 'content') {
         const state = production.get(executionId);
         if (state) state.characters += segment.delta.length;
-        projectionState(executionId).pendingContent += segment.delta;
-        scheduleFlush(executionId);
+        if (!options.threadFirst) {
+          projectionState(executionId).pendingContent += segment.delta;
+          scheduleFlush(executionId);
+        }
       }
     }
     const state = production.get(executionId);
@@ -639,7 +645,7 @@ export function createConversationLinkedLifecycle(
       await emitProductionEvent({ code: 'model_request', status: 'completed', operationId: executionId,
         facts: { purpose: 'content' } });
       await traceResponse(executionId, 'started');
-      await queueProjection(executionId, (conversation, assistantMessageId) =>
+      if (!options.threadFirst) await queueProjection(executionId, (conversation, assistantMessageId) =>
         startAssistantMessageStreaming(
           conversation,
           assistantMessageId,
@@ -655,7 +661,7 @@ export function createConversationLinkedLifecycle(
       await sealAndDrainDeltas(executionId);
       await enqueue(executionId, async () => {
         await flushPending(executionId);
-        await queueProjection(executionId, (conversation, assistantMessageId, reasoningContent) => completeAssistantMessage(
+        if (!options.threadFirst) await queueProjection(executionId, (conversation, assistantMessageId, reasoningContent) => completeAssistantMessage(
           conversation,
           assistantMessageId,
           toIsoTimestamp(now()),
@@ -683,7 +689,7 @@ export function createConversationLinkedLifecycle(
         await traceResponse(executionId, 'cancelled');
         production.delete(executionId);
         try {
-          await queueProjection(executionId, (conversation, assistantMessageId, reasoningContent) => cancelAssistantMessage(
+          if (!options.threadFirst) await queueProjection(executionId, (conversation, assistantMessageId, reasoningContent) => cancelAssistantMessage(
             conversation,
             assistantMessageId,
             toIsoTimestamp(now()),
@@ -703,7 +709,7 @@ export function createConversationLinkedLifecycle(
         await traceResponse(executionId, 'failed');
         production.delete(executionId);
         try {
-          await queueProjection(executionId, (conversation, assistantMessageId, reasoningContent) => failAssistantMessage(
+          if (!options.threadFirst) await queueProjection(executionId, (conversation, assistantMessageId, reasoningContent) => failAssistantMessage(
             conversation,
             assistantMessageId,
             failureReasonFromSafeCode(safeCode),
@@ -727,35 +733,4 @@ export function createConversationLinkedLifecycle(
       });
     }
   };
-}
-
-function failureReasonFromSafeCode(safeCode: string): MessageFailureReason {
-  if (safeCode.includes('timeout')) {
-    return 'unknown';
-  }
-  if (safeCode.includes('finish.length')) {
-    return 'truncated';
-  }
-  if (safeCode.includes('upstream_rejected')) {
-    return 'upstream_rejected';
-  }
-  if (safeCode.includes('model_not_found')) {
-    return 'model_unavailable';
-  }
-  if (safeCode.includes('local_response_write_failed')) {
-    return 'local_write_failed';
-  }
-  if (safeCode.includes('invalid_request') || safeCode.includes('invalid_parameters')) {
-    return 'request_rejected';
-  }
-  if (safeCode.includes('authentication_failed') || safeCode.includes('permission_denied')) {
-    return 'access_denied';
-  }
-  if (safeCode.includes('invalid_response')) {
-    return 'invalid_response';
-  }
-  if (safeCode.includes('interrupted') || safeCode.includes('application_shutdown')) {
-    return 'interrupted';
-  }
-  return 'unavailable';
 }

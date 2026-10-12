@@ -120,7 +120,7 @@ function textCandidate(): ResolvedFeatureCandidateV1 {
 }
 
 describe('ConversationResponseArtifactFactory', () => {
-  it.each([false, true])('uses the complete Thread model transcript with Legacy projection debt (Agent: %s)', async agentNative => {
+  it.each([[false, false], [true, false], [false, true], [true, true]])('uses the complete Thread model transcript with Legacy projection debt (Agent: %s, Thread writes: %s)', async (agentNative, threadFirst) => {
     const root = await mkdtemp(path.join(os.tmpdir(), 'unicomp-thread-model-artifact-'));
     roots.push(root);
     const storage = new NodeProjectStorage(root);
@@ -145,12 +145,18 @@ describe('ConversationResponseArtifactFactory', () => {
     const subject = await new ProjectConversationResponseSubjectResolver(conversations, drafts, contexts).resolve({
       kind: 'conversation_response_draft', conversationId: legacy.id, conversationRevision: legacy.revision,
       responseDraftId: draft.id, responseDraftRevision: draft.revision, userMessageId: current.id });
-    const created = await new ConversationResponseArtifactFactory({ conversations, drafts, contexts, executions, modelHistory }).create({
+    const save = vi.spyOn(conversations, 'save');
+    const projectAssistantMessage = vi.fn(async () => undefined);
+    const created = await new ConversationResponseArtifactFactory({ conversations, drafts, contexts, executions, modelHistory,
+      threadFirst, projectAssistantMessage }).create({
       subject, candidate: textCandidate(), routeSnapshotId: toProviderExecutionRouteSnapshotId('thread-route'),
       invocationAttemptId: toProviderInvocationAttemptId('thread-attempt'), authorizationClaimId: 'thread-claim', createdAt: t1 });
     expect(created.dispatchRequest.messages).toContainEqual({ role: 'user', content: '预算上限七万元' });
     expect(created.dispatchRequest.messages).toContainEqual({ role: 'assistant', content: '按七万元方案讨论' });
     expect(created.dispatchRequest.messages.at(-1)?.content).toBe('继续讨论');
+    expect(save).toHaveBeenCalledTimes(threadFirst ? 0 : 1);
+    expect(projectAssistantMessage).toHaveBeenCalledWith(expect.objectContaining({ status: 'pending',
+      legacyMessageSnapshot: expect.objectContaining({ schemaVersion: 1, role: 'assistant', state: 'pending', content: '' }) }));
   });
   it.each(['unchanged', 'changed', 'unbound'] as const)('sends only the pinned image bytes and fails closed when %s', async (mode) => {
     const root = await mkdtemp(path.join(os.tmpdir(), 'unicomp-conversation-image-'));

@@ -42,6 +42,7 @@ export interface ConversationResponseArtifactFactoryDependencies {
   readonly drafts: ConversationResponseDraftRepository;
   readonly contexts: ProjectContextRepository;
   readonly executions: ConversationResponseExecutionRepository;
+  readonly threadFirst?: boolean;
   readonly contextBuilder?: ConversationContextBuilder;
   readonly agentContextAssembler?: AgentContextAssembler;
   readonly modelHistory?: Pick<ModelHistoryReader, 'readConversation'>;
@@ -60,6 +61,7 @@ export interface ConversationResponseArtifactFactoryDependencies {
     readonly content: string;
     readonly createdAt: string;
     readonly updatedAt: string;
+    readonly legacyMessageSnapshot?: Readonly<Record<string, unknown>>;
   }): Promise<void>;
   bindExecutionOwnership?(executionId: string): Promise<void>;
   bindDocumentOwnership?(executionId: string): Promise<void>;
@@ -201,6 +203,9 @@ export class ConversationResponseArtifactFactory
       id: assistantMessageId,
       createdAt
     });
+    if (this.dependencies.threadFirst && !this.dependencies.projectAssistantMessage) {
+      throw new Error('thread_pending_projection_unavailable');
+    }
     await this.dependencies.projectAssistantMessage?.({
       threadId: String(conversation.id),
       sourceMessageId: String(draft.userMessageId),
@@ -209,9 +214,10 @@ export class ConversationResponseArtifactFactory
       status: 'pending',
       content: '',
       createdAt,
-      updatedAt: createdAt
+      updatedAt: createdAt,
+      legacyMessageSnapshot: pendingConversation.messages.at(-1)! as unknown as Readonly<Record<string, unknown>>
     });
-    await this.dependencies.conversations.save(
+    if (!this.dependencies.threadFirst) await this.dependencies.conversations.save(
       pendingConversation,
       conversation.revision
     );

@@ -25,6 +25,7 @@ let abortCount = 0;
 let transportMode = 'normal';
 let toolCallCount = 0;
 let toolCallId;
+const hostDiagnostics = [];
 
 function sseResponse(model, text) {
   const chunk = { id: 'agent-mock-electron', object: 'chat.completion.chunk', created: 1, model,
@@ -98,6 +99,13 @@ async function run() {
       platform.newApiProviderPackageDescriptor
     ]),
     runtimeAuthorization: providers.authorization,
+    onError: error => {
+      const messages = [];
+      for (let depth = 0, current = error; depth < 5 && current; depth += 1, current = current.cause) {
+        messages.push(current instanceof Error ? current.stack : String(current));
+      }
+      hostDiagnostics.push(messages.join('\nCaused by: '));
+    },
     textSubmission: { credentialVault: providers.vault, deepSeekRuntime, newApiRuntime }
   });
   documentLifecycle = registerDocumentGenerationIpcHandlers({
@@ -135,7 +143,7 @@ async function run() {
   }
   if (!normalRead?.ok || normalRead.value.state !== 'completed') throw new Error(`Normal execution not completed: ${JSON.stringify(normalRead)}`);
   let threadRuntimeControls;
-  if (process.env.UNICOMP_THREAD_FIRST === '1') {
+  if (process.env.UNICOMP_THREAD_FIRST !== '0') {
     const detail = await js(`window.unicomp.chatContexts.getThread(${JSON.stringify(normal.value.execution.conversationId)})`);
     threadRuntimeControls = Boolean(detail?.ok && detail.value.parentRuns?.some(run =>
       run.responseExecutionId === normal.value.execution.responseExecutionId) && Array.isArray(detail.value.agentSessions));
@@ -176,14 +184,26 @@ async function run() {
   const toolConversation = await js(`window.unicomp.chatContexts.getConversation(${JSON.stringify(toolExecution.conversationId)})`);
   const artifactMessage = toolConversation?.ok && toolConversation.value.messages?.find(message => message.documentResult);
   let threadArtifact;
-  if (process.env.UNICOMP_THREAD_FIRST === '1') {
+  let threadDocumentReceipt;
+  let threadToolParentState;
+  if (process.env.UNICOMP_THREAD_FIRST !== '0') {
     for (let attempt = 0; attempt < 40; attempt += 1) {
       const page = await js(`window.unicomp.chatContexts.getThreadItemsPage(${JSON.stringify({ threadId: toolExecution.conversationId, limit: 200, direction: 'older', cursor: null })})`);
       threadArtifact = page?.ok
         ? page.value.items.find(item => item.itemType === 'document_artifact_projection')
         : undefined;
-      if (threadArtifact?.artifact?.workId) break;
+      threadDocumentReceipt = page?.ok
+        ? page.value.items.find(item => item.itemType === 'assistant_message' && item.message?.documentResult)?.message.documentResult
+        : undefined;
+      const detail = await js(`window.unicomp.chatContexts.getThread(${JSON.stringify(toolExecution.conversationId)})`);
+      threadToolParentState = detail?.value?.parentRuns?.find(run => run.responseExecutionId === toolExecution.responseExecutionId)?.state;
+      if (threadArtifact?.artifact?.workId && threadDocumentReceipt?.workId === threadArtifact.artifact.workId && threadToolParentState === 'completed') break;
       await delay(100);
+    }
+    if (!threadDocumentReceipt?.workId || threadDocumentReceipt.workId !== threadArtifact?.artifact?.workId || threadToolParentState !== 'completed') {
+      const detail = await js(`window.unicomp.chatContexts.getThread(${JSON.stringify(toolExecution.conversationId)})`);
+      throw new Error('Thread Assistant lost the verified document receipt; ' + JSON.stringify({
+        state: toolExecution.state, parentRuns: detail?.value?.parentRuns, hostDiagnostics }));
     }
   }
   const toolCalling = {
@@ -193,6 +213,8 @@ async function run() {
     observationReturned: toolExecution.content?.includes('工具观察结果') ?? false,
     artifactRegistered: Boolean(artifactMessage?.documentResult),
     documentResult: artifactMessage?.documentResult ?? null,
+    threadDocumentReceipt: threadDocumentReceipt ?? null,
+    threadToolParentState,
     threadArtifact: threadArtifact ? {
       workId: threadArtifact.artifact?.workId ?? null,
       fileName: threadArtifact.artifact?.fileName ?? null,
@@ -257,6 +279,5 @@ async function cleanup() {
 run().catch(error => { process.stderr.write(`${error.stack ?? error}\n`); process.exitCode = 1; })
   .finally(async () => {
     await cleanup();
-    app.quit();
-    setTimeout(() => process.exit(process.exitCode ?? 0), 2_000).unref();
+    app.exit(process.exitCode ?? 0);
   });
