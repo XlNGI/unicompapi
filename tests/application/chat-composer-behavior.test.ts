@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { ReactElement, ReactNode } from 'react';
 import type * as ReactModule from 'react';
+import type { ThreadItemsPageDto, ThreadSummaryPageDto } from '../../src/shared/chat-context-ipc';
 
 // A small hook runner lets us exercise the real JSX event handlers without a DOM.
 // State is allocated by React's hook ordering, never by component-specific indexes.
@@ -175,6 +176,62 @@ describe('chat composer event behavior', () => {
     vi.spyOn(console, 'info').mockImplementation(() => {});
   });
   afterEach(() => { vi.unstubAllGlobals(); vi.restoreAllMocks(); });
+
+  it.each(['summaries', 'items'] as const)('restores Thread messages after a page remount when %s arrive last', async (last) => {
+    const message = {
+      messageId: 'message-return-to-chat', role: 'assistant' as const, state: 'completed' as const,
+      conversationId: conversation.conversationId,
+      revision: 1, content: 'Persisted reply after returning to chat', attachments: [],
+      createdAt: conversation.updatedAt, updatedAt: conversation.updatedAt
+    };
+    const summaries = { ok: true as const, value: { items: [{
+      ...conversation, threadId: conversation.conversationId, messageCount: 1, turnCount: 1,
+      hasActiveDocumentGeneration: false, status: 'active', storageScope: 'current_project',
+      createdAt: conversation.updatedAt
+    }], readAtSequence: 1, hasMore: false } satisfies ThreadSummaryPageDto };
+    const page = { ok: true as const, value: {
+      threadId: conversation.conversationId, revision: 1, updatedAt: conversation.updatedAt,
+      readAtSequence: 1, hasMore: false, items: [{
+        itemId: { namespace: 'message', value: message.messageId }, itemType: 'assistant_message',
+        threadId: conversation.conversationId, status: 'completed', createdAt: conversation.updatedAt,
+        sequence: 1, updatedAt: conversation.updatedAt, message
+      }]
+    } satisfies ThreadItemsPageDto };
+    const listThreadSummaries = vi.fn(async () => summaries);
+    const getThreadItemsPage = vi.fn(async () => page);
+    Object.assign(window.unicomp!.chatContexts!, {
+      listThreadSummaries, getThreadItemsPage, getThread: vi.fn()
+    });
+    Object.assign(window.unicomp!.storage!, {
+      listProjects: vi.fn(async () => ({ ok: true, value: [{
+        ...session, availability: 'available', lastOpenedAt: conversation.updatedAt
+      }] }))
+    });
+    const reply = () => find(tree, item => item.type === 'li' && item.key === message.messageId);
+    await settle(24);
+    (conversationButton(conversation.title).props.onClick as () => void)();
+    await settle(24);
+    expect(reply()).toBeDefined();
+
+    // App retains the selected id while ChatPage is unmounted on navigation.
+    unmount();
+    initialConversationId = conversation.conversationId;
+    const delayedSummaries = deferred<typeof summaries>();
+    const delayedPage = deferred<typeof page>();
+    listThreadSummaries.mockImplementation(() => delayedSummaries.promise);
+    getThreadItemsPage.mockImplementation(() => delayedPage.promise);
+    await settle();
+    if (last === 'summaries') delayedPage.resolve(page);
+    else delayedSummaries.resolve(summaries);
+    await settle(16);
+    if (last === 'summaries') delayedSummaries.resolve(summaries);
+    else delayedPage.resolve(page);
+    await settle(24);
+
+    expect(reply()).toBeDefined();
+    expect(JSON.stringify(reply()?.props.children)).toContain(message.content);
+    expect(startResponse).not.toHaveBeenCalled();
+  });
 
   it.each(['enter', 'button'] as const)('%s keeps an unsubmitted draft when no model is selected', async (method) => {
     initialModelSelection = undefined;

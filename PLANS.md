@@ -1,5 +1,13 @@
 # UniComp 开发计划
 
+### 维护修复：会话页切页返回后消息消失（2026-10-12）
+
+实际复现确认，Thread 读取模式下 ChatPage 卸载后 App 保留 selected conversation id；重新挂载时 Thread Item Page 读取可能先于会话 Summary 完成。Item 读取结果写入空 `conversations` 后，Summary 只提供无消息的 sidebar DTO，页面没有再次触发 Item 读取，导致返回会话页显示空内容。修复将 Item Page effect 绑定到已解析的 `selected?.conversationId`，在会话列表尚未恢复时等待，不再使用仅由父级保留的过早 selectedId 发起并丢弃读取。
+
+新增 ChatPage remount 定向回归，覆盖 Summary/Item 两种返回顺序；修复前 Summary 后返回用例稳定失败、Item 后返回通过，修复后均通过。`tests/electron/conversation-phase6-e2e.mjs` 增加真实 Electron Thread/Legacy 连续切页返回检查并使用动态 CDP/Vite 端口，避免占用用户运行中的开发服务；显式设置 main Thread-first/Legacy 模式。验证：ChatPage/VirtualMessageList 51/51、UI 合同 6/6、typecheck、lint、build 通过；Thread-first 与 Legacy adapter 真实 Electron 各 3 会话/120 条消息，作品库→返回、设置→返回、作品库→返回均恢复选中会话和末条消息，会话切换/虚拟列表/更早分页保持通过。长会话验收只断言末条内容可见，不把虚拟列表测量过程中的暂时 DOM 尾行当作消息终态。
+
+日志只读核对：真实用户 `application.log` 在 2026-10-10 以来共 42 条 Provider 成功记录，最近一条 2026-10-12 14:04:39（北京时间）、HTTP 200；没有本次页面异常记录。`renderer-trace.log` 最后更新时间 2026-10-10 17:42:06；源码 `UNICOMP_RENDERER_TRACE`/`VITE_UNICOMP_RENDERER_TRACE` 显式开关控制写入，未取证当时启动环境，不能断言具体停写原因。该日志缺口不影响定向竞态复现。本批没有读取凭证、修改真实项目/会话文件或发起 Provider 请求；下一步继续原会话事实源与模型适配维护审计中的剩余调用方。
+
 ### Office Agent 会话/模型维护第二批：Thread 模型历史与候选查询收敛（2026-10-12）
 
 在 `feature/office-agent-thread-model-convergence` 继续第一批 `c7004af`。新增 `ThreadModelHistorySource` 接入现有 `ModelHistoryReader`，Response Artifact Factory 的模型上下文和 Agent Continuation 语义上下文读取完整 Thread 消息，独立于 UI 分页；附件/reasoning/收据来自持久 snapshot，状态/正文以 Item 为准。Thread 写模式缺少 Thread、损坏或越界时阻断，仅只读模式未迁移数据保留明确 Legacy fallback。修复同 revision Assistant 更新遗漏 snapshot 元数据与其幂等键问题。

@@ -1290,13 +1290,17 @@ export function ChatPage({
   }, [chat, documentGeneration, storage, threadReadsEnabled]);
 
   useEffect(() => {
-    if (!threadReadsEnabled || !chat?.getThreadItemsPage || !selectedId) {
+    const conversationId = selected?.conversationId;
+    // On a page remount App restores selectedId before summaries are loaded.
+    // Wait for its conversation so a fast Item page cannot be dropped by an
+    // update to an empty list and then replaced by a message-free summary.
+    if (!threadReadsEnabled || !chat?.getThreadItemsPage || !conversationId) {
       setThreadItemsLoading(false);
       return;
     }
     let active = true;
     setThreadItemsLoading(true);
-    void chat.getThreadItemsPage({ threadId: selectedId, limit: 100, direction: 'older', cursor: undefined }).then(async result => {
+    void chat.getThreadItemsPage({ threadId: conversationId, limit: 100, direction: 'older', cursor: undefined }).then(async result => {
       if (!active || !result.ok) {
         if (active && result && !result.ok) setNotice(errorMessages[result.error.code]);
         return;
@@ -1307,13 +1311,13 @@ export function ChatPage({
         hasOlder: result.value.hasMore,
         complete: !result.value.hasMore
       });
-      setThreadItemPages(current => ({ ...current, [selectedId]: store }));
+      setThreadItemPages(current => ({ ...current, [conversationId]: store }));
       const items = threadItemStoreItems(store);
       const hasArtifacts = items.some(item => item.itemType === 'document_artifact_projection' && item.projectionSource?.workId);
-      const fallback = hasArtifacts ? await chat.getConversation(selectedId, 'fast') : undefined;
+      const fallback = hasArtifacts ? await chat.getConversation(conversationId, 'fast') : undefined;
       if (!active) return;
       const messages = messagesFromThreadItems(items, fallback?.ok ? fallback.value.messages : []);
-      setConversations(current => current.map(conversation => conversation.conversationId === selectedId
+      setConversations(current => current.map(conversation => conversation.conversationId === conversationId
         ? { ...conversation, messages, revision: result.value.revision, updatedAt: result.value.updatedAt }
         : conversation));
     }).catch(() => {
@@ -1322,7 +1326,7 @@ export function ChatPage({
       if (active) setThreadItemsLoading(false);
     });
     return () => { active = false; };
-  }, [chat, selectedId, threadReadsEnabled]);
+  }, [chat, selected?.conversationId, threadReadsEnabled]);
 
   useEffect(() => {
     onConversationChange?.(selectedId);
