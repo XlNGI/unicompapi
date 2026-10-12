@@ -469,6 +469,7 @@ export function registerStorageIpcHandlers(options: {
     revealFile: (target) => shell.showItemInFolder(target)
   });
   const projectController = new ProjectSessionController({
+    threadConversationsEnabled: process.env.UNICOMP_THREAD_FIRST !== '0' || process.env.UNICOMP_THREAD_FILE_WRITE_PATH === '1',
     registry: sessionRegistry,
     chooseProjectDirectory: () => choosePath(['openDirectory']),
     beforeSessionChange: async () => {

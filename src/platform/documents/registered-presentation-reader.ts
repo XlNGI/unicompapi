@@ -1,7 +1,7 @@
 import { createHash } from 'node:crypto';
 import { readFile, stat } from 'node:fs/promises';
 import path from 'node:path';
-import type { ConversationId, ConversationIntentPlan, ConversationWorkflowV1, DocumentOutline, MessageId, ProjectId, WorkId } from '../../domain';
+import type { ConversationId, ConversationIntentPlan, ConversationWorkflowV1, DocumentOutline, MessageId, ProjectId, WorkId, ProjectConversationRepository } from '../../domain';
 import { toConversationId } from '../../domain';
 import { DocumentGenerationApplicationError } from '../../application/document-generation-service';
 import { mappedPresentationTarget, type PresentationRevisionMap } from '../../application/presentation-revision-map';
@@ -87,9 +87,10 @@ function scopeError() {
   return new DocumentGenerationApplicationError('revision_scope_violation', '无法将章节唯一对应到 PPT 的实际页面，请核对目标范围后重新发起修改。');
 }
 
-export function createPresentationWorkflowScope(options: { rootDirectory: string; projectId: ProjectId }) {
+export function createPresentationWorkflowScope(options: { rootDirectory: string; projectId: ProjectId;
+  conversations?: Pick<ProjectConversationRepository, 'get'> }) {
   const storage = new NodeProjectStorage(options.rootDirectory);
-  const conversations = new JsonProjectConversationRepository(storage, options.projectId);
+  const conversations = options.conversations ?? new JsonProjectConversationRepository(storage, options.projectId);
   const reader = new RegisteredPresentationReader(options);
   async function canRetryMessage(conversationId: ConversationId, messageId: MessageId): Promise<boolean> {
     const conversation = await conversations.get(conversationId);

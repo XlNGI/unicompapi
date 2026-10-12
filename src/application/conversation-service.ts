@@ -70,7 +70,7 @@ export class ConversationApplicationService {
 
   nextConversationId(): ConversationId { return this.ids.nextConversationId(); }
   nextMessageId(): MessageId { return this.ids.nextMessageId(); }
-  get writesTranscript(): boolean { return this.transcript !== undefined; }
+  get writesTranscript(): boolean { return this.transcript !== undefined || 'transcriptAuthority' in this.repository && this.repository.transcriptAuthority === true; }
 
   async create(input: {
     readonly title: string;

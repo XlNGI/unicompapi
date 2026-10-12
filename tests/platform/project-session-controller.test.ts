@@ -1,4 +1,4 @@
-import { mkdtemp, rm } from 'node:fs/promises';
+import { mkdtemp, mkdir, rm, writeFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
@@ -19,6 +19,8 @@ import {
   StorageIpcController,
   StorageProjectSessionRegistry
 } from '../../src/platform';
+import { ThreadFileRepository } from '../../src/platform/repositories/thread-file-repository';
+import { toThreadId } from '../../src/domain';
 
 const roots: string[] = [];
 const timestamp = toIsoTimestamp('2020-01-01T00:00:00.000Z');
@@ -52,6 +54,19 @@ async function createValidProjectRoot() {
 }
 
 describe('ProjectSessionController', () => {
+  it.each([true, false])('reads recent project summaries from the selected authority (Thread: %s)', async threadConversationsEnabled => {
+    const { root, projectId } = await createValidProjectRoot();
+    const id = toConversationId('authority-summary');
+    await new JsonProjectConversationRepository(new NodeProjectStorage(root), projectId).create(createProjectConversation({
+      id, projectId, title: 'Legacy 标题', createdAt: timestamp }));
+    await new ThreadFileRepository(root).createThread({ threadId: toThreadId(id), projectId, title: 'Thread 标题', createdAt: timestamp });
+    await mkdir(path.join(root, 'migration'), { recursive: true });
+    await writeFile(path.join(root, 'migration', 'authority-fence.v1.json'), JSON.stringify({ schemaVersion: 1, state: 'new_authoritative',
+      generation: 0, legacyGeneration: 0, targetGeneration: 0, preparedAt: timestamp, backupVerified: true }));
+    const controller = new ProjectSessionController({ threadConversationsEnabled, registry: new StorageProjectSessionRegistry(),
+      chooseProjectDirectory: async () => undefined, catalog: { getEntries: async () => [{ projectId, rootDirectory: root }] } as unknown as ProjectCatalogService });
+    expect(await controller.listProjectConversationSummaries({ projectId })).toMatchObject({ ok: true, value: [{ title: threadConversationsEnabled ? 'Thread 标题' : 'Legacy 标题' }] });
+  });
   it('keeps the session empty when native directory selection is cancelled', async () => {
     const registry = new StorageProjectSessionRegistry();
     const controller = new ProjectSessionController({

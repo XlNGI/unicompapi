@@ -163,7 +163,7 @@ export class ConversationController {
         expectedRevision: input.expectedRevision,
         content: input.content
       });
-      if (this.dependencies.turnCoordinator) {
+      if (this.dependencies.turnCoordinator && !this.dependencies.service.writesTranscript) {
         const message = conversation.messages.at(-1)!;
         await this.dependencies.turnCoordinator.acceptUserTurn({
           threadId: conversation.id,
@@ -196,7 +196,7 @@ export class ConversationController {
         messageId: toMessageId(input.messageId),
         content: input.content
       });
-      if (this.dependencies.turnCoordinator) {
+      if (this.dependencies.turnCoordinator && !this.dependencies.service.writesTranscript) {
         const message = conversation.messages.find(item => item.id === input.messageId);
         if (message) {
           await this.dependencies.turnCoordinator.acceptUserTurn({

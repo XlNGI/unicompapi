@@ -1,5 +1,5 @@
 import { createHash, randomUUID } from 'node:crypto';
-import { appendFile, mkdir } from 'node:fs/promises';
+import { appendFile, mkdir, readFile } from 'node:fs/promises';
 import path from 'node:path';
 import { app, ipcMain, shell } from 'electron';
 import {
@@ -61,8 +61,11 @@ import { JsonProviderInvocationRepository } from '../../src/platform/repositorie
 import { JsonProviderUsageObservationRepository } from '../../src/platform/repositories/json-provider-usage-repository';
 import { emitProductionEvent } from '../../src/platform/conversation-production-trace';
 import { HostExecutionBudget } from '../../src/application/execution-budget';
+import type { ProjectConversationRepository } from '../../src/domain';
+import { ThreadConversationRepository } from '../../src/platform/repositories/thread-conversation-repository';
 
 export function registerDocumentGenerationIpcHandlers(options: {
+  getConversationRepository?(session: StorageProjectSession): Promise<ProjectConversationRepository>;
   readonly sessionRegistry: StorageProjectSessionRegistry;
   readonly providerRegistry?: JsonProviderRegistryStore;
   readonly providerPackages?: ProviderPackageRegistry;
@@ -75,18 +78,24 @@ export function registerDocumentGenerationIpcHandlers(options: {
     nextMessageId: () => toMessageId(`message-${randomUUID()}`)
   };
   const applications = new Map<string, DocumentGenerationApplicationService>();
+  const getConversationRepository = (session: StorageProjectSession): Promise<ProjectConversationRepository> => {
+    if (options.getConversationRepository) return options.getConversationRepository(session);
+    if (process.env.UNICOMP_THREAD_FIRST !== '0') return Promise.reject(new Error('thread_conversation_repository_unavailable'));
+    return Promise.resolve(new JsonProjectConversationRepository(new NodeProjectStorage(session.rootDirectory), session.projectId, now));
+  };
   const controller = new DocumentGenerationController({
+    getConversation: async (session, id) => (await getConversationRepository(session)).get(id),
     getSession: () => options.sessionRegistry.get(),
     getApplication: (session) => {
       const key = `${session.projectId}:${session.rootDirectory}`;
       const existing = applications.get(key);
       if (existing) return existing;
       const storage = new NodeProjectStorage(session.rootDirectory);
-      const repository = new JsonProjectConversationRepository(
-        storage,
-        session.projectId,
-        now
-      );
+      const repository: ProjectConversationRepository = { projectId: session.projectId,
+        get: async id => (await getConversationRepository(session)).get(id),
+        list: async input => (await getConversationRepository(session)).list(input),
+        create: async input => (await getConversationRepository(session)).create(input),
+        save: async (input, expectedRevision) => (await getConversationRepository(session)).save(input, expectedRevision) };
       const taskRuntimeRepository = new JsonDocumentTaskRuntimeRepository(storage, session.projectId, now);
       const runtimeFiles = new JsonFileReferenceRepository(storage, session.projectId);
       const runtimeWorks = new JsonWorkRepository(storage, session.projectId);
@@ -134,7 +143,7 @@ export function registerDocumentGenerationIpcHandlers(options: {
         }
       });
       const streaming = new ConversationStreamingService(repository, ids, now);
-      const presentationScope = createPresentationWorkflowScope({ rootDirectory: session.rootDirectory, projectId: session.projectId });
+      const presentationScope = createPresentationWorkflowScope({ rootDirectory: session.rootDirectory, projectId: session.projectId, conversations: repository });
       const workflowService = new ConversationWorkflowService(
         new JsonConversationWorkflowRepository(
           storage,
@@ -194,7 +203,24 @@ export function registerDocumentGenerationIpcHandlers(options: {
           createCompletedLocalAssistantMessage: (input) =>
             streaming.createCompletedLocalAssistantMessage(input),
           attachDocumentResult: async (input) => {
+            const owner = await getConversationRepository(session);
+            const work = await runtimeWorks.get(input.documentResult.workId);
+            const file = work ? await runtimeFiles.get(work.fileId) : undefined;
+            if (!work || work.projectId !== session.projectId || work.mediaKind !== 'document' || !file || file.projectId !== session.projectId ||
+                file.state !== 'available' || file.sourceExecutionId !== work.sourceExecutionId || file.sizeBytes !== input.documentResult.sizeBytes ||
+                !file.checksumSha256 || file.locator.kind !== 'project' || path.basename(file.locator.relativePath) !== input.documentResult.fileName) throw new Error('document_receipt_file_unavailable');
+            const bytes = await readFile(await resolveFileReferencePathSafely(session.rootDirectory, file));
+            if (bytes.length !== file.sizeBytes || createHash('sha256').update(bytes).digest('hex') !== file.checksumSha256) throw new Error('document_receipt_file_changed');
             await streaming.attachDocumentResult(input);
+            if (owner instanceof ThreadConversationRepository) {
+              const conversation = await owner.get(input.conversationId);
+              const index = conversation?.messages.findIndex(message => message.id === input.messageId) ?? -1;
+              const message = index < 0 ? undefined : conversation!.messages[index];
+              const source = conversation?.messages.slice(0, index).reverse().find(message => message.role === 'user');
+              if (message && source) await owner.projectDocumentArtifact({ threadId: input.conversationId, sourceMessageId: source.id,
+                workId: work.id, status: 'completed', content: `${input.documentResult.fileName} (${input.documentResult.kind})`,
+                createdAt: message.createdAt, updatedAt: message.updatedAt, legacyMessageSnapshot: { documentResult: input.documentResult } });
+            }
           },
           updateDocumentGenerationStatus: async (input) => {
             await streaming.updateDocumentGenerationStatus(input);

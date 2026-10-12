@@ -3,6 +3,8 @@ import {
   addUserMessage,
   createConversation,
   parseMessage,
+  parseConversation,
+  parseThreadV1,
   toConversationId,
   toIsoTimestamp,
   toMessageId,
@@ -36,7 +38,7 @@ export class ThreadLegacyProjectionWorker {
       } catch {
         // Thread is authoritative. Keep the unacknowledged Outbox event as
         // durable projection debt without blocking a new User Turn.
-        continue;
+        break;
       }
       const receipt: ThreadProjectionReceiptV1 = {
         schemaVersion: 1,
@@ -53,6 +55,23 @@ export class ThreadLegacyProjectionWorker {
   }
 
   private async project(event: ThreadProjectionOutboxEventV1): Promise<void> {
+    if (event.eventType === 'thread_upsert') {
+      const snapshot = parseThreadV1(event.thread);
+      if (snapshot.threadId !== event.threadId || snapshot.projectId !== this.conversations.projectId) throw new Error('legacy_projection_scope_mismatch');
+      // Replaying an older metadata debt must not restore an old title/status.
+      const thread = await this.threads.getThread(event.threadId);
+      if (!thread || thread.projectId !== snapshot.projectId) throw new Error('thread_not_found_for_legacy_projection');
+      const conversation = await this.conversations.get(toConversationId(event.threadId));
+      if (!conversation) await this.conversations.create(createConversation({ id: toConversationId(event.threadId), projectId: thread.projectId, title: thread.title, createdAt: thread.createdAt }));
+      const current = conversation ?? await this.conversations.get(toConversationId(event.threadId));
+      if (!current) throw new Error('legacy_projection_unavailable');
+      if (current.title === thread.title && current.status === thread.status) return;
+      const base = Object.fromEntries(Object.entries(current).filter(([key]) => !['archivedAt', 'deletedAt'].includes(key)));
+      const updatedAt = toIsoTimestamp([thread.updatedAt, current.updatedAt].sort().at(-1)!);
+      await this.conversations.save(parseConversation({ ...base, revision: current.revision + 1, title: thread.title, status: thread.status, updatedAt,
+        ...(thread.status === 'archived' ? { archivedAt: updatedAt } : thread.status === 'deleted' ? { deletedAt: updatedAt } : {}) }), current.revision);
+      return;
+    }
     const item = event.item;
     if (!item.messageSource || !['user_message', 'assistant_message'].includes(item.type)) return;
     let conversation = await this.conversations.get(toConversationId(String(event.threadId)));
@@ -125,6 +144,7 @@ export class ThreadLegacyProjectionWorker {
     await this.conversations.save(updated, conversation.revision);
   }
 }
+
 
 function workflowReply(snapshot: Readonly<Record<string, unknown>> | undefined): { readonly workflowId: string; readonly revision: number } | undefined {
   const value = snapshot?.workflowReply;

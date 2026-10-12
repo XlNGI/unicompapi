@@ -33,6 +33,17 @@ function repository() {
 }
 
 describe('ThreadCommandService', () => {
+  it('reuses the original Turn for the same committed User Item across Host commands', async () => {
+    const repo = repository(), service = new ThreadCommandService(repo);
+    const input = { threadId: toThreadId('thread-command'), projectId: toProjectId('project-command'), title: '命令测试',
+      messageId: 'message-command', content: '你好', createdAt: toIsoTimestamp('2026-10-10T00:00:00.000Z'), clientCommandId: 'user-command' };
+    const first = await service.acceptUserTurn(input);
+    const existing = await service.acceptUserTurn({ ...input, clientCommandId: 'workflow-execute' });
+    expect(existing.turn.turnId).toBe(first.turn.turnId);
+    expect(existing.thread.generation).toBe(first.thread.generation);
+    expect((await repo.readTurns(input.threadId))).toHaveLength(1);
+    await expect(service.acceptUserTurn({ ...input, clientCommandId: 'bad-replay', content: 'different content' })).rejects.toThrow('thread_user_item_conflict');
+  });
   it('accepts one native turn and returns the same facts on an idempotent retry', async () => {
     const repo = repository();
     const service = new ThreadCommandService(repo);

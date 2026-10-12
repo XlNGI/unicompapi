@@ -87,6 +87,17 @@ export class ThreadCommandService {
     if (!thread) throw new Error('thread_not_found_after_create');
     if (thread.projectId !== projectId) throw new Error('thread_project_scope_mismatch');
 
+    const existing = (await this.repository.readItems(threadId)).find(item => item.type === 'user_message' &&
+      item.messageSource?.messageId === input.messageId);
+    if (existing) {
+      if (existing.content !== content || existing.messageSource!.messageRevision !== (input.messageRevision ?? 0) ||
+          Object.entries(input.legacyMessageSnapshot ?? {}).some(([key, value]) =>
+            JSON.stringify(existing.legacyMessageSnapshot?.[key]) !== JSON.stringify(value))) throw new Error('thread_user_item_conflict');
+      const turn = (await this.repository.readTurns(threadId)).find(turn => turn.turnId === existing.turnId);
+      if (!turn) throw new Error('thread_turn_idempotency_record_missing');
+      return { thread, turn, item: existing, alreadyCommitted: true };
+    }
+
     const turnId = toTurnId(String(input.turnId ?? `turn-${input.clientCommandId}`));
     const item = createItemV1({
       itemId: toMessageItemId(input.messageId),

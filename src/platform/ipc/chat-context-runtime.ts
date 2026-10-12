@@ -65,6 +65,7 @@ import {
   type ConversationResponseStreamEventV1,
   type ItemStatus,
   type ProjectId,
+  type ProjectConversationRepository,
   type WorkId,
 } from '../../domain';
 import {
@@ -98,6 +99,7 @@ import { ConversationThreadReadController } from './conversation-thread-read-con
 import { ThreadFileReadAdapter } from './thread-file-read-adapter';
 import { ThreadFileRepository } from '../repositories/thread-file-repository';
 import { ThreadModelHistorySource } from '../repositories/thread-model-history-source';
+import { ThreadConversationRepository, hasCommittedThreadAuthority } from '../repositories/thread-conversation-repository';
 import { LegacyThreadMigration, type LegacyConversationSnapshot } from '../repositories/thread-migration';
 import type { ThreadReadApi } from './thread-file-read-adapter';
 import { verifyRetainedDocumentArtifacts } from './retained-document-artifact-projection';
@@ -193,6 +195,7 @@ export interface ChatContextRuntimeDependencies {
 }
 
 export interface ChatContextRuntime {
+  getConversationRepository(session: StorageProjectSession): Promise<ProjectConversationRepository>;
   readonly conversations: ConversationControllerPort;
   readonly threadReads: ThreadReadApi;
   readonly responses: ConversationResponseController;
@@ -259,7 +262,7 @@ export function createChatContextRuntime(
     readonly rootDirectory: string;
     readonly conversations: ConversationController;
     readonly readThreadExecutionState: (conversationId: string) => Promise<Pick<ThreadDto, 'parentRuns' | 'agentSessions'>>;
-    readonly conversationRepository: JsonProjectConversationRepository;
+    readonly conversationRepository: ProjectConversationRepository & Pick<JsonProjectConversationRepository, 'createImportedSnapshot'>;
     readonly contextService: ProjectContextRegistryService;
   readonly workflowService: ConversationWorkflowService;
     readonly agentRuns: JsonConversationAgentRunRepository;
@@ -287,8 +290,17 @@ export function createChatContextRuntime(
       session.projectId,
       now
     );
+    const sharedThreadRepository = dependencies.threadFileWriteEnabled ? new ThreadFileRepository(session.rootDirectory) : undefined;
+    const legacyProjection = sharedThreadRepository ? new ThreadLegacyProjectionWorker(sharedThreadRepository, projectConversations, now) : undefined;
+    const authoritativeConversations = sharedThreadRepository
+      ? new ThreadConversationRepository(sharedThreadRepository, session.projectId, {
+          createThread: input => turnCoordinatorForContinuation!.createThread(input),
+          projectDocumentArtifact: input => turnCoordinatorForContinuation!.projectDocumentArtifact(input),
+          saveConversation: input => turnCoordinatorForContinuation!.saveConversation(input)
+        }, { ready: () => threadMigrationReady, projection: { drain: id => legacyProjection!.drain(id) }, onError: dependencies.onError })
+      : projectConversations;
     const service = new ConversationApplicationService(
-      projectConversations,
+      authoritativeConversations,
       conversationIds,
       now
     );
@@ -298,7 +310,7 @@ export function createChatContextRuntime(
       now
     );
     const contextService = new ProjectContextRegistryService(
-      projectConversations,
+      authoritativeConversations,
       contextRepository,
       contextIds,
       now
@@ -314,7 +326,7 @@ export function createChatContextRuntime(
     );
     const agentRuns = new JsonConversationAgentRunRepository(storage, session.projectId, executionTimestamp);
     const contextThreadRepository = (dependencies.threadFileReadEnabled || dependencies.threadFileWriteEnabled)
-      ? new ThreadFileRepository(session.rootDirectory)
+      ? sharedThreadRepository ?? new ThreadFileRepository(session.rootDirectory)
       : undefined;
     const contextReader = contextThreadRepository
       ? new ConversationContextReader(
@@ -330,11 +342,9 @@ export function createChatContextRuntime(
           dependencies.threadFileWriteEnabled ? undefined : { getConversation: id => projectConversations.get(id) })
       : undefined;
     const modelHistory = threadConversationSource ? new ModelHistoryReader(threadConversationSource) : undefined;
-    const conversationFacts = dependencies.threadFileWriteEnabled && threadConversationSource
-      ? { projectId: session.projectId, get: (id: Parameters<typeof projectConversations.get>[0]) => threadConversationSource.getConversation(id) }
-      : projectConversations;
+    const conversationFacts = authoritativeConversations;
     const transcriptService = dependencies.threadFileWriteEnabled
-      ? new ConversationApplicationService(projectConversations, conversationIds, now, {
+      ? new ConversationApplicationService(authoritativeConversations, conversationIds, now, {
           get: id => conversationFacts.get(id),
           publishUser: async ({ conversation, message, clientCommandId }) => {
             if (!turnCoordinatorForContinuation) throw new Error('thread_turn_coordinator_unavailable');
@@ -461,7 +471,7 @@ export function createChatContextRuntime(
         // legacy business routing. Saved workflows remain readable offline.
         routingMode: 'agent_first'
       }),
-      executionTimestamp, undefined, undefined, createPresentationWorkflowScope({ rootDirectory: session.rootDirectory, projectId: session.projectId })
+      executionTimestamp, undefined, undefined, createPresentationWorkflowScope({ rootDirectory: session.rootDirectory, projectId: session.projectId, conversations: authoritativeConversations })
     );
     const retrieval = new RagRetrievalService({
       rootDirectory: session.rootDirectory,
@@ -850,8 +860,8 @@ export function createChatContextRuntime(
       canRun: (id: ConversationAgentRunId) => Promise<boolean>,
       repairKnownLocalProjection = false
     ) => {
-        await interruptOrphanedConversationResponses(responseLifecycle, projectConversations, now, canResponse);
-        await settleRecoverableConversationDocuments(workflowService, responseExecutions, projectConversations, now, canResponse);
+        await interruptOrphanedConversationResponses(responseLifecycle, authoritativeConversations, now, canResponse);
+        await settleRecoverableConversationDocuments(workflowService, responseExecutions, authoritativeConversations, now, canResponse);
         await workflowService.recoverInterruptedExecutions(async workflow => {
           if (workflow.executionId) return canResponse(workflow.executionId);
           const owners = (await sessions.list()).filter(task => task.conversationId === workflow.conversationId && task.sourceMessageId === workflow.sourceMessageId);
@@ -957,7 +967,7 @@ export function createChatContextRuntime(
           if (['pending', 'streaming'].includes(execution.state)) {
             const event = await responseLifecycle.failDeferredPublish(id, 'conversation.recovery_prepared_not_submitted');
             await input.claim.assertCurrent();
-            await projectInterruptedAssistant(projectConversations, execution.snapshot.conversationId, execution.snapshot.assistantMessageId, now);
+            await projectInterruptedAssistant(authoritativeConversations, execution.snapshot.conversationId, execution.snapshot.assistantMessageId, now);
             await responseLifecycle.publish(event);
           }
           await input.claim.assertCurrent();
@@ -967,11 +977,21 @@ export function createChatContextRuntime(
         }
       },
       onError: error => dependencies.onError?.(error) });
-    const threadWriteRepository = dependencies.threadFileWriteEnabled
-      ? new ThreadFileRepository(session.rootDirectory)
-      : undefined;
+    const threadWriteRepository = sharedThreadRepository;
     const threadMigrationReady: Promise<void> = threadWriteRepository
       ? (async () => {
+          if (await hasCommittedThreadAuthority(session.rootDirectory)) {
+            // After cutover, Legacy is only an Outbox projection. Reconcile the
+            // committed Thread journal before reading or repairing that view.
+            await threadWriteRepository.rebuildSummaryIndex();
+            for (const summary of await threadWriteRepository.listThreadSummaries()) {
+              if (summary.projectId !== session.projectId) throw new Error('thread_project_scope_mismatch');
+              const recovered = await threadWriteRepository.recover(toThreadId(summary.threadId));
+              if (recovered.status === 'degraded_read_only') throw new Error('thread_recovery_degraded_read_only');
+              await legacyProjection!.drain(summary.threadId).catch(error => dependencies.onError?.(error));
+            }
+            return;
+          }
           // The Legacy file is retained as the rollback source. Create a
           // missing backup before migration, but never overwrite an existing
           // backup or mutate the source document.
@@ -1081,9 +1101,6 @@ export function createChatContextRuntime(
       ? new ConversationTurnCoordinator(threadCommands, threadProjections)
       : undefined;
     turnCoordinatorForContinuation = turnCoordinator;
-    const legacyProjection = threadWriteRepository
-      ? new ThreadLegacyProjectionWorker(threadWriteRepository, projectConversations, now)
-      : undefined;
     if (turnCoordinator) {
       projectThreadStreamEvent = async event => {
         const execution = await responseLifecycle.readModel(event.responseExecutionId);
@@ -1439,7 +1456,7 @@ export function createChatContextRuntime(
         legacyProjection: responses.legacyProjection,
         onError: dependencies.onError
       }),
-      conversationRepository: projectConversations,
+      conversationRepository: authoritativeConversations,
       agentRuntime,
       sessionService,
       canInterruptResponse: async id => {
@@ -1592,7 +1609,7 @@ export function createChatContextRuntime(
         now
       );
       await project.conversationRepository.createImportedSnapshot(copied);
-      return { ok: true, value: toConversationDto(copied) };
+      return { ok: true, value: toConversationDto((await project.conversationRepository.get(copied.id))!) };
     }),
     requestAssistantResponse: (request) =>
       requireProjectController()?.requestAssistantResponse(request) ??
@@ -1665,6 +1682,15 @@ export function createChatContextRuntime(
     onError: dependencies.onError
   });
   return {
+    getConversationRepository: async session => {
+      const active = dependencies.getSession();
+      if (active?.projectId !== session.projectId || active.rootDirectory !== session.rootDirectory) throw new ConversationAgentSessionError('scope_mismatch');
+      const runtime = getProjectRuntime(session);
+      await runtime.responses.ready;
+      const current = dependencies.getSession();
+      if (current?.projectId !== session.projectId || current.rootDirectory !== session.rootDirectory) throw new ConversationAgentSessionError('scope_mismatch');
+      return runtime.conversationRepository;
+    },
     conversations,
     threadReads,
     responses,
@@ -1727,7 +1753,7 @@ function withoutUnverifiedRetainedArtifacts(conversation: ConversationDto): Conv
 }
 
 async function projectInterruptedAssistant(
-  conversations: JsonProjectConversationRepository,
+  conversations: ProjectConversationRepository,
   conversationId: string,
   messageId: string,
   now: () => string
@@ -1748,7 +1774,7 @@ async function projectInterruptedAssistant(
 async function settleRecoverableConversationDocuments(
   workflows: ConversationWorkflowService,
   executions: JsonConversationResponseExecutionRepository,
-  conversations: JsonProjectConversationRepository,
+  conversations: ProjectConversationRepository,
   now: () => string,
   canRecover?: (responseExecutionId: string) => Promise<boolean>
 ): Promise<void> {
@@ -1803,7 +1829,7 @@ async function settleRecoverableConversationDocuments(
 
 async function interruptOrphanedConversationResponses(
   executions: ConversationResponseExecutionLifecycle,
-  conversations: JsonProjectConversationRepository,
+  conversations: ProjectConversationRepository,
   now: () => string,
   canRecover?: (responseExecutionId: string) => Promise<boolean>
 ): Promise<void> {

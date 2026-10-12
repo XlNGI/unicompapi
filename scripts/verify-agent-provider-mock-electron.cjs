@@ -109,6 +109,7 @@ async function run() {
     textSubmission: { credentialVault: providers.vault, deepSeekRuntime, newApiRuntime }
   });
   documentLifecycle = registerDocumentGenerationIpcHandlers({
+    getConversationRepository: lifecycle.getConversationRepository,
     sessionRegistry: sessions,
     providerRegistry: providers.registry,
     providerPackages: new platform.ProviderPackageRegistry([
@@ -264,6 +265,13 @@ async function run() {
     if (!prepared?.ok) throw new Error(`${kind} prepare failed: ${JSON.stringify(prepared)}`);
     const generated = await js(`window.unicomp.documentGeneration.generateFromMessage(${JSON.stringify({ conversationId: execution.conversationId, expectedRevision: conversation.value.revision, messageId: assistant.messageId, kind })})`);
     if (!generated?.ok) throw new Error(`${kind} generation failed: ${JSON.stringify(generated)}`);
+    if (process.env.UNICOMP_THREAD_FIRST !== '0') {
+      const page = await js(`window.unicomp.chatContexts.getThreadItemsPage(${JSON.stringify({ threadId: execution.conversationId, limit: 200, direction: 'older', cursor: null })})`);
+      const receipt = page?.ok && page.value.items.find(item => item.itemType === 'assistant_message' && item.message?.documentResult?.workId === generated.value.workId);
+      const artifact = page?.ok && page.value.items.find(item => item.itemType === 'document_artifact_projection' && item.artifact?.workId === generated.value.workId);
+      if (!receipt || !artifact || receipt.message.documentResult.kind !== kind || artifact.artifact.kind !== kind) throw new Error(`${kind} generated Work lost its Thread receipt or Artifact`);
+      return { ...generated.value, threadDocumentReceipt: true, threadArtifact: true };
+    }
     return generated.value;
   }
   additionalRootDirectory = await mkdtemp(path.join(os.tmpdir(), 'unicomp-agent-mock-electron-docs-'));

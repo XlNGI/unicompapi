@@ -233,6 +233,7 @@ const chatContextLifecycle = registerChatContextIpcHandlers({
   }
 });
 const documentLifecycle = registerDocumentGenerationIpcHandlers({
+  getConversationRepository: chatContextLifecycle.getConversationRepository,
   sessionRegistry: projectSessionRegistry,
   providerRegistry: viduComposition.registry,
   providerPackages,

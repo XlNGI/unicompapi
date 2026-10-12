@@ -191,7 +191,10 @@ export class ThreadFileRepository {
 
   async getThread(threadId: ThreadId): Promise<ThreadV1 | undefined> {
     await this.initialize();
-    return this.readThreadMetadata(threadId);
+    return this.exclusive(threadId, async () => {
+      const thread = await this.readThreadMetadata(threadId);
+      return thread ? this.committedThreadMetadata(thread, await this.getManifest(threadId)) : undefined;
+    });
   }
 
   async getManifest(threadId: ThreadId): Promise<ThreadManifestV1> {
@@ -219,7 +222,7 @@ export class ThreadFileRepository {
       if (!thread) return undefined;
       const manifest = await this.getManifest(threadId);
       const records = await this.readCommittedRecords<ItemV1>(threadId, manifest, 'item');
-      return { thread, items: dedupeItems(records.map(record => parseItemV1(record.payload))) };
+      return { thread: await this.committedThreadMetadata(thread, manifest), items: dedupeItems(records.map(record => parseItemV1(record.payload))) };
     });
   }
 
@@ -527,16 +530,43 @@ export class ThreadFileRepository {
     const items = await this.readCommittedRecords<ItemV1>(threadId, manifest, 'item');
     const turns = await this.readCommittedRecords<TurnV1>(threadId, manifest, 'turn');
     const last = items.at(-1);
+    const outbox = await this.readCommittedRecords<ThreadProjectionOutboxEventV1>(threadId, manifest, 'projection_outbox');
+    const metadata = outbox.filter(record => record.payload.eventType === 'thread_upsert')
+      .map(record => record.payload.eventType === 'thread_upsert' ? parseThreadV1(record.payload.thread) : undefined).at(-1);
+    if (metadata && (metadata.threadId !== threadId || metadata.projectId !== thread.projectId || metadata.createdAt !== thread.createdAt)) throw new Error('thread_metadata_scope_mismatch');
     const next = parseThreadV1({
       ...thread,
+      ...(metadata ? { title: metadata.title, status: metadata.status } : {}),
       generation: manifest.generation,
-      updatedAt: thread.updatedAt,
+      updatedAt: [thread.updatedAt, metadata?.updatedAt ?? thread.updatedAt, ...items.map(item => item.payload.updatedAt)].sort().at(-1),
       itemCount: Math.max(thread.itemCount, items.length),
       turnCount: Math.max(thread.turnCount, turns.length),
       lastItemSequence: Math.max(thread.lastItemSequence, last?.sequence ?? 0),
       ...(last ? { lastItemId: last.payload.itemId } : {})
     });
     await atomicWrite(this.threadMetadataPath(threadId), next);
+  }
+
+  private async committedThreadMetadata(thread: ThreadV1, manifest: ThreadManifestV1): Promise<ThreadV1> {
+    if (thread.generation === manifest.generation) return thread;
+    if (thread.generation > manifest.generation) throw new Error('thread_metadata_ahead_of_commit');
+    const threadId = thread.threadId;
+    const [items, turns, outbox] = await Promise.all([
+      this.readCommittedRecords<ItemV1>(threadId, manifest, 'item'),
+      this.readCommittedRecords<TurnV1>(threadId, manifest, 'turn'),
+      this.readCommittedRecords<ThreadProjectionOutboxEventV1>(threadId, manifest, 'projection_outbox')
+    ]);
+    const saved = outbox.filter(record => record.generation > thread.generation && record.payload.eventType === 'thread_upsert').at(-1)?.payload;
+    const metadata = saved?.eventType === 'thread_upsert' ? parseThreadV1(saved.thread) : undefined;
+    if (metadata && (metadata.threadId !== threadId || metadata.projectId !== thread.projectId || metadata.createdAt !== thread.createdAt)) throw new Error('thread_metadata_scope_mismatch');
+    const last = items.at(-1)?.payload;
+    return parseThreadV1({ ...thread, ...(metadata ? { title: metadata.title, status: metadata.status } : {}),
+      generation: manifest.generation,
+      updatedAt: [thread.updatedAt, metadata?.updatedAt ?? thread.updatedAt, ...items.map(record => record.payload.updatedAt)].sort().at(-1),
+      itemCount: Math.max(thread.itemCount, ...items.map(record => record.payload.sequence)),
+      lastItemSequence: Math.max(thread.lastItemSequence, ...items.map(record => record.payload.sequence)),
+      turnCount: Math.max(thread.turnCount, ...turns.map(record => record.payload.turnSequence)),
+      ...(last ? { lastItemId: last.itemId } : {}) });
   }
 
   private async findIdempotency(threadId: ThreadId, manifest: ThreadManifestV1, input: ThreadAppendInput): Promise<CommitRecordV1 | undefined> {
@@ -555,7 +585,7 @@ export class ThreadFileRepository {
     return undefined;
   }
 
-  private async requireThread(threadId: ThreadId): Promise<ThreadV1> { const thread = await this.readThreadMetadata(threadId); if (!thread) throw new Error('thread_not_found'); return thread; }
+  private async requireThread(threadId: ThreadId): Promise<ThreadV1> { const thread = await this.readThreadMetadata(threadId); if (!thread) throw new Error('thread_not_found'); return this.committedThreadMetadata(thread, await this.getManifest(threadId)); }
   private async readThreadMetadata(threadId: ThreadId): Promise<ThreadV1 | undefined> { const value = await readJson<ThreadV1>(this.threadMetadataPath(threadId)); return value ? parseThreadV1(value) : undefined; }
   private async prepareThreadDirectory(threadId: ThreadId): Promise<void> { await Promise.all([mkdir(this.threadDirectory(threadId), { recursive: true }), mkdir(this.segmentsDirectory(threadId), { recursive: true }), mkdir(this.commitsDirectory(threadId), { recursive: true }), mkdir(this.snapshotsDirectory(threadId), { recursive: true })]); }
   private async segmentFor(threadId: ThreadId, kind: ThreadSegmentKind, generation: number, manifest: ThreadManifestV1): Promise<{ readonly segmentId: string; readonly path: string; readonly committedBytes: number }> {
@@ -630,8 +660,8 @@ function hydrateTurnFromItems(turn: TurnV1, items: readonly ItemV1[]): TurnV1 {
     .sort((left, right) => left.sequence - right.sequence);
   if (!assistants.length) return turn;
   const assistantItemIds = [...new Map([
-    ...turn.assistantItemIds.map(item => [String(item), item] as const),
-    ...assistants.map(item => [String(item.itemId), item.itemId] as const)
+    ...turn.assistantItemIds.map(item => [`${item.namespace}:${item.value}`, item] as const),
+    ...assistants.map(item => [`${item.itemId.namespace}:${item.itemId.value}`, item.itemId] as const)
   ]).values()];
   const latest = assistants.at(-1)!;
   const status = latest.status === 'completed' ? 'completed'

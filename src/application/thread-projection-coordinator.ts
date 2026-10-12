@@ -1,6 +1,10 @@
 import {
   appendTurnExecutionLink,
   createItemV1,
+  itemIdKey,
+  createTurnV1,
+  parseConversation,
+  assertThreadUpdate,
   updateItemV1,
   updateTurnV1,
   toConversationAgentRunId,
@@ -13,6 +17,7 @@ import {
   toToolCallId,
   sha256Hex,
   type ItemStatus,
+  type Conversation,
   type ItemV1,
   type ConversationAgentRunId,
   type ConversationResponseExecutionId,
@@ -36,6 +41,7 @@ export interface ThreadProjectionRepository {
     readonly idempotencyKey: string;
     readonly occurredAt: IsoTimestamp;
     readonly expectedGeneration?: number;
+    readonly thread?: Partial<Pick<ThreadV1, 'title' | 'status' | 'lastItemId' | 'lastItemSequence' | 'itemCount' | 'turnCount' | 'generation'>>;
     readonly turns?: readonly TurnV1[];
     readonly items?: readonly ItemV1[];
     readonly executionLinks?: readonly TurnExecutionLinkV1[];
@@ -106,6 +112,62 @@ export interface ProjectToolProjectionInput {
  */
 export class ThreadProjectionCoordinator {
   constructor(private readonly repository: ThreadProjectionRepository) {}
+
+  /** Apply Host-validated Conversation changes as one transcript commit. */
+  async saveConversation(input: { readonly previous: Conversation; readonly next: Conversation }): Promise<void> {
+    const previous = parseConversation(input.previous), next = parseConversation(input.next);
+    const threadId = toThreadId(previous.id), thread = await this.repository.getThread(threadId);
+    if (!thread || thread.generation !== previous.revision) throw new Error('generation_conflict');
+    if (next.id !== previous.id || next.projectId !== previous.projectId || next.projectId !== thread.projectId ||
+        next.createdAt !== previous.createdAt || next.revision !== previous.revision + 1 || next.updatedAt < previous.updatedAt ||
+        next.messages.length < previous.messages.length || previous.messages.some((message, index) => next.messages[index]?.id !== message.id)) {
+      throw new Error('thread_conversation_update_invalid');
+    }
+    const existingItems = await this.repository.readItems(threadId), turns = [...await this.repository.readTurns(threadId)];
+    const items: ItemV1[] = [], changedTurns = new Map<string, TurnV1>();
+    const previousMessages = new Map(previous.messages.map(message => [message.id, message]));
+    let sequence = thread.lastItemSequence, turnSequence = thread.turnCount, currentTurn: TurnV1 | undefined;
+    for (const message of next.messages) {
+      const existing = existingItems.find(item => item.itemId.namespace === 'message' && item.itemId.value === message.id);
+      if (message.role === 'user') {
+        currentTurn = turns.find(turn => turn.userItemId?.namespace === 'message' && turn.userItemId.value === message.id);
+        if (!currentTurn && !existing) {
+          currentTurn = createTurnV1({ threadId, turnId: toTurnId(`turn-transcript-${sha256Hex(message.id)}`), turnSequence: ++turnSequence,
+            userItemId: toMessageItemId(message.id), createdAt: message.createdAt, provenance: 'native' });
+          turns.push(currentTurn); changedTurns.set(currentTurn.turnId, currentTurn);
+        }
+      }
+      const prior = previousMessages.get(message.id);
+      if (prior && JSON.stringify(prior) === JSON.stringify(message)) continue;
+      if (prior && (prior.role !== message.role || prior.createdAt !== message.createdAt || message.revision < prior.revision || message.updatedAt < prior.updatedAt)) {
+        throw new Error('thread_message_update_invalid');
+      }
+      const item = createItemV1({ ...(existing ? updateItemV1(existing, { status: message.state, content: message.content, updatedAt: message.updatedAt }) : {}),
+        itemId: toMessageItemId(message.id), threadId, ...(existing?.turnId ?? currentTurn?.turnId ? { turnId: existing?.turnId ?? currentTurn!.turnId } : {}),
+        sequence: existing?.sequence ?? ++sequence, type: message.role === 'user' ? 'user_message' : 'assistant_message',
+        status: message.state, content: message.content, createdAt: message.createdAt, updatedAt: message.updatedAt,
+        messageSource: { messageId: message.id, messageRevision: message.revision },
+        legacyMessageSnapshot: message as unknown as Readonly<Record<string, unknown>> });
+      items.push(item);
+      if (message.role === 'assistant' && item.turnId) {
+        const turn = changedTurns.get(item.turnId) ?? turns.find(turn => turn.turnId === item.turnId);
+        if (!turn) throw new Error('turn_not_found_for_assistant');
+        const updated = updateTurnForAssistant(turn, item);
+        changedTurns.set(turn.turnId, updated);
+        if (currentTurn?.turnId === updated.turnId) currentTurn = updated;
+      }
+    }
+    const lastItem = items.reduce((latest, item) => !latest || item.sequence >= latest.sequence ? item : latest, existingItems.at(-1));
+    const projectedThread = { ...thread, ...(lastItem ? { lastItemId: lastItem.itemId } : {}), title: next.title, status: next.status, generation: thread.generation + 1,
+      updatedAt: next.updatedAt, itemCount: Math.max(thread.itemCount, sequence), lastItemSequence: sequence, turnCount: turnSequence };
+    assertThreadUpdate(thread, projectedThread);
+    const key = `thread-conversation:${threadId}:${previous.revision}:${sha256Hex(JSON.stringify(next))}`;
+    const outbox: ThreadProjectionOutboxEventV1[] = items.map(item => projectionEvent(item, `${key}:${item.itemId.value}`, next.updatedAt));
+    outbox.push({ schemaVersion: 1, eventType: 'thread_upsert', threadId, thread: projectedThread, sequence,
+      eventId: `thread-projection-${sha256Hex(key)}`, idempotencyKey: key, occurredAt: next.updatedAt });
+    await this.repository.append({ threadId, idempotencyKey: key, expectedGeneration: previous.revision, occurredAt: next.updatedAt,
+      thread: { title: next.title, status: next.status, ...(lastItem ? { lastItemId: lastItem.itemId } : {}) }, turns: [...changedTurns.values()], items, projectionOutbox: outbox });
+  }
 
   async linkExecution(input: LinkThreadExecutionInput): Promise<{ readonly thread: ThreadV1; readonly link: TurnExecutionLinkV1; readonly alreadyCommitted: boolean }> {
     const threadId = toThreadId(String(input.threadId));
@@ -324,7 +386,7 @@ function latestItem(items: readonly ItemV1[]): ItemV1 | undefined {
 }
 
 function updateTurnForAssistant(turn: TurnV1, item: ItemV1): TurnV1 {
-  const assistantItemIds = turn.assistantItemIds.some(candidate => String(candidate) === String(item.itemId))
+  const assistantItemIds = turn.assistantItemIds.some(candidate => itemIdKey(candidate) === itemIdKey(item.itemId))
     ? turn.assistantItemIds
     : [...turn.assistantItemIds, item.itemId];
   const status = item.status === 'completed' ? 'completed'

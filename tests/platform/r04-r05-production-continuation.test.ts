@@ -225,7 +225,7 @@ describe('R04/R05 production Host continuation boundary', () => {
       if (failLegacy) {
         const outbox = await threads.readProjectionOutbox(toThreadId(f.conversation.id));
         const receipts = await threads.readProjectionReceipts(toThreadId(f.conversation.id));
-        expect(outbox.some(event => event.item.type === 'assistant_message' && event.item.status === 'completed' &&
+        expect(outbox.some(event => event.eventType === 'item_upsert' && event.item.type === 'assistant_message' && event.item.status === 'completed' &&
           !receipts.some(receipt => receipt.eventId === event.eventId))).toBe(true);
         legacySave.mockRestore();
         const replayed = await new ThreadLegacyProjectionWorker(threads, f.conversations, () => timestamp).drain(f.conversation.id);
