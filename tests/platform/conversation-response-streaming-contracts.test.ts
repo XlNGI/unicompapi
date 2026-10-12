@@ -5,6 +5,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
   createConversationResponseExecution,
   createConversationResponseStreamEvent,
+  parseMessage,
   toConnectionId,
   toConversationId,
   toConversationResponseDraftId,
@@ -28,6 +29,8 @@ import {
   JsonConversationResponseExecutionRepository,
   NodeProjectStorage
 } from '../../src/platform';
+import { parseConversationResponseExecutionDocument } from '../../src/platform/repositories/json-conversation-response-execution-repository';
+import { threadResponseMessage } from '../../src/platform/providers/thread-response-message';
 
 const roots: string[] = [];
 const projectId = toProjectId('project-response-stream');
@@ -123,6 +126,40 @@ function ids() {
 }
 
 describe('conversation response execution repository', () => {
+  it.each(['complete', 'fail', 'confirmCancelled', 'interrupt'] as const)('builds the Thread snapshot from Response facts through %s, retaining Host metadata', async terminal => {
+    const { repository } = await fixture();
+    const item = execution({ productFeature: 'text_reasoning' });
+    await repository.create(item, createdEvent(item.id));
+    const lifecycle = new ConversationResponseExecutionLifecycle(repository, ids(), undefined, () => t1);
+    await lifecycle.start(item.id);
+    await lifecycle.appendDeltas(item.id, [{ kind: 'reasoning', delta: '持久推理摘要' }, { kind: 'content', delta: '当前回复' }]);
+    const stale = parseMessage({ schemaVersion: 1, id: item.snapshot.assistantMessageId,
+      conversationId: item.snapshot.conversationId, role: 'assistant', revision: 0, state: 'pending',
+      content: '', attachments: [], createdAt: t0, updatedAt: t0,
+      documentGenerationStatus: { state: 'generating_file', kind: 'ppt' } });
+    const event = terminal === 'fail' ? await lifecycle.fail(item.id, 'newapi.tool_loop_unknown_result')
+      : terminal === 'interrupt' ? await lifecycle.interrupt(item.id, 'application_shutdown')
+        : await lifecycle[terminal](item.id);
+    const model = await lifecycle.readModel(item.id);
+    const snapshot = threadResponseMessage(model, event, stale);
+    expect(snapshot).toMatchObject({ content: '当前回复', reasoningContent: '持久推理摘要', revision: 0,
+      documentGenerationStatus: stale.documentGenerationStatus,
+      state: terminal === 'complete' ? 'completed' : terminal === 'confirmCancelled' ? 'cancelled' : 'failed' });
+    if (terminal === 'fail' || terminal === 'interrupt') expect(snapshot).toMatchObject({ failureReason: terminal === 'fail' ? 'unknown' : 'interrupted' });
+    expect(() => threadResponseMessage({ ...model, responseExecutionId: toConversationResponseExecutionId('foreign-execution') }, event)).toThrow('scope_mismatch');
+  });
+  it('validates interleaved histories and rejects orphan events, duplicate identities and invalid retry predecessors', () => {
+    const first = execution();
+    const second = execution({ id: 'second-history', attemptId: 'second-attempt', assistantMessageId: 'second-assistant' });
+    const document = { schemaVersion: 1, revision: 1, executions: [first, second],
+      events: [createdEvent(second.id, 'created-second'), createdEvent(first.id)] };
+    expect(parseConversationResponseExecutionDocument(document, projectId)).toEqual(document);
+    expect(() => parseConversationResponseExecutionDocument({ ...document,
+      events: [...document.events, createdEvent(toConversationResponseExecutionId('orphan'), 'orphan-event')] }, projectId)).toThrow();
+    expect(() => parseConversationResponseExecutionDocument({ ...document, events: [...document.events, document.events[0]] }, projectId)).toThrow();
+    expect(() => parseConversationResponseExecutionDocument({ ...document,
+      executions: [first, { ...second, retryOfExecutionId: first.id }] }, projectId)).toThrow('retryable');
+  });
   it('reads execution and events from one committed storage snapshot', async () => {
     const { storage, repository } = await fixture();
     const item = execution();
@@ -238,6 +275,27 @@ describe('conversation response execution repository', () => {
 });
 
 describe('controlled conversation response stream lifecycle', () => {
+  it('uses one committed snapshot when appending and leaves sequence validation to the atomic write', async () => {
+    const { repository } = await fixture();
+    const item = execution();
+    await repository.create(item, createdEvent(item.id));
+    const snapshot = vi.spyOn(repository, 'getSnapshot');
+    const get = vi.spyOn(repository, 'get');
+    const events = vi.spyOn(repository, 'listEvents');
+    const lifecycle = new ConversationResponseExecutionLifecycle(repository, ids(), undefined, () => t1);
+    await lifecycle.start(item.id);
+    expect(snapshot).toHaveBeenCalledOnce();
+    expect(get).not.toHaveBeenCalled();
+    expect(events).not.toHaveBeenCalled();
+    snapshot.mockImplementationOnce(async id => {
+      const captured = await JsonConversationResponseExecutionRepository.prototype.getSnapshot.call(repository, id);
+      await repository.appendEvent(createConversationResponseStreamEvent({ id: toConversationResponseStreamEventId('racing-delta'),
+        responseExecutionId: item.id, sequence: 3, type: 'content_delta', contentDelta: 'other writer', occurredAt: t1 }));
+      return captured;
+    });
+    await expect(lifecycle.appendContent(item.id, 'stale append')).rejects.toThrow('sequence conflict');
+    await expect(lifecycle.readModel(item.id)).resolves.toMatchObject({ content: 'other writer', streamSequence: 3 });
+  });
   it('does not mix a captured execution state with events committed after that snapshot', async () => {
     const { repository } = await fixture();
     const item = execution();
@@ -276,6 +334,9 @@ describe('controlled conversation response stream lifecycle', () => {
     await expect(lifecycle.readModel(item.id)).resolves.toMatchObject({ state: 'pending', streamSequence: 1 });
     expect(get).toHaveBeenCalledTimes(1);
     expect(listEvents).toHaveBeenCalledTimes(1);
+    await lifecycle.start(item.id);
+    expect(get).toHaveBeenCalledTimes(2);
+    expect(listEvents).toHaveBeenCalledTimes(2);
   });
 
   it('does not fall back to split reads when an atomic snapshot reports a missing execution', async () => {
@@ -283,6 +344,7 @@ describe('controlled conversation response stream lifecycle', () => {
     const get = vi.spyOn(repository, 'get');
     const lifecycle = new ConversationResponseExecutionLifecycle(repository, ids());
     await expect(lifecycle.readModel(toConversationResponseExecutionId('missing-snapshot'))).rejects.toThrow('does not exist');
+    await expect(lifecycle.start(toConversationResponseExecutionId('missing-snapshot'))).rejects.toThrow('does not exist');
     expect(get).not.toHaveBeenCalled();
   });
 

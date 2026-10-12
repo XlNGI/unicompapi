@@ -12,6 +12,7 @@ import {
   toMessageId,
   toWorkId
 } from '../../domain';
+import type { Conversation, ConversationId } from '../../domain';
 import type {
   DocumentGenerationCancelResultDto,
   DocumentDeterministicRevisionPrepareResultDto,
@@ -35,6 +36,7 @@ import { emitProductionEvent, withProductionTrace } from '../conversation-produc
 import { ExecutionBudgetError } from '../../application/execution-budget';
 
 export interface DocumentGenerationControllerDependencies {
+  getConversation?(session: StorageProjectSession, conversationId: ConversationId): Promise<Conversation | undefined>;
   getSession(): StorageProjectSession | undefined;
   getApplication(
     session: StorageProjectSession
@@ -114,7 +116,7 @@ export class DocumentGenerationController {
     return this.execute(async () => {
       const input = documentGenerationRequestParsers.generateFromMessage(request);
       const session = this.requireSession();
-      const conversation = await new JsonProjectConversationRepository(
+      const conversation = this.dependencies.getConversation ? await this.dependencies.getConversation(session, toConversationId(input.conversationId)) : await new JsonProjectConversationRepository(
         new NodeProjectStorage(session.rootDirectory), session.projectId
       ).get(toConversationId(input.conversationId));
       const assistantIndex = conversation?.messages.findIndex((message) => message.id === input.messageId) ?? -1;

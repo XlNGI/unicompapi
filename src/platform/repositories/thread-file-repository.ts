@@ -1,4 +1,5 @@
-import { mkdir, open, readFile, rename, stat, writeFile } from 'node:fs/promises';
+import { mkdir, open, readFile, rename, stat, writeFile, rm } from 'node:fs/promises';
+import { randomUUID } from 'node:crypto';
 import path from 'node:path';
 import {
   createThreadV1,
@@ -190,7 +191,10 @@ export class ThreadFileRepository {
 
   async getThread(threadId: ThreadId): Promise<ThreadV1 | undefined> {
     await this.initialize();
-    return this.readThreadMetadata(threadId);
+    return this.exclusive(threadId, async () => {
+      const thread = await this.readThreadMetadata(threadId);
+      return thread ? this.committedThreadMetadata(thread, await this.getManifest(threadId)) : undefined;
+    });
   }
 
   async getManifest(threadId: ThreadId): Promise<ThreadManifestV1> {
@@ -208,6 +212,18 @@ export class ThreadFileRepository {
     const manifest = await this.getManifest(threadId);
     const records = await this.readCommittedRecords<ItemV1>(threadId, manifest, 'item');
     return dedupeItems(records.filter(record => readAtSequence === undefined || record.sequence <= readAtSequence).map(record => parseItemV1(record.payload)));
+  }
+
+  /** Identity, revision and messages from one committed transcript boundary. */
+  async readTranscript(threadId: ThreadId): Promise<{ readonly thread: ThreadV1; readonly items: readonly ItemV1[] } | undefined> {
+    await this.initialize();
+    return this.exclusive(threadId, async () => {
+      const thread = await this.readThreadMetadata(threadId);
+      if (!thread) return undefined;
+      const manifest = await this.getManifest(threadId);
+      const records = await this.readCommittedRecords<ItemV1>(threadId, manifest, 'item');
+      return { thread: await this.committedThreadMetadata(thread, manifest), items: dedupeItems(records.map(record => parseItemV1(record.payload))) };
+    });
   }
 
   async listItemSequences(threadId: ThreadId, readAtSequence?: number): Promise<readonly number[]> {
@@ -244,7 +260,8 @@ export class ThreadFileRepository {
     // Older commits may have written an Assistant Item before the Turn update
     // was introduced. Hydrate the read model from committed Items so those
     // records still expose a coherent Turn without rewriting the journal.
-    const items = await this.readItems(threadId);
+    const itemRecords = await this.readCommittedRecords<ItemV1>(threadId, manifest, 'item');
+    const items = dedupeItems(itemRecords.map(record => parseItemV1(record.payload)));
     return turns.map(turn => hydrateTurnFromItems(turn, items));
   }
 
@@ -404,7 +421,7 @@ export class ThreadFileRepository {
     }
     for (const segment of current.segments) {
       try {
-        const parsed = await parseJsonl<SegmentRecordV1>(this.segmentPath(threadId, segment.segmentId), value => value as SegmentRecordV1);
+        const parsed = await parseJsonl<SegmentRecordV1>(this.segmentPath(threadId, segment.segmentId), value => value as SegmentRecordV1, segment.committedBytes);
         if (parsed.nonTailCorrupt || parsed.lastCompleteOffset < segment.committedBytes) throw new Error('segment_jsonl_corrupt');
         for (const record of parsed.records) validateSegmentRecord(record);
       } catch (error) {
@@ -469,7 +486,7 @@ export class ThreadFileRepository {
   private async readCommittedRecords<T>(threadId: ThreadId, manifest: ThreadManifestV1, kind: ThreadSegmentKind): Promise<readonly SegmentRecordV1<T>[]> {
     const result: SegmentRecordV1<T>[] = [];
     for (const segment of manifest.segments.filter(segment => segment.recordKind === kind)) {
-      const parsed = await parseJsonl<SegmentRecordV1<T>>(this.segmentPath(threadId, segment.segmentId), value => value as SegmentRecordV1<T>);
+      const parsed = await parseJsonl<SegmentRecordV1<T>>(this.segmentPath(threadId, segment.segmentId), value => value as SegmentRecordV1<T>, segment.committedBytes);
       if (parsed.nonTailCorrupt || parsed.lastCompleteOffset < segment.committedBytes) throw new Error('thread_segment_corrupt');
       for (const record of parsed.records) {
         validateSegmentRecord(record);
@@ -513,16 +530,43 @@ export class ThreadFileRepository {
     const items = await this.readCommittedRecords<ItemV1>(threadId, manifest, 'item');
     const turns = await this.readCommittedRecords<TurnV1>(threadId, manifest, 'turn');
     const last = items.at(-1);
+    const outbox = await this.readCommittedRecords<ThreadProjectionOutboxEventV1>(threadId, manifest, 'projection_outbox');
+    const metadata = outbox.filter(record => record.payload.eventType === 'thread_upsert')
+      .map(record => record.payload.eventType === 'thread_upsert' ? parseThreadV1(record.payload.thread) : undefined).at(-1);
+    if (metadata && (metadata.threadId !== threadId || metadata.projectId !== thread.projectId || metadata.createdAt !== thread.createdAt)) throw new Error('thread_metadata_scope_mismatch');
     const next = parseThreadV1({
       ...thread,
+      ...(metadata ? { title: metadata.title, status: metadata.status } : {}),
       generation: manifest.generation,
-      updatedAt: thread.updatedAt,
+      updatedAt: [thread.updatedAt, metadata?.updatedAt ?? thread.updatedAt, ...items.map(item => item.payload.updatedAt)].sort().at(-1),
       itemCount: Math.max(thread.itemCount, items.length),
       turnCount: Math.max(thread.turnCount, turns.length),
       lastItemSequence: Math.max(thread.lastItemSequence, last?.sequence ?? 0),
       ...(last ? { lastItemId: last.payload.itemId } : {})
     });
     await atomicWrite(this.threadMetadataPath(threadId), next);
+  }
+
+  private async committedThreadMetadata(thread: ThreadV1, manifest: ThreadManifestV1): Promise<ThreadV1> {
+    if (thread.generation === manifest.generation) return thread;
+    if (thread.generation > manifest.generation) throw new Error('thread_metadata_ahead_of_commit');
+    const threadId = thread.threadId;
+    const [items, turns, outbox] = await Promise.all([
+      this.readCommittedRecords<ItemV1>(threadId, manifest, 'item'),
+      this.readCommittedRecords<TurnV1>(threadId, manifest, 'turn'),
+      this.readCommittedRecords<ThreadProjectionOutboxEventV1>(threadId, manifest, 'projection_outbox')
+    ]);
+    const saved = outbox.filter(record => record.generation > thread.generation && record.payload.eventType === 'thread_upsert').at(-1)?.payload;
+    const metadata = saved?.eventType === 'thread_upsert' ? parseThreadV1(saved.thread) : undefined;
+    if (metadata && (metadata.threadId !== threadId || metadata.projectId !== thread.projectId || metadata.createdAt !== thread.createdAt)) throw new Error('thread_metadata_scope_mismatch');
+    const last = items.at(-1)?.payload;
+    return parseThreadV1({ ...thread, ...(metadata ? { title: metadata.title, status: metadata.status } : {}),
+      generation: manifest.generation,
+      updatedAt: [thread.updatedAt, metadata?.updatedAt ?? thread.updatedAt, ...items.map(record => record.payload.updatedAt)].sort().at(-1),
+      itemCount: Math.max(thread.itemCount, ...items.map(record => record.payload.sequence)),
+      lastItemSequence: Math.max(thread.lastItemSequence, ...items.map(record => record.payload.sequence)),
+      turnCount: Math.max(thread.turnCount, ...turns.map(record => record.payload.turnSequence)),
+      ...(last ? { lastItemId: last.itemId } : {}) });
   }
 
   private async findIdempotency(threadId: ThreadId, manifest: ThreadManifestV1, input: ThreadAppendInput): Promise<CommitRecordV1 | undefined> {
@@ -541,7 +585,7 @@ export class ThreadFileRepository {
     return undefined;
   }
 
-  private async requireThread(threadId: ThreadId): Promise<ThreadV1> { const thread = await this.readThreadMetadata(threadId); if (!thread) throw new Error('thread_not_found'); return thread; }
+  private async requireThread(threadId: ThreadId): Promise<ThreadV1> { const thread = await this.readThreadMetadata(threadId); if (!thread) throw new Error('thread_not_found'); return this.committedThreadMetadata(thread, await this.getManifest(threadId)); }
   private async readThreadMetadata(threadId: ThreadId): Promise<ThreadV1 | undefined> { const value = await readJson<ThreadV1>(this.threadMetadataPath(threadId)); return value ? parseThreadV1(value) : undefined; }
   private async prepareThreadDirectory(threadId: ThreadId): Promise<void> { await Promise.all([mkdir(this.threadDirectory(threadId), { recursive: true }), mkdir(this.segmentsDirectory(threadId), { recursive: true }), mkdir(this.commitsDirectory(threadId), { recursive: true }), mkdir(this.snapshotsDirectory(threadId), { recursive: true })]); }
   private async segmentFor(threadId: ThreadId, kind: ThreadSegmentKind, generation: number, manifest: ThreadManifestV1): Promise<{ readonly segmentId: string; readonly path: string; readonly committedBytes: number }> {
@@ -616,8 +660,8 @@ function hydrateTurnFromItems(turn: TurnV1, items: readonly ItemV1[]): TurnV1 {
     .sort((left, right) => left.sequence - right.sequence);
   if (!assistants.length) return turn;
   const assistantItemIds = [...new Map([
-    ...turn.assistantItemIds.map(item => [String(item), item] as const),
-    ...assistants.map(item => [String(item.itemId), item.itemId] as const)
+    ...turn.assistantItemIds.map(item => [`${item.namespace}:${item.value}`, item] as const),
+    ...assistants.map(item => [`${item.itemId.namespace}:${item.itemId.value}`, item.itemId] as const)
   ]).values()];
   const latest = assistants.at(-1)!;
   const status = latest.status === 'completed' ? 'completed'
@@ -635,18 +679,64 @@ function hydrateTurnFromItems(turn: TurnV1, items: readonly ItemV1[]): TurnV1 {
 }
 function canonicalJson(value: unknown): string { return JSON.stringify(sortValue(value)); }
 function sortValue(value: unknown): unknown { if (Array.isArray(value)) return value.map(sortValue); if (value && typeof value === 'object') return Object.fromEntries(Object.entries(value as Record<string, unknown>).filter(([, entry]) => entry !== undefined).sort(([left], [right]) => left.localeCompare(right)).map(([key, entry]) => [key, sortValue(entry)])); return value; }
-async function atomicWrite(file: string, value: unknown): Promise<void> { await mkdir(path.dirname(file), { recursive: true }); const temp = `${file}.tmp-${process.pid}-${Date.now()}`; await writeFile(temp, `${canonicalJson(value)}\n`, 'utf8'); const handle = await open(temp, 'r+'); await handle.sync(); await handle.close(); await rename(temp, file); }
+async function atomicWrite(file: string, value: unknown): Promise<void> {
+  await sharedFileWriteCoordinator.runExclusive(file, async () => {
+    await mkdir(path.dirname(file), { recursive: true });
+    const temp = `${file}.tmp-${randomUUID()}`;
+    try {
+      const handle = await open(temp, 'wx');
+      try {
+        await handle.writeFile(`${canonicalJson(value)}\n`, 'utf8');
+        await handle.sync();
+      } finally { await handle.close(); }
+      await rename(temp, file);
+    } finally { await rm(temp, { force: true }); }
+  });
+}
 async function appendBytes(file: string, bytes: Uint8Array, sync = true): Promise<void> { await mkdir(path.dirname(file), { recursive: true }); const handle = await open(file, 'a'); await handle.write(bytes); if (sync) await handle.sync(); await handle.close(); }
 async function syncFile(file: string): Promise<void> { const handle = await open(file, 'r+'); await handle.sync(); await handle.close(); }
 async function syncFiles(files: readonly string[]): Promise<void> { for (const file of files) await syncFile(file); }
-async function readJson<T>(file: string): Promise<T | undefined> { try { return JSON.parse(await readFile(file, 'utf8')) as T; } catch (error) { if ((error as NodeJS.ErrnoException).code === 'ENOENT') return undefined; throw error; } }
+async function readJson<T>(file: string): Promise<T | undefined> {
+  return sharedFileWriteCoordinator.runExclusive(file, async () => {
+    try { return JSON.parse(await readFile(file, 'utf8')) as T; }
+    catch (error) { if ((error as NodeJS.ErrnoException).code === 'ENOENT') return undefined; throw error; }
+  });
+}
 async function safeStatSize(file: string): Promise<number> { try { return (await stat(file)).size; } catch (error) { if ((error as NodeJS.ErrnoException).code === 'ENOENT') return 0; throw error; } }
 async function exists(file: string): Promise<boolean> { try { await stat(file); return true; } catch { return false; } }
 async function directoryNames(directory: string): Promise<readonly string[]> { try { return (await import('node:fs/promises')).readdir(directory); } catch (error) { if ((error as NodeJS.ErrnoException).code === 'ENOENT') return []; throw error; } }
 async function generations(directory: string): Promise<readonly number[]> { return (await directoryNames(directory)).flatMap(name => { const match = /(?:commits|items|turns|turn_execution_links|projection_outboxes)-(\d+)-?/.exec(name); return match ? [Number(match[1])] : []; }).filter((value, index, values) => values.indexOf(value) === index).sort((left, right) => left - right); }
-async function previousRecordHash(file: string, committedBytes: number): Promise<string> { if (!committedBytes) return emptyHash; const text = await readFile(file, 'utf8'); const lines = text.slice(0, committedBytes).trimEnd().split('\n'); return String((JSON.parse(lines.at(-1)!) as { readonly recordHash?: string }).recordHash ?? emptyHash); }
+async function previousRecordHash(file: string, committedBytes: number): Promise<string> {
+  if (!committedBytes) return emptyHash;
+  const bytes = await readFile(file);
+  if (bytes.length < committedBytes) throw new Error('segment_shorter_than_commit');
+  const lines = bytes.subarray(0, committedBytes).toString('utf8').trimEnd().split('\n');
+  return String((JSON.parse(lines.at(-1)!) as { readonly recordHash?: string }).recordHash ?? emptyHash);
+}
 async function checksumRange(file: string, start: number, end: number): Promise<string> { const bytes = await readFile(file); return sha256Hex(new Uint8Array(bytes.subarray(start, end))); }
-async function parseJsonl<T>(file: string, parser: (value: unknown) => T): Promise<{ readonly records: readonly T[]; readonly lastCompleteOffset: number; readonly tailBytes: number; readonly nonTailCorrupt: boolean }> { const bytes = await readFile(file).catch(error => { if ((error as NodeJS.ErrnoException).code === 'ENOENT') return Buffer.alloc(0); throw error; }); const text = bytes.toString('utf8'); const lines = text.split('\n'); const records: T[] = []; let offset = 0; let lastCompleteOffset = 0; let nonTailCorrupt = false; for (let index = 0; index < lines.length; index += 1) { const raw = lines[index]!; const lineBytes = Buffer.byteLength(raw, 'utf8'); const complete = index < lines.length - 1; if (!raw && !complete) break; try { records.push(parser(JSON.parse(raw))); } catch { if (complete) nonTailCorrupt = true; break; } offset += lineBytes + (complete ? 1 : 0); if (complete) lastCompleteOffset = offset; } return { records, lastCompleteOffset, tailBytes: bytes.length - lastCompleteOffset, nonTailCorrupt }; }
+async function parseJsonl<T>(file: string, parser: (value: unknown) => T, committedBytes?: number): Promise<{ readonly records: readonly T[]; readonly lastCompleteOffset: number; readonly tailBytes: number; readonly nonTailCorrupt: boolean }> {
+  const stored = await readFile(file).catch(error => { if ((error as NodeJS.ErrnoException).code === 'ENOENT') return Buffer.alloc(0); throw error; });
+  if (committedBytes !== undefined && (!Number.isSafeInteger(committedBytes) || committedBytes < 0 || committedBytes > stored.length)) {
+    throw new Error('segment_shorter_than_commit');
+  }
+  // A concurrent writer can have complete or partial records beyond the
+  // manifest. Those bytes are never transcript facts until their commit wins.
+  const bytes = committedBytes === undefined ? stored : stored.subarray(0, committedBytes);
+  const lines = bytes.toString('utf8').split('\n');
+  const records: T[] = [];
+  let offset = 0, lastCompleteOffset = 0, nonTailCorrupt = false;
+  for (let index = 0; index < lines.length; index += 1) {
+    const raw = lines[index]!;
+    const lineBytes = Buffer.byteLength(raw, 'utf8');
+    const complete = index < lines.length - 1;
+    if (!raw && !complete) break;
+    try { records.push(parser(JSON.parse(raw))); }
+    catch { if (complete) nonTailCorrupt = true; break; }
+    offset += lineBytes + (complete ? 1 : 0);
+    if (complete) lastCompleteOffset = offset;
+  }
+  return { records, lastCompleteOffset, tailBytes: bytes.length - lastCompleteOffset, nonTailCorrupt };
+}
 async function inspectTail(file: string, committedBytes: number): Promise<{ readonly tailBytes: number; readonly nonTailCorrupt: boolean; readonly detail: string }> { const bytes = await readFile(file).catch(error => { if ((error as NodeJS.ErrnoException).code === 'ENOENT') return Buffer.alloc(0); throw error; }); if (bytes.length < committedBytes) return { tailBytes: 0, nonTailCorrupt: true, detail: 'segment shorter than manifest committedBytes' }; const tail = bytes.subarray(committedBytes); if (!tail.length) return { tailBytes: 0, nonTailCorrupt: false, detail: '' }; const tailText = tail.toString('utf8'); const completeLines = tailText.split('\n').filter(Boolean); let nonTailCorrupt = false; for (const line of completeLines.slice(0, -1)) { try { JSON.parse(line); } catch { nonTailCorrupt = true; } } return { tailBytes: tail.length, nonTailCorrupt, detail: 'uncommitted tail bytes present' }; }
 async function copyBytes(source: string, target: string, end: number): Promise<void> { const bytes = await readFile(source); await writeFile(target, bytes.subarray(end)); }
 async function truncateFile(file: string, length: number): Promise<void> { const handle = await open(file, 'r+'); await handle.truncate(length); await handle.sync(); await handle.close(); }

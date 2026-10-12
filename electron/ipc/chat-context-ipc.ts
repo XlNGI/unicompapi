@@ -14,6 +14,7 @@ import { chatContextIpcChannels } from '../../src/shared/chat-context-ipc';
 import { webResearchIpcChannels } from '../../src/shared/web-research-ipc';
 
 export interface ChatContextIpcLifecycle {
+  getConversationRepository(session: StorageProjectSession): ReturnType<ReturnType<typeof createChatContextRuntime>['getConversationRepository']>;
   interruptActiveResponses(): Promise<number>;
   waitForMutations(): Promise<void>;
 }
@@ -264,6 +265,7 @@ export function registerChatContextIpcHandlers(options: {
   );
 
   return {
+    getConversationRepository: runtime.getConversationRepository,
     interruptActiveResponses: runtime.interruptActiveResponses,
     waitForMutations: runtime.waitForMutations
   };

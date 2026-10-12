@@ -11,7 +11,7 @@ export function documentDeliveryFailureReason(status: DocumentGenerationStatus |
 /** Resolve execution identity from persisted application state, never from model output. */
 export function createDocumentWorkflowSettlement(options: {
   readonly workflows: ConversationWorkflowService;
-  readonly conversations: ProjectConversationRepository;
+  readonly conversations: Pick<ProjectConversationRepository, 'projectId' | 'get'>;
   readonly executions: ConversationResponseExecutionRepository;
 }): NonNullable<DocumentGenerationWorkflowPort['settleDocumentResult']> {
   return async (input) => {

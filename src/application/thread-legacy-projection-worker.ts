@@ -3,6 +3,8 @@ import {
   addUserMessage,
   createConversation,
   parseMessage,
+  parseConversation,
+  parseThreadV1,
   toConversationId,
   toIsoTimestamp,
   toMessageId,
@@ -36,7 +38,7 @@ export class ThreadLegacyProjectionWorker {
       } catch {
         // Thread is authoritative. Keep the unacknowledged Outbox event as
         // durable projection debt without blocking a new User Turn.
-        continue;
+        break;
       }
       const receipt: ThreadProjectionReceiptV1 = {
         schemaVersion: 1,
@@ -53,6 +55,23 @@ export class ThreadLegacyProjectionWorker {
   }
 
   private async project(event: ThreadProjectionOutboxEventV1): Promise<void> {
+    if (event.eventType === 'thread_upsert') {
+      const snapshot = parseThreadV1(event.thread);
+      if (snapshot.threadId !== event.threadId || snapshot.projectId !== this.conversations.projectId) throw new Error('legacy_projection_scope_mismatch');
+      // Replaying an older metadata debt must not restore an old title/status.
+      const thread = await this.threads.getThread(event.threadId);
+      if (!thread || thread.projectId !== snapshot.projectId) throw new Error('thread_not_found_for_legacy_projection');
+      const conversation = await this.conversations.get(toConversationId(event.threadId));
+      if (!conversation) await this.conversations.create(createConversation({ id: toConversationId(event.threadId), projectId: thread.projectId, title: thread.title, createdAt: thread.createdAt }));
+      const current = conversation ?? await this.conversations.get(toConversationId(event.threadId));
+      if (!current) throw new Error('legacy_projection_unavailable');
+      if (current.title === thread.title && current.status === thread.status) return;
+      const base = Object.fromEntries(Object.entries(current).filter(([key]) => !['archivedAt', 'deletedAt'].includes(key)));
+      const updatedAt = toIsoTimestamp([thread.updatedAt, current.updatedAt].sort().at(-1)!);
+      await this.conversations.save(parseConversation({ ...base, revision: current.revision + 1, title: thread.title, status: thread.status, updatedAt,
+        ...(thread.status === 'archived' ? { archivedAt: updatedAt } : thread.status === 'deleted' ? { deletedAt: updatedAt } : {}) }), current.revision);
+      return;
+    }
     const item = event.item;
     if (!item.messageSource || !['user_message', 'assistant_message'].includes(item.type)) return;
     let conversation = await this.conversations.get(toConversationId(String(event.threadId)));
@@ -69,21 +88,39 @@ export class ThreadLegacyProjectionWorker {
     }
     const messageId = toMessageId(String(item.messageSource.messageId));
     const existing = conversation.messages.find(message => message.id === messageId);
+    const snapshot = item.legacyMessageSnapshot;
+    if (!existing && snapshot?.schemaVersion === 1) {
+      const projected = parseMessage(snapshot);
+      if (projected.id !== messageId || projected.conversationId !== conversation.id ||
+          projected.role !== (item.type === 'user_message' ? 'user' : 'assistant') ||
+          projected.revision !== item.messageSource.messageRevision) {
+        throw new Error('legacy_projection_message_conflict');
+      }
+      // The first replay may already be streaming/failed/cancelled or carry a
+      // formal document receipt. Restoring it as completed text loses facts.
+      await this.conversations.save({ ...conversation, revision: conversation.revision + 1,
+        updatedAt: projected.updatedAt > conversation.updatedAt ? projected.updatedAt : conversation.updatedAt,
+        messages: [...conversation.messages, projected] }, conversation.revision);
+      return;
+    }
     if (existing) {
       // Stream replay can encounter events older than a direct Legacy
       // compatibility write. They are already represented by a newer
       // revision and can be acknowledged safely.
-      if (existing.revision >= item.messageSource.messageRevision) return;
-      const snapshot = item.legacyMessageSnapshot;
+      if (existing.revision > item.messageSource.messageRevision) return;
+      if (existing.revision === item.messageSource.messageRevision &&
+          (!snapshot || JSON.stringify(existing) === JSON.stringify(parseMessage(snapshot)))) return;
       if (snapshot) {
         const projected = parseMessage(snapshot);
-        if (projected.id !== messageId || projected.conversationId !== conversation.id || projected.revision < existing.revision) {
+        if (projected.id !== messageId || projected.conversationId !== conversation.id ||
+            projected.role !== (item.type === 'user_message' ? 'user' : 'assistant') ||
+            projected.revision !== item.messageSource.messageRevision || projected.updatedAt < existing.updatedAt) {
           throw new Error('legacy_projection_message_conflict');
         }
         await this.conversations.save({
           ...conversation,
           revision: conversation.revision + 1,
-          updatedAt: projected.updatedAt,
+          updatedAt: projected.updatedAt > conversation.updatedAt ? projected.updatedAt : conversation.updatedAt,
           messages: conversation.messages.map(message => message.id === messageId ? projected : message)
         }, conversation.revision);
         return;
@@ -107,6 +144,7 @@ export class ThreadLegacyProjectionWorker {
     await this.conversations.save(updated, conversation.revision);
   }
 }
+
 
 function workflowReply(snapshot: Readonly<Record<string, unknown>> | undefined): { readonly workflowId: string; readonly revision: number } | undefined {
   const value = snapshot?.workflowReply;

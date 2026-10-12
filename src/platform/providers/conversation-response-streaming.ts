@@ -230,8 +230,11 @@ export class ConversationResponseExecutionLifecycle {
     publish = true
   ): Promise<readonly ConversationResponseStreamEventV1[]> {
     if (inputs.length === 0) return [];
-    const execution = await this.requireExecution(executionId);
-    const events = await this.repository.listEvents(executionId);
+    const snapshot = this.repository.getSnapshot
+      ? await this.repository.getSnapshot(executionId)
+      : { execution: await this.requireExecution(executionId), events: await this.repository.listEvents(executionId) };
+    if (!snapshot) throw new ConversationResponseExecutionLifecycleError('Conversation response execution does not exist');
+    const { execution, events } = snapshot;
     const appended = inputs.map((input, index) => createConversationResponseStreamEvent({
       id: this.ids.nextConversationResponseStreamEventId(),
       responseExecutionId: executionId,

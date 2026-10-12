@@ -3,6 +3,7 @@ import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { spawn } from 'node:child_process';
+import { createServer } from 'node:net';
 
 const require = createRequire(import.meta.url);
 const projectRoot = await mkdtemp(path.join(os.tmpdir(), 'unicomp-phase6-electron-project-'));
@@ -50,6 +51,16 @@ const conversationDocument = {
 };
 
 function sleep(ms) { return new Promise(resolve => setTimeout(resolve, ms)); }
+async function unusedPort() {
+  const server = createServer();
+  await new Promise((resolve, reject) => { server.once('error', reject); server.listen(0, '127.0.0.1', resolve); });
+  const port = server.address().port;
+  await new Promise((resolve, reject) => server.close(error => error ? reject(error) : resolve()));
+  return port;
+}
+const vitePort = await unusedPort();
+const cdpPort = await unusedPort();
+const viteUrl = `http://127.0.0.1:${vitePort}`;
 async function waitForUrl(url, timeoutMs = 30_000, json = true) {
   const deadline = Date.now() + timeoutMs;
   while (Date.now() < deadline) {
@@ -113,7 +124,7 @@ async function waitForCdpTarget(timeoutMs = 30_000) {
   const deadline = Date.now() + timeoutMs;
   while (Date.now() < deadline) {
     try {
-      const targets = await fetch('http://127.0.0.1:9229/json/list').then(response => response.json());
+      const targets = await fetch(`http://127.0.0.1:${cdpPort}/json/list`).then(response => response.json());
       const target = targets.find(item => item.type === 'page' && item.webSocketDebuggerUrl);
       if (target) return target;
     } catch { /* retry while Electron initializes */ }
@@ -139,9 +150,15 @@ try {
 
   const viteEntry = path.join(path.dirname(require.resolve('vite/package.json')), 'bin/vite.js');
   const electronCommand = require('electron');
-  vite = spawnProcess(process.execPath, [viteEntry, '--host', '127.0.0.1'], { VITE_UNICOMP_THREAD_FILE_READ_PATH: '1', VITE_UNICOMP_E2E: '1' });
-  await waitForUrl('http://127.0.0.1:5173', 30_000, false);
-  electron = spawnProcess(electronCommand, ['.', '--remote-debugging-port=9229'], { VITE_DEV_SERVER_URL: 'http://127.0.0.1:5173', UNICOMP_TEST_USER_DATA: userData, UNICOMP_E2E: '1', ...(useThreadFile ? { UNICOMP_THREAD_FILE_READ_PATH: '1', VITE_UNICOMP_THREAD_FILE_READ_PATH: '1' } : {}) });
+  const threadFlags = {
+    UNICOMP_THREAD_FIRST: useThreadFile ? '1' : '0',
+    VITE_UNICOMP_THREAD_FIRST: useThreadFile ? '1' : '0',
+    UNICOMP_THREAD_FILE_READ_PATH: useThreadFile ? '1' : '0',
+    VITE_UNICOMP_THREAD_FILE_READ_PATH: '1'
+  };
+  vite = spawnProcess(process.execPath, [viteEntry, '--host', '127.0.0.1', '--port', String(vitePort), '--strictPort'], { ...threadFlags, VITE_UNICOMP_E2E: '1' });
+  await waitForUrl(viteUrl, 30_000, false);
+  electron = spawnProcess(electronCommand, ['.', `--remote-debugging-port=${cdpPort}`], { ...threadFlags, VITE_DEV_SERVER_URL: viteUrl, UNICOMP_TEST_USER_DATA: userData, UNICOMP_E2E: '1' });
   const target = await waitForCdpTarget();
   const cdp = new CdpClient(target.webSocketDebuggerUrl);
   await cdp.call('Runtime.enable');
@@ -158,6 +175,23 @@ try {
   await cdp.evaluate(`document.querySelector('.uc-chat-page__workspace-conversation')?.click()`);
   await waitForExpression(cdp, `document.querySelectorAll('[data-virtual-item-id]').length > 0`);
   await sleep(300);
+  const pageNavigation = [];
+  const expectedLastMessage = `助手回复 0-${messageCount - 1}`;
+  await waitForExpression(cdp, `document.body.innerText.includes(${JSON.stringify(expectedLastMessage)})`);
+  for (const destination of ['library', 'settings', 'library']) {
+    const selectedTitle = await cdp.evaluate(`document.querySelector('.uc-chat-page__workspace-conversation-row[aria-current="true"]')?.textContent`);
+    await cdp.evaluate(`document.getElementById('${destination}-navigation-trigger')?.click()`);
+    await waitForExpression(cdp, `!document.querySelector('.uc-chat-page')`);
+    await cdp.evaluate(`document.getElementById('projects-navigation-trigger')?.click()`);
+    await waitForExpression(cdp, `document.querySelectorAll('[data-virtual-item-id]').length > 0`);
+    try {
+      await waitForExpression(cdp, `document.querySelector('.uc-chat-page__workspace-conversation-row[aria-current="true"]')?.textContent === ${JSON.stringify(selectedTitle)} && document.body.innerText.includes(${JSON.stringify(expectedLastMessage)})`);
+    } catch (error) {
+      const state = await cdp.evaluate(`(()=>{const pane=document.querySelector('.uc-chat-page__messages');return {selected:document.querySelector('.uc-chat-page__workspace-conversation-row[aria-current="true"]')?.textContent,expected:${JSON.stringify(selectedTitle)},scrollTop:pane?.scrollTop,scrollHeight:pane?.scrollHeight,clientHeight:pane?.clientHeight,rows:[...document.querySelectorAll('[data-virtual-item-id]')].map(row=>({id:row.getAttribute('data-virtual-item-id'),text:row.textContent?.slice(0,100)}))};})()`);
+      throw new Error(`${error.message}; navigation=${destination}; state=${JSON.stringify(state)}`);
+    }
+    pageNavigation.push({ destination, restoredSelectionAndLastMessage: true });
+  }
   const uiInteraction = await cdp.evaluate(`(async()=>{const buttons=[...document.querySelectorAll('.uc-chat-page__workspace-conversation')];const switchCount=Math.min(buttons.length,3);for(let index=1;index<switchCount;index+=1){buttons[index]?.click();await new Promise(resolve=>setTimeout(resolve,250));}buttons[0]?.click();await new Promise(resolve=>setTimeout(resolve,300));const scroller=document.querySelector('.uc-chat-page__messages');const before={scrollTop:scroller?.scrollTop??0,scrollHeight:scroller?.scrollHeight??0,virtualRows:document.querySelectorAll('[data-virtual-item-id]').length};if(scroller){scroller.scrollTop=0;scroller.dispatchEvent(new Event('scroll',{bubbles:true}));}await new Promise(resolve=>setTimeout(resolve,700));const olderButton=document.querySelector('.uc-chat-page__history-more button');if(olderButton){olderButton.click();await new Promise(resolve=>setTimeout(resolve,900));}return {switchCount,before,after:{scrollTop:scroller?.scrollTop??0,scrollHeight:scroller?.scrollHeight??0,virtualRows:document.querySelectorAll('[data-virtual-item-id]').length},paginationTriggered:Boolean(olderButton)};})()`);
   const readMetrics = await cdp.evaluate(`(async()=>{const listSamples=[],pageSamples=[],loopSamples=[];let summaryCount=0,pageCount=0;for(let sample=0;sample<5;sample+=1){const loop=window.unicomp.e2e?.sampleMainEventLoop(250);let start=performance.now();const summaries=await window.unicomp.chatContexts.listThreadSummaries({includeArchived:true,includeDeleted:false,limit:100});listSamples.push(performance.now()-start);start=performance.now();const page=await window.unicomp.chatContexts.getThreadItemsPage({threadId:${JSON.stringify(conversationId)},direction:'older',limit:30});pageSamples.push(performance.now()-start);const loopResult=await loop;if(loopResult)loopSamples.push(loopResult);summaryCount=summaries.value?.items?.length??0;pageCount=page.value?.items?.length??0;}const p=(values,f)=>{const sorted=[...values].sort((a,b)=>a-b);return sorted[Math.min(sorted.length-1,Math.floor(sorted.length*f))]??0};const body=document.body;return {listSamples,pageSamples,listP50Ms:p(listSamples,.5),listP95Ms:p(listSamples,.95),pageP50Ms:p(pageSamples,.5),pageP95Ms:p(pageSamples,.95),mainLoopDuringRead:loopSamples,summaryCount,pageCount,domMessageRows:document.querySelectorAll('.uc-chat-page__message-item').length,virtualRows:document.querySelectorAll('[data-virtual-item-id]').length,interactive:!!body?.innerText,heapUsedBytes:performance.memory?.usedJSHeapSize??null};})()`);
   const semanticSignature = await cdp.evaluate(`(async()=>{const summaries=await window.unicomp.chatContexts.listThreadSummaries({includeArchived:true,includeDeleted:false,limit:100});const page=await window.unicomp.chatContexts.getThreadItemsPage({threadId:${JSON.stringify(conversationId)},direction:'older',limit:30});const value={summaryIds:(summaries.value?.items??[]).map(item=>item.threadId??item.conversationId),items:(page.value?.items??[]).map(item=>({itemId:item.itemId,sequence:item.sequence,messageId:item.message?.messageId,role:item.message?.role,content:item.message?.content,revision:item.message?.revision}))};return JSON.stringify(value);})()`);
@@ -169,7 +203,7 @@ try {
     cdp.close();
     await stopProcess(electron);
     electron = undefined;
-    electron = spawnProcess(electronCommand, ['.', '--remote-debugging-port=9229'], { VITE_DEV_SERVER_URL: 'http://127.0.0.1:5173', UNICOMP_TEST_USER_DATA: userData, UNICOMP_E2E: '1', ...(useThreadFile ? { UNICOMP_THREAD_FILE_READ_PATH: '1', VITE_UNICOMP_THREAD_FILE_READ_PATH: '1' } : {}) });
+    electron = spawnProcess(electronCommand, ['.', `--remote-debugging-port=${cdpPort}`], { ...threadFlags, VITE_DEV_SERVER_URL: viteUrl, UNICOMP_TEST_USER_DATA: userData, UNICOMP_E2E: '1' });
     const targetAfterRestart = await waitForCdpTarget();
     const cdpAfterRestart = new CdpClient(targetAfterRestart.webSocketDebuggerUrl);
     await cdpAfterRestart.call('Runtime.enable');
@@ -207,7 +241,7 @@ try {
       };
     }
   }
-  const result = { schemaVersion: 1, generatedAt: new Date().toISOString(), mode: useThreadFile ? 'thread-file' : 'legacy', messageCount, threadCount: conversationIds.length, environment: { platform: process.platform, node: process.version }, flags: { main: useThreadFile, renderer: useThreadFile }, uiInteraction, readMetrics, semanticSignature, recovery, mainLoop, reactCommits, ipcMetrics, trace, measurementBoundary: 'real Electron renderer via CDP; Provider/Office calls intentionally not started', notMeasured: ['real Provider/Office E2E'] };
+  const result = { schemaVersion: 1, generatedAt: new Date().toISOString(), mode: useThreadFile ? 'thread-file' : 'legacy', messageCount, threadCount: conversationIds.length, environment: { platform: process.platform, node: process.version }, flags: { main: useThreadFile, renderer: true }, pageNavigation, uiInteraction, readMetrics, semanticSignature, recovery, mainLoop, reactCommits, ipcMetrics, trace, measurementBoundary: 'real Electron renderer via CDP; Provider/Office calls intentionally not started', notMeasured: ['real Provider/Office E2E'] };
   const reportDirectory = path.resolve('outputs/conversation-phase6');
   await mkdir(reportDirectory, { recursive: true });
   await writeFile(path.join(reportDirectory, `electron-e2e-${useThreadFile ? 'thread-file' : 'legacy'}-${conversationIds.length}threads-${messageCount}${process.env.UNICOMP_E2E_RESTART === '1' ? '-restart' : ''}.json`), `${JSON.stringify(result, null, 2)}\n`, 'utf8');

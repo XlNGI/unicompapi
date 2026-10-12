@@ -1,0 +1,15 @@
+{
+  "schemaVersion": 1,
+  "date": "2026-10-12",
+  "baseline": "cf1d724",
+  "paidRequests": 0,
+  "boundary": "isolated local Thread repository, UTF-8 content, paused before durable Commit",
+  "baselineResult": {
+    "visibleBeforeCommit": 2,
+    "visibleAfterCommit": 2
+  },
+  "currentResult": {
+    "visibleBeforeCommit": 1,
+    "visibleAfterCommit": 2
+  }
+}

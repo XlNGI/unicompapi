@@ -6,6 +6,7 @@ const path = require('node:path');
 const { parseArgs } = require('node:util');
 const { app, safeStorage } = require('electron');
 const JSZip = require('jszip');
+const { toolReceipts, safeCodes, generationFailure, verifyGeneratedReadTranscript } = require('./lib/document-acceptance-evidence.cjs');
 
 // Run only after a production build. Default mode performs local setup without
 // decrypting provider credentials or making a network request. The live mode
@@ -15,6 +16,7 @@ const { values } = parseArgs({ options: {
   'authorized-two-synthetic-cases': { type: 'boolean', default: false },
   'authorized-generation-case': { type: 'boolean', default: false },
   'authorized-d3-layout-case': { type: 'boolean', default: false },
+  'output-directory': { type: 'string' },
   pages: { type: 'string' },
   model: { type: 'string' }
 } });
@@ -194,7 +196,17 @@ async function inspectOutbound(request, domain, expectedModel) {
     maximum: artTokenLimit
   });
   requireCondition(outputBudgetValid, 'output_budget_missing');
-  if (generationCase && activeCase.outerRequests > 0 && !artDirectionRequest) await verifyGeneratedFile();
+  if (generationCase && !artDirectionRequest) {
+    const receipts = toolReceipts(payload.messages);
+    activeCase.wireToolReceipts = receipts;
+    // A known failed/unknown generation is evidence, not permission to send
+    // another paid request. Preserve it before the acceptance gate stops.
+    const generation = receipts.find(receipt => receipt.toolId === 'generate_pptx');
+    if (generation && generation.status !== 'success') {
+      requireCondition(false, generation.status === 'unknown' ? 'generation_result_unknown' : 'generation_tool_failed');
+    }
+    if (generation?.status === 'success') await verifyGeneratedFile();
+  }
   report.actualWireModel = safeModel(payload.model);
   const inspectionText = payloadText + '\n' + (payload.messages ?? []).filter(message => message.role === 'tool').map(message => message.content).join('\n');
   const pathLeak = /(?:[a-zA-Z]:\\|file:\/\/|\/Users\/|\/home\/)/u.test(inspectionText) ||
@@ -237,6 +249,8 @@ async function inspectOutbound(request, domain, expectedModel) {
         'final_answer_observation_missing');
       requireCondition(toolMessages.some(message => message.content.includes(markers[0]) &&
         message.content.includes(markers[1])), 'final_answer_observation_facts_missing');
+      Object.assign(activeCase, verifyGeneratedReadTranscript(payload.messages, { ...generatedVerification, markers,
+        validateCall: (toolId, args) => domain.validateCanonicalToolArguments(domain.createCanonicalToolRegistry().get(toolId), args) }));
       activeCase.finalAnswerRequests = (activeCase.finalAnswerRequests ?? 0) + 1;
       activeCase.providerStages.push({ stage: 'final_answer', model: safeModel(payload.model),
         status: 'request_started', toolsVisible: false, outputTokenLimit: tokenLimit });
@@ -374,7 +388,10 @@ async function inspectOutbound(request, domain, expectedModel) {
 async function verifyGeneratedFile() {
   const { platform, storage, projectId, projectRoot } = hostVerification;
   const works = await new platform.JsonWorkRepository(storage, projectId).list(projectId);
-  requireCondition(works.length === 1, 'expected_one_generated_work');
+  if (works.length !== 1) {
+    await collectGenerationEvidence();
+    requireCondition(false, activeCase.generationEvidence?.failure ?? 'generation_not_verified');
+  }
   const { RegisteredPresentationReader } = require('../dist-electron/src/platform/documents/registered-presentation-reader');
   const actual = await new RegisteredPresentationReader({ rootDirectory: projectRoot, projectId }).read(works[0].id);
   const pageCountValid = d3LayoutMode ? actual.pages.length >= 6 && actual.pages.length <= 8 : actual.pages.length >= 4;
@@ -423,7 +440,7 @@ async function seedGenerationConversation(platform, domain, storage, projectId) 
   const now = domain.toIsoTimestamp(new Date().toISOString());
   let conversation = domain.createConversation({ id: domain.toConversationId('conversation-synthetic-generation-' + randomUUID()),
     projectId, title: '合成生成读回验收', createdAt: now });
-  const repository = new platform.JsonProjectConversationRepository(storage, projectId);
+  const repository = await runtime.getConversationRepository({ projectId, projectName: '合成生成读回验收', rootDirectory: isolatedProjectAtStartup });
   await repository.create(conversation);
   let previousRevision = conversation.revision;
   conversation = domain.addUserMessage(conversation, { id: domain.toMessageId('requirement-' + randomUUID()),
@@ -468,7 +485,7 @@ async function seedConversation(platform, domain, storage, projectId, fixture, l
   const now = domain.toIsoTimestamp(new Date().toISOString());
   const id = domain.toConversationId(`conversation-synthetic-read-${label}-${randomUUID()}`);
   let conversation = domain.createConversation({ id, projectId, title: '合成只读工具验收', createdAt: now });
-  const repository = new platform.JsonProjectConversationRepository(storage, projectId);
+  const repository = await runtime.getConversationRepository({ projectId, projectName: '合成只读工具验收', rootDirectory: isolatedProjectAtStartup });
   await repository.create(conversation);
   const messageId = domain.toMessageId(`message-synthetic-document-${randomUUID()}`);
   const revision = conversation.revision;
@@ -506,6 +523,8 @@ async function executeCase(platform, domain, storage, projectId, fixture, candid
     contextSelections: [], parameterValues, confirmed: true
   }), 'response_start_failed');
   const executionId = started.execution.responseExecutionId;
+  hostVerification.conversationId = conversation.id;
+  hostVerification.executionId = executionId;
   const deadline = Date.now() + (generationMode ? 300_000 : 150_000);
   let execution = started.execution;
   while (!terminalStates.has(execution.state) && Date.now() < deadline && !lifecycleAbort.signal.aborted) {
@@ -522,6 +541,7 @@ async function executeCase(platform, domain, storage, projectId, fixture, candid
     } catch { /* keep timeout report bounded */ }
     throw Object.assign(new Error('case_deadline_exceeded'), { code: 'case_deadline_exceeded' });
   }
+  await runtime.waitForMutations();
   entry.terminalState = execution.state;
   const executionEvents = await new platform.JsonConversationResponseExecutionRepository(storage, projectId).listEvents(executionId);
   entry.terminalDiagnostics = executionEvents.flatMap(event =>
@@ -529,6 +549,8 @@ async function executeCase(platform, domain, storage, projectId, fixture, candid
   entry.answerUsesObservation = scope === 'page' ? execution.content.includes(markers[0])
     : markers.every(marker => execution.content.includes(marker));
   if (liveGeneration) {
+    await collectGenerationEvidence();
+    requireCondition(!entry.generationEvidence.failure, entry.generationEvidence.failure);
     await verifyGeneratedFile();
     const reportedPages = /文件页数\s*[：:]\s*(\d+)/u.exec(execution.content);
     entry.finalPhysicalPageCountMatched = Number(reportedPages?.[1]) === generatedVerification.pages.length;
@@ -729,13 +751,15 @@ async function run() {
   const { ElectronNewApiHttpTransport } = require('../dist-electron/electron/ipc/management-adapters');
   const realTransport = new ElectronNewApiHttpTransport();
   const transport = { async send(request) {
-    const requestStage = await inspectOutbound(request, domain, selected.model.providerModelKey);
+    let requestStage;
+    try { requestStage = await inspectOutbound(request, domain, selected.model.providerModelKey); }
+    catch (error) {
+      if (activeCase) (activeCase.localRejections ??= []).push(safeCode(error));
+      throw error;
+    }
     const response = await realTransport.send({ ...request, signal: AbortSignal.any([request.signal, lifecycleAbort.signal]) });
-    if (activeCase && requestStage === 'art_direction') {
-      const item = [...activeCase.providerStages].reverse().find(value => value.stage === 'art_direction' && value.status === 'request_started');
-      if (item) { item.status = response.status >= 200 && response.status < 300 ? 'http_accepted' : 'http_rejected'; item.httpStatus = response.status; }
-    } else if (activeCase && requestStage === 'content_planning') {
-      const item = [...activeCase.providerStages].reverse().find(value => value.stage === 'content_planning' && value.status === 'request_started');
+    if (activeCase) {
+      const item = [...activeCase.providerStages].reverse().find(value => value.stage === requestStage && value.status === 'request_started');
       if (item) { item.status = response.status >= 200 && response.status < 300 ? 'http_accepted' : 'http_rejected'; item.httpStatus = response.status; }
     }
     return response;
@@ -763,6 +787,7 @@ async function run() {
   deepSeekRuntime = new platform.DeepSeekSharedRuntime(options);
   newApiRuntime = new platform.NewApiSharedRuntime(options);
   runtime = platform.createChatContextRuntime({ userDataDirectory: profile,
+    threadFileReadEnabled: true, threadFileWriteEnabled: true,
     getSession: () => ({ projectId, projectName: '合成只读工具验收', rootDirectory: projectRoot }),
     providerRegistry: selected.registry, runtimeAuthorization: authorization,
     textSubmission: { credentialVault: vault, deepSeekRuntime, newApiRuntime },
@@ -782,6 +807,16 @@ async function run() {
   const outerOutputLimit = d3LayoutMode ? 4_096 : 1_024;
   requireCondition(field && (field.minimum ?? 1) <= 1_024 && (field.maximum ?? outerOutputLimit) >= outerOutputLimit, 'bounded_output_unavailable');
   const parameterValues = { [field.fieldId]: Math.min(field.maximum ?? outerOutputLimit, outerOutputLimit) };
+  if (!live) {
+    const seeded = generationMode ? await seedGenerationConversation(platform, domain, storage, projectId)
+      : await seedConversation(platform, domain, storage, projectId, fixture, 'dry-run');
+    const owner = await runtime.getConversationRepository({ projectId, projectName: '合成工具验收', rootDirectory: projectRoot });
+    const committed = await owner.get(seeded.id);
+    requireCondition(committed?.id === seeded.id && committed.projectId === projectId && committed.messages.length === seeded.messages.length,
+      'synthetic_thread_fixture_not_committed');
+    report.fixtureThreadAuthorityVerified = true;
+    report.fixtureMessageCount = committed.messages.length;
+  }
   if (live) {
     requireCondition(safeStorage.isEncryptionAvailable(), 'credential_encryption_unavailable');
     if (liveGeneration) await executeCase(platform, domain, storage, projectId, fixture, candidate, parameterValues, 'document');
@@ -805,6 +840,7 @@ async function cleanup() {
   lifecycleAbort.abort();
   await runtime?.interruptActiveResponses().catch(() => undefined);
   await runtime?.waitForMutations().catch(() => undefined);
+  await collectGenerationEvidence().catch(() => undefined);
   deepSeekRuntime?.dispose();
   newApiRuntime?.dispose();
   proxy?.dispose();
@@ -817,6 +853,10 @@ async function cleanup() {
     report.status = 'failed';
     report.safeCode = 'user_configuration_changed_during_acceptance';
   }
+  if (liveGeneration) {
+    report.isolatedProjectRetained = true;
+    return;
+  }
   if (temporaryRoot) {
     const resolved = path.resolve(temporaryRoot);
     requireCondition(path.dirname(resolved) === path.resolve(os.tmpdir()) &&
@@ -824,6 +864,39 @@ async function cleanup() {
     try { await rm(resolved, { recursive: true, force: true, maxRetries: 3, retryDelay: 100 }); }
     catch { report.temporaryCleanupDeferred = true; }
   }
+}
+
+async function collectGenerationEvidence() {
+  if (!liveGeneration || !activeCase || !hostVerification?.executionId) return;
+  const { platform, storage, projectId, conversationId, executionId } = hostVerification;
+  const { ConversationProductionTraceStore } = require('../dist-electron/src/platform/conversation-production-trace');
+  const trace = await new ConversationProductionTraceStore(storage, projectId).list({ conversationId });
+  const pipelineTrace = trace.filter(event => ['tool_call', 'tool_result', 'document_render', 'document_check',
+    'document_compile', 'document_structure_check', 'plan_validation', 'document_hash_check', 'document_publish', 'document_register', 'task_complete'].includes(event.code))
+    .map(event => ({ code: event.code, status: event.status,
+      ...(typeof event.operationId === 'string' && /^(?:presentation-(?:art-direction|design-[a-z-]+|layout-[a-z-]+)|document-[a-z-]+)(?::repair-\d+)?$/u.test(event.operationId)
+        ? { operation: event.operationId } : {}),
+      ...(event.facts?.tool ? { tool: event.facts.tool } : {}) }));
+  const tasks = await new platform.JsonDocumentTaskRuntimeRepository(storage, projectId).list(conversationId);
+  const durableReceipts = tasks.filter(task => task.executionId === executionId).flatMap(task => task.toolCalls.map(call => ({
+    toolId: call.toolId, status: call.status === 'completed' ? 'success' : call.status,
+    diagnosticCodes: safeCodes(task.observations.filter(observation => observation.step === call.step).map(observation => observation.diagnostic))
+  })));
+  const workCount = (await new platform.JsonWorkRepository(storage, projectId).list(projectId)).length;
+  const summary = { workCount, terminalState: activeCase.terminalState,
+    artDirectionRequests: activeCase.artDirectionRequests ?? 0,
+    receipts: [...(activeCase.wireToolReceipts ?? []), ...durableReceipts],
+    localRejections: activeCase.localRejections ?? [], trace: pipelineTrace };
+  activeCase.generationEvidence = { ...summary, failure: generationFailure(summary) };
+  const { ThreadFileRepository } = require('../dist-electron/src/platform/repositories/thread-file-repository');
+  const threads = new ThreadFileRepository(hostVerification.projectRoot);
+  const items = await threads.readItems(conversationId);
+  const turns = await threads.readTurns(conversationId);
+  activeCase.threadFacts = { turns: turns.length,
+    assistantItems: items.filter(item => item.type === 'assistant_message').length,
+    toolCalls: items.filter(item => item.type === 'tool_call_projection').length,
+    toolResults: items.filter(item => item.type === 'tool_result_projection').length,
+    artifacts: items.filter(item => item.type === 'document_artifact_projection').length };
 }
 
 processDeadline = setTimeout(() => {
@@ -840,15 +913,18 @@ run().catch(error => {
   report.errorSummary = safeErrorSummary(error);
   if (activeCase) activeCase.status = 'failed';
 }).finally(async () => {
+  try { await collectGenerationEvidence(); } catch { report.evidenceCollectionFailed = true; }
   try { await cleanup(); }
   catch { report.status = 'failed'; report.safeCode = 'acceptance_cleanup_failed'; }
   clearTimeout(processDeadline);
   report.finishedAt = new Date().toISOString();
-  const outputDirectory = path.join(workspace, d3LayoutMode ? 'outputs/phase2-d3-kimi-layout-engine'
-    : generationMode ? 'outputs/phase2-d1-kimi-art-direction' : 'outputs/production-document-read');
+  const outputDirectory = values['output-directory'] ? path.resolve(workspace, values['output-directory'])
+    : path.join(workspace, 'outputs', `office-provider-${new Date().toISOString().replace(/[:.]/g, '-')}`);
   try {
     await mkdir(outputDirectory, { recursive: true });
     await writeFile(path.join(outputDirectory, live ? 'real-provider.json' : 'dry-run.json'), JSON.stringify(report, null, 2) + '\n', 'utf8');
+    if (report.isolatedProjectRetained) await writeFile(path.join(outputDirectory, 'isolation-location.json'),
+      JSON.stringify({ projectDirectory: isolatedProjectAtStartup, profileDirectory: isolatedProfileAtStartup }, null, 2) + '\n', 'utf8');
   } catch { report.status = 'failed'; report.safeCode = 'safe_report_write_failed'; }
   process.stdout.write(JSON.stringify(report, null, 2) + '\n');
   app.exit(['passed', 'dry_run_passed'].includes(report.status) ? 0 : 1);

@@ -9,6 +9,7 @@ import {
   toConversationResponseStreamEventId,
   toIsoTimestamp,
   toMessageId,
+  toThreadId,
   type ConversationResponseDraftRepository,
   type ConversationResponseExecutionRepository,
   type MessageId,
@@ -19,6 +20,7 @@ import { freezeProjectContextOutboundSnapshots } from '../repositories/project-c
 import {
   ConversationContextBuilder,
   AgentContextAssembler,
+  type ModelHistoryReader,
   type ConversationContextReference
 } from '../../application';
 import { DEEPSEEK_PROVIDER_PACKAGE_ID } from './deepseek/deepseek-contracts';
@@ -36,12 +38,14 @@ import { buildDocumentGenerationConversationInstruction, isPptGenerationIntent }
 
 export interface ConversationResponseArtifactFactoryDependencies {
   readonly nativeSearch?: ConversationNativeSearch;
-  readonly conversations: ProjectConversationRepository;
+  readonly conversations: Pick<ProjectConversationRepository, 'projectId' | 'get' | 'save'>;
   readonly drafts: ConversationResponseDraftRepository;
   readonly contexts: ProjectContextRepository;
   readonly executions: ConversationResponseExecutionRepository;
+  readonly threadFirst?: boolean;
   readonly contextBuilder?: ConversationContextBuilder;
   readonly agentContextAssembler?: AgentContextAssembler;
+  readonly modelHistory?: Pick<ModelHistoryReader, 'readConversation'>;
   readonly attachments?: Pick<ConversationAttachmentContextService, 'resolve'> & Partial<Pick<ConversationAttachmentContextService, 'resolveImage'>>;
   readonly documentPages?: Pick<ConversationDocumentPageContextService, 'resolve'>;
   readonly documentTools?: Pick<ConversationDocumentToolSessionService, 'prepare' | 'registerExecution'>;
@@ -57,6 +61,7 @@ export interface ConversationResponseArtifactFactoryDependencies {
     readonly content: string;
     readonly createdAt: string;
     readonly updatedAt: string;
+    readonly legacyMessageSnapshot?: Readonly<Record<string, unknown>>;
   }): Promise<void>;
   bindExecutionOwnership?(executionId: string): Promise<void>;
   bindDocumentOwnership?(executionId: string): Promise<void>;
@@ -93,17 +98,19 @@ export class ConversationResponseArtifactFactory
       throw new TypeError('Conversation response artifacts require a response draft subject');
     }
     const draft = await this.dependencies.drafts.get(subject.responseDraftId);
-    if (!draft || draft.revision !== subject.responseDraftRevision) {
+    if (!draft || draft.revision !== subject.responseDraftRevision || draft.conversationId !== subject.conversationId ||
+        draft.conversationRevision !== subject.conversationRevision || draft.userMessageId !== subject.userMessageId) {
       throw new TypeError('Conversation response draft is unavailable for artifact creation');
     }
     const startupSignal = this.dependencies.getStartupSignal?.(draft.id);
     assertStartupSignal(startupSignal);
     const conversation = await this.dependencies.conversations.get(subject.conversationId);
-    if (!conversation || conversation.revision !== subject.conversationRevision) {
+    if (!conversation || conversation.id !== subject.conversationId || conversation.projectId !== this.dependencies.conversations.projectId ||
+        conversation.status !== 'active' || conversation.revision !== subject.conversationRevision) {
       throw new TypeError('Conversation revision changed before artifact creation');
     }
     const userMessage = conversation.messages.find((message) => message.id === draft.userMessageId);
-    if (!userMessage || userMessage.role !== 'user' || userMessage.state !== 'completed') {
+    if (!userMessage || userMessage.role !== 'user' || userMessage.state !== 'completed' || userMessage.revision !== draft.userMessageRevision) {
       throw new TypeError('Conversation response user message is unavailable for artifact creation');
     }
     const nativeSearch = await this.dependencies.nativeSearch?.dispatch(draft, input.candidate);
@@ -152,15 +159,23 @@ export class ConversationResponseArtifactFactory
       })
     )];
     if (nativeSearch && references.length) throw new TypeError('Native search context exceeds the authorized scope');
+    const modelConversation = this.dependencies.modelHistory
+      ? await this.dependencies.modelHistory.readConversation({ threadId: toThreadId(conversation.id) })
+      : conversation;
+    const modelUser = modelConversation.messages.find(message => message.id === draft.userMessageId);
+    if (!modelUser || modelUser.role !== 'user' || modelUser.state !== 'completed' || modelUser.revision !== draft.userMessageRevision) {
+      throw new TypeError('Authoritative model history user message changed');
+    }
+    assertStartupSignal(startupSignal);
     const contextEnvelope = draft.agentNative
       ? this.agentContextAssembler.assemble({
-          conversation,
+          conversation: modelConversation,
           currentUserMessageId: draft.userMessageId,
           currentUserContent: input.subject.outboundTextSnapshot,
           references
         })
       : this.contextBuilder.build({
-          conversation,
+          conversation: modelConversation,
           currentUserMessageId: draft.userMessageId,
           currentUserContent: input.subject.outboundTextSnapshot,
           omitHistory: pageReferences.length > 0 || !!nativeSearch || !!toolSelection,
@@ -190,6 +205,9 @@ export class ConversationResponseArtifactFactory
       id: assistantMessageId,
       createdAt
     });
+    if (this.dependencies.threadFirst && !this.dependencies.projectAssistantMessage) {
+      throw new Error('thread_pending_projection_unavailable');
+    }
     await this.dependencies.projectAssistantMessage?.({
       threadId: String(conversation.id),
       sourceMessageId: String(draft.userMessageId),
@@ -198,9 +216,10 @@ export class ConversationResponseArtifactFactory
       status: 'pending',
       content: '',
       createdAt,
-      updatedAt: createdAt
+      updatedAt: createdAt,
+      legacyMessageSnapshot: pendingConversation.messages.at(-1)! as unknown as Readonly<Record<string, unknown>>
     });
-    await this.dependencies.conversations.save(
+    if (!this.dependencies.threadFirst) await this.dependencies.conversations.save(
       pendingConversation,
       conversation.revision
     );

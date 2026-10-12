@@ -41,7 +41,7 @@ async function run() {
     providerRegistry: new platform.JsonProviderRegistryStore(path.join(userData, 'providers.json')),
     providerPackages: new platform.ProviderPackageRegistry([])
   });
-  documents = registerDocumentGenerationIpcHandlers({ sessionRegistry });
+  documents = registerDocumentGenerationIpcHandlers({ sessionRegistry, getConversationRepository: lifecycle.getConversationRepository });
   const fixture = path.join(temporaryRoot, 'synthetic-report.txt');
   await writeFile(fixture, '合成测试资料：季度销售额 120，成本 80。\n最后一节风险：供应链交付延迟。', 'utf8');
   const html = path.join(temporaryRoot, 'smoke.html');
@@ -150,6 +150,9 @@ async function run() {
 
 run().catch((error) => {
   process.exitCode = 1;
+  // A rejected assertion must have the same bounded exit as the success path,
+  // even when Chromium keeps a profile handle during best-effort cleanup.
+  setTimeout(() => process.exit(1), 5_000);
   process.stderr.write(`${error.stack ?? error}\n`);
 }).finally(async () => {
   clearTimeout(deadline);

@@ -44,6 +44,7 @@ import {
   VIDU_OFFICIAL_TEMPLATE_ID,
   type ResolvedFeatureSubjectV1
 } from '../../src/platform';
+import { initializeProviderFeatureProfiles } from '../../src/platform/providers/provider-feature-profile-initialization';
 
 const now = toIsoTimestamp('2026-09-29T00:00:00.000Z');
 const projectId = toProjectId('project-multi-reference-gate');
@@ -64,22 +65,28 @@ class MemoryRegistry {
     this.snapshot = mutation.snapshot;
     return mutation.result;
   }
+
+  mutateIfChanged<T>(mutator: (snapshot: ProviderRegistrySnapshot) =>
+    { readonly snapshot: ProviderRegistrySnapshot; readonly result: T } | Promise<{ readonly snapshot: ProviderRegistrySnapshot; readonly result: T }>): Promise<T> {
+    return this.mutate(mutator);
+  }
 }
 
 describe('multi-reference candidate contracts', () => {
+  const registry = new MemoryRegistry(gateSnapshot()) as unknown as JsonProviderRegistryStore;
+  const packages = new ProviderPackageRegistry([
+    unicompapiProviderPackageDescriptor, viduProviderPackageDescriptor, minimaxH3ProviderPackageDescriptor
+  ]);
   const source = new RegistryFeatureCandidateSource(
-    new MemoryRegistry(gateSnapshot()) as unknown as JsonProviderRegistryStore,
-    new ProviderPackageRegistry([
-      unicompapiProviderPackageDescriptor,
-      viduProviderPackageDescriptor,
-      minimaxH3ProviderPackageDescriptor
-    ]),
+    registry,
+    packages,
     new ProviderFeatureContractRegistry([
       ...createImageProviderFeatureContracts(),
       ...createVideoProviderFeatureContracts(),
       customMultiReferenceContract()
     ]),
-    { async checkAccess() { return { allowed: true, operation: 'submit' as const, reason: 'allowed' as const, policyId: 'policy-gate', policyRevision: 1 }; } }
+    { async checkAccess() { return { allowed: true, operation: 'submit' as const, reason: 'allowed' as const, policyId: 'policy-gate', policyRevision: 1 }; } },
+    initializeProviderFeatureProfiles(registry, packages)
   );
 
   it('keeps one image available without opening an unverified multi-image contract', async () => {

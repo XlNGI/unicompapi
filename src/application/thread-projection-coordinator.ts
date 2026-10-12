@@ -1,6 +1,10 @@
 import {
   appendTurnExecutionLink,
   createItemV1,
+  itemIdKey,
+  createTurnV1,
+  parseConversation,
+  assertThreadUpdate,
   updateItemV1,
   updateTurnV1,
   toConversationAgentRunId,
@@ -13,6 +17,7 @@ import {
   toToolCallId,
   sha256Hex,
   type ItemStatus,
+  type Conversation,
   type ItemV1,
   type ConversationAgentRunId,
   type ConversationResponseExecutionId,
@@ -36,6 +41,7 @@ export interface ThreadProjectionRepository {
     readonly idempotencyKey: string;
     readonly occurredAt: IsoTimestamp;
     readonly expectedGeneration?: number;
+    readonly thread?: Partial<Pick<ThreadV1, 'title' | 'status' | 'lastItemId' | 'lastItemSequence' | 'itemCount' | 'turnCount' | 'generation'>>;
     readonly turns?: readonly TurnV1[];
     readonly items?: readonly ItemV1[];
     readonly executionLinks?: readonly TurnExecutionLinkV1[];
@@ -91,6 +97,7 @@ export interface ProjectToolProjectionInput {
   readonly sourceMessageId: string;
   readonly toolCallId: string;
   readonly toolId: string;
+  readonly eventSystem?: 'agent_runtime' | 'response_execution';
   readonly status: ItemStatus;
   readonly responseExecutionId?: ConversationResponseExecutionId | string;
   readonly agentRunId?: ConversationAgentRunId | string;
@@ -105,6 +112,62 @@ export interface ProjectToolProjectionInput {
  */
 export class ThreadProjectionCoordinator {
   constructor(private readonly repository: ThreadProjectionRepository) {}
+
+  /** Apply Host-validated Conversation changes as one transcript commit. */
+  async saveConversation(input: { readonly previous: Conversation; readonly next: Conversation }): Promise<void> {
+    const previous = parseConversation(input.previous), next = parseConversation(input.next);
+    const threadId = toThreadId(previous.id), thread = await this.repository.getThread(threadId);
+    if (!thread || thread.generation !== previous.revision) throw new Error('generation_conflict');
+    if (next.id !== previous.id || next.projectId !== previous.projectId || next.projectId !== thread.projectId ||
+        next.createdAt !== previous.createdAt || next.revision !== previous.revision + 1 || next.updatedAt < previous.updatedAt ||
+        next.messages.length < previous.messages.length || previous.messages.some((message, index) => next.messages[index]?.id !== message.id)) {
+      throw new Error('thread_conversation_update_invalid');
+    }
+    const existingItems = await this.repository.readItems(threadId), turns = [...await this.repository.readTurns(threadId)];
+    const items: ItemV1[] = [], changedTurns = new Map<string, TurnV1>();
+    const previousMessages = new Map(previous.messages.map(message => [message.id, message]));
+    let sequence = thread.lastItemSequence, turnSequence = thread.turnCount, currentTurn: TurnV1 | undefined;
+    for (const message of next.messages) {
+      const existing = existingItems.find(item => item.itemId.namespace === 'message' && item.itemId.value === message.id);
+      if (message.role === 'user') {
+        currentTurn = turns.find(turn => turn.userItemId?.namespace === 'message' && turn.userItemId.value === message.id);
+        if (!currentTurn && !existing) {
+          currentTurn = createTurnV1({ threadId, turnId: toTurnId(`turn-transcript-${sha256Hex(message.id)}`), turnSequence: ++turnSequence,
+            userItemId: toMessageItemId(message.id), createdAt: message.createdAt, provenance: 'native' });
+          turns.push(currentTurn); changedTurns.set(currentTurn.turnId, currentTurn);
+        }
+      }
+      const prior = previousMessages.get(message.id);
+      if (prior && JSON.stringify(prior) === JSON.stringify(message)) continue;
+      if (prior && (prior.role !== message.role || prior.createdAt !== message.createdAt || message.revision < prior.revision || message.updatedAt < prior.updatedAt)) {
+        throw new Error('thread_message_update_invalid');
+      }
+      const item = createItemV1({ ...(existing ? updateItemV1(existing, { status: message.state, content: message.content, updatedAt: message.updatedAt }) : {}),
+        itemId: toMessageItemId(message.id), threadId, ...(existing?.turnId ?? currentTurn?.turnId ? { turnId: existing?.turnId ?? currentTurn!.turnId } : {}),
+        sequence: existing?.sequence ?? ++sequence, type: message.role === 'user' ? 'user_message' : 'assistant_message',
+        status: message.state, content: message.content, createdAt: message.createdAt, updatedAt: message.updatedAt,
+        messageSource: { messageId: message.id, messageRevision: message.revision },
+        legacyMessageSnapshot: message as unknown as Readonly<Record<string, unknown>> });
+      items.push(item);
+      if (message.role === 'assistant' && item.turnId) {
+        const turn = changedTurns.get(item.turnId) ?? turns.find(turn => turn.turnId === item.turnId);
+        if (!turn) throw new Error('turn_not_found_for_assistant');
+        const updated = updateTurnForAssistant(turn, item);
+        changedTurns.set(turn.turnId, updated);
+        if (currentTurn?.turnId === updated.turnId) currentTurn = updated;
+      }
+    }
+    const lastItem = items.reduce((latest, item) => !latest || item.sequence >= latest.sequence ? item : latest, existingItems.at(-1));
+    const projectedThread = { ...thread, ...(lastItem ? { lastItemId: lastItem.itemId } : {}), title: next.title, status: next.status, generation: thread.generation + 1,
+      updatedAt: next.updatedAt, itemCount: Math.max(thread.itemCount, sequence), lastItemSequence: sequence, turnCount: turnSequence };
+    assertThreadUpdate(thread, projectedThread);
+    const key = `thread-conversation:${threadId}:${previous.revision}:${sha256Hex(JSON.stringify(next))}`;
+    const outbox: ThreadProjectionOutboxEventV1[] = items.map(item => projectionEvent(item, `${key}:${item.itemId.value}`, next.updatedAt));
+    outbox.push({ schemaVersion: 1, eventType: 'thread_upsert', threadId, thread: projectedThread, sequence,
+      eventId: `thread-projection-${sha256Hex(key)}`, idempotencyKey: key, occurredAt: next.updatedAt });
+    await this.repository.append({ threadId, idempotencyKey: key, expectedGeneration: previous.revision, occurredAt: next.updatedAt,
+      thread: { title: next.title, status: next.status, ...(lastItem ? { lastItemId: lastItem.itemId } : {}) }, turns: [...changedTurns.values()], items, projectionOutbox: outbox });
+  }
 
   async linkExecution(input: LinkThreadExecutionInput): Promise<{ readonly thread: ThreadV1; readonly link: TurnExecutionLinkV1; readonly alreadyCommitted: boolean }> {
     const threadId = toThreadId(String(input.threadId));
@@ -161,20 +224,22 @@ export class ThreadProjectionCoordinator {
       if (isTerminalItemStatus(existing.status) && input.status !== existing.status) {
         return { thread, item: existing, alreadyCommitted: true };
       }
-      const item = updateItemV1(existing, { status: input.status, content: input.content, updatedAt: input.updatedAt });
+      const item = { ...updateItemV1(existing, { status: input.status, content: input.content, updatedAt: input.updatedAt }),
+        ...(input.legacyMessageSnapshot ? { legacyMessageSnapshot: input.legacyMessageSnapshot } : {}) };
       const updatedTurn = updateTurnForAssistant(turn, item);
       if (item.status === existing.status && item.content === existing.content && item.updatedAt === existing.updatedAt &&
+        JSON.stringify(item.legacyMessageSnapshot) === JSON.stringify(existing.legacyMessageSnapshot) &&
         JSON.stringify(updatedTurn) === JSON.stringify(turn)) {
         return { thread, item: existing, alreadyCommitted: true };
       }
       const result = await this.repository.append({
         threadId,
-        idempotencyKey: `thread-item-update:${threadId}:message:${input.assistantMessageId}:${input.status}:${input.updatedAt}`,
+        idempotencyKey: `thread-item-update:${threadId}:message:${input.assistantMessageId}:${input.status}:${input.updatedAt}:${sha256Hex(JSON.stringify(item.legacyMessageSnapshot ?? null))}`,
         occurredAt: input.updatedAt,
         expectedGeneration: thread.generation,
         turns: [updatedTurn],
         items: [item],
-        projectionOutbox: [projectionEvent(item, `thread-item-update:${threadId}:message:${input.assistantMessageId}:${input.status}:${input.updatedAt}`, input.updatedAt)]
+        projectionOutbox: [projectionEvent(item, `thread-item-update:${threadId}:message:${input.assistantMessageId}:${input.status}:${input.updatedAt}:${sha256Hex(JSON.stringify(item.legacyMessageSnapshot ?? null))}`, input.updatedAt)]
       });
       return { thread: result.thread, item, alreadyCommitted: result.alreadyCommitted };
     }
@@ -261,25 +326,30 @@ export class ThreadProjectionCoordinator {
     if (!turn) throw new Error('turn_not_found_for_tool_projection');
     const existing = latestItem((await this.repository.readItems(threadId)).filter(item =>
       item.type === input.kind && item.projectionSource?.toolCallId !== undefined &&
-      String(item.projectionSource.toolCallId) === input.toolCallId
+      String(item.projectionSource.toolCallId) === input.toolCallId &&
+      item.projectionSource.responseExecutionId === input.responseExecutionId &&
+      item.projectionSource.agentRunId === input.agentRunId &&
+      item.projectionSource.eventSystem === (input.eventSystem ?? 'agent_runtime') &&
+      item.projectionSource.sourceIdentity === `${input.toolId}:${input.toolCallId}`
     ));
     if (existing) {
       if (existing.status === input.status && existing.content === input.content && existing.updatedAt === input.updatedAt) return { thread, item: existing, alreadyCommitted: true };
       return this.updateItem({ threadId, itemId: existing.itemId, status: input.status, content: input.content, updatedAt: input.updatedAt });
     }
     const projected = createToolProjectionItem({ ...input, threadId, turnId: turn.turnId, sequence: thread.lastItemSequence + 1 });
+    const idempotencyKey = `thread-tool:${threadId}:${input.kind}:${toolProjectionIdentity(input)}`;
     const result = await this.repository.append({
       threadId,
-      idempotencyKey: `thread-tool:${threadId}:${input.kind}:${input.toolCallId}`,
+      idempotencyKey,
       occurredAt: input.updatedAt,
       expectedGeneration: thread.generation,
       items: [projected],
-      projectionOutbox: [projectionEvent(projected, `thread-tool:${threadId}:${input.kind}:${input.toolCallId}`, input.updatedAt)]
+      projectionOutbox: [projectionEvent(projected, idempotencyKey, input.updatedAt)]
     });
     if (!result.alreadyCommitted) return { thread: result.thread, item: projected, alreadyCommitted: false };
     const committed = (await this.repository.readItems(threadId)).find(candidate =>
       candidate.type === input.kind && candidate.projectionSource?.toolCallId !== undefined &&
-      String(candidate.projectionSource.toolCallId) === input.toolCallId
+      candidate.itemId.value === projected.itemId.value
     );
     if (!committed) throw new Error('thread_tool_idempotency_record_missing');
     return { thread: result.thread, item: committed, alreadyCommitted: true };
@@ -316,7 +386,7 @@ function latestItem(items: readonly ItemV1[]): ItemV1 | undefined {
 }
 
 function updateTurnForAssistant(turn: TurnV1, item: ItemV1): TurnV1 {
-  const assistantItemIds = turn.assistantItemIds.some(candidate => String(candidate) === String(item.itemId))
+  const assistantItemIds = turn.assistantItemIds.some(candidate => itemIdKey(candidate) === itemIdKey(item.itemId))
     ? turn.assistantItemIds
     : [...turn.assistantItemIds, item.itemId];
   const status = item.status === 'completed' ? 'completed'
@@ -351,7 +421,7 @@ function projectionEvent(item: ItemV1, idempotencyKey: string, occurredAt: IsoTi
 
 function createToolProjectionItem(input: ProjectToolProjectionInput & { readonly threadId: ThreadId; readonly turnId: TurnId; readonly sequence: number }): ItemV1 {
   return createItemV1({
-    itemId: toProjectionItemId(`item-projection-v1:${sha256Hex(JSON.stringify([input.threadId, input.kind, input.toolId, input.toolCallId]))}`),
+    itemId: toProjectionItemId(`item-projection-v1:${toolProjectionIdentity(input)}`),
     threadId: input.threadId,
     turnId: input.turnId,
     sequence: input.sequence,
@@ -361,11 +431,16 @@ function createToolProjectionItem(input: ProjectToolProjectionInput & { readonly
     updatedAt: input.updatedAt,
     ...(input.content !== undefined ? { content: input.content } : {}),
     projectionSource: {
-      eventSystem: 'agent_runtime',
+      eventSystem: input.eventSystem ?? 'agent_runtime',
       sourceIdentity: `${input.toolId}:${input.toolCallId}`,
       ...(input.responseExecutionId ? { responseExecutionId: toConversationResponseExecutionId(String(input.responseExecutionId)) } : {}),
       ...(input.agentRunId ? { agentRunId: toConversationAgentRunId(String(input.agentRunId)) } : {}),
       toolCallId: toToolCallId(input.toolCallId)
     }
   });
+}
+
+function toolProjectionIdentity(input: ProjectToolProjectionInput): string {
+  return sha256Hex(JSON.stringify([input.threadId, input.kind, input.eventSystem ?? 'agent_runtime',
+    input.responseExecutionId ?? null, input.agentRunId ?? null, input.toolId, input.toolCallId]));
 }

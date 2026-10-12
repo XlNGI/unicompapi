@@ -96,16 +96,19 @@ export interface ItemV1 {
   readonly projectionSource?: ItemProjectionSourceV1;
 }
 
-export interface ThreadProjectionOutboxEventV1 {
+interface ThreadProjectionOutboxBaseV1 {
   readonly schemaVersion: 1;
   readonly eventId: string;
   readonly threadId: ThreadId;
-  readonly eventType: 'item_upsert';
   readonly sequence: number;
   readonly idempotencyKey: string;
-  readonly item: ItemV1;
   readonly occurredAt: IsoTimestamp;
 }
+
+export type ThreadProjectionOutboxEventV1 = ThreadProjectionOutboxBaseV1 & (
+  | { readonly eventType: 'item_upsert'; readonly item: ItemV1 }
+  | { readonly eventType: 'thread_upsert'; readonly thread: ThreadV1 }
+);
 
 export interface ThreadProjectionReceiptV1 {
   readonly schemaVersion: 1;

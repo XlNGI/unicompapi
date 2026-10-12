@@ -7,6 +7,7 @@ import {
   toConversationId,
   toConversationWorkflowId,
   toIsoTimestamp,
+  toMessageId,
   type Conversation,
   type ConversationAttachmentReference,
   type ConversationWorkflowV1,
@@ -123,13 +124,14 @@ export class ConversationWorkflowController {
         return failure('invalid_request', 'Conversation attachments are unavailable');
       }
       signal.throwIfAborted();
-      const conversation = await runtime.conversationService.addUserMessage({
+      const conversation = await this.acceptUserMessage(runtime, {
         conversationId: workflow.conversationId,
         expectedRevision: input.expectedConversationRevision,
         content: input.content,
+        commandId: input.clientCommandId ?? `answer:${input.workflowId}:${input.expectedWorkflowRevision}`,
         ...(attachments ? { attachments } : {})
       });
-      if (runtime.turnCoordinator) {
+      if (runtime.turnCoordinator && !runtime.conversationService.writesTranscript) {
         const source = conversation.messages.at(-1)!;
         await runtime.turnCoordinator.acceptUserTurn({
           threadId: conversation.id,
@@ -416,19 +418,21 @@ export class ConversationWorkflowController {
         clientCommandId: input.clientCommandId,
         ...(attachments ? { legacyMessageSnapshot: { attachments } } : {})
       });
-      await runtime.legacyProjection?.drain(String(conversationId));
+      await this.drainLegacyProjection(runtime, String(conversationId));
       conversation = await runtime.conversationService.get(conversationId);
       preaccepted = true;
     } else {
       conversation = input.conversation
         ? await runtime.conversationService.get(toConversationId(input.conversation.conversationId))
         : await runtime.conversationService.create({ title: input.title, projectId: session.projectId });
-      conversation = await runtime.conversationService.addUserMessage({
+      conversation = await this.acceptUserMessage(runtime, {
         conversationId: conversation.id,
         expectedRevision: input.conversation?.expectedRevision ?? conversation.revision,
         content: input.content,
+        commandId: input.clientCommandId,
         ...(attachments ? { attachments } : {})
       });
+      preaccepted = runtime.conversationService.writesTranscript;
     }
     const source = conversation.messages.at(-1);
     if (!source || source.role !== 'user') {
@@ -490,7 +494,7 @@ export class ConversationWorkflowController {
     conversation: Awaited<ReturnType<ConversationApplicationService['get']>>,
     workflow: ConversationWorkflowV1
   ): Promise<typeof conversation> {
-    if (!runtime.turnCoordinator) return conversation;
+    if (!runtime.turnCoordinator || runtime.conversationService.writesTranscript) return conversation;
     const reply = [...conversation.messages].reverse().find(message =>
       message.role === 'assistant' && message.workflowReply?.workflowId === workflow.id &&
       message.workflowReply.revision >= workflow.revision
@@ -509,6 +513,30 @@ export class ConversationWorkflowController {
     });
     await runtime.legacyProjection?.drain(String(conversation.id));
     return conversation;
+  }
+
+  private async acceptUserMessage(runtime: ConversationWorkflowControllerRuntime, input: {
+    readonly conversationId: Conversation['id']; readonly expectedRevision: number;
+    readonly content: string; readonly commandId: string; readonly attachments?: readonly ConversationAttachmentReference[];
+  }): Promise<Conversation> {
+    if (!runtime.conversationService.writesTranscript) return runtime.conversationService.addUserMessage(input);
+    if (!runtime.turnCoordinator) throw new Error('thread_turn_coordinator_unavailable');
+    const conversation = await runtime.conversationService.get(input.conversationId);
+    if (conversation.revision !== input.expectedRevision) throw new ConversationRevisionConflictError(conversation.id, input.expectedRevision, conversation.revision);
+    await runtime.turnCoordinator.acceptUserTurn({ threadId: conversation.id, projectId: conversation.projectId,
+      title: conversation.title, messageId: toMessageId(runtime.conversationService.nextMessageId()),
+      content: input.content, createdAt: toIsoTimestamp(new Date().toISOString()), clientCommandId: input.commandId,
+      ...(input.attachments ? { legacyMessageSnapshot: { attachments: input.attachments } } : {}) });
+    await this.drainLegacyProjection(runtime, String(conversation.id));
+    return runtime.conversationService.get(conversation.id);
+  }
+
+  private async drainLegacyProjection(runtime: ConversationWorkflowControllerRuntime, conversationId: string): Promise<void> {
+    try { await runtime.legacyProjection?.drain(conversationId); }
+    catch (error) {
+      if (!runtime.conversationService.writesTranscript) throw error;
+      this.dependencies.onError?.(error);
+    }
   }
 
   private requireRuntime():

@@ -1,7 +1,12 @@
 import { mkdtemp, readFile, rm, unlink } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
+import * as filesystem from 'node:fs/promises';
+vi.mock('node:fs/promises', async importOriginal => {
+  const actual = await importOriginal<typeof filesystem>();
+  return { ...actual, readFile: vi.fn(actual.readFile), rename: vi.fn(actual.rename) };
+});
 import {
   createItemV1,
   createTurnV1,
@@ -21,7 +26,7 @@ const projectId = toProjectId('project-repository-test');
 const t0 = toIsoTimestamp('2026-10-08T00:00:00.000Z');
 const t1 = toIsoTimestamp('2026-10-08T00:00:01.000Z');
 
-afterEach(async () => { await Promise.all(roots.splice(0).map(root => rm(root, { recursive: true, force: true }))); });
+afterEach(async () => { vi.restoreAllMocks(); await Promise.all(roots.splice(0).map(root => rm(root, { recursive: true, force: true }))); });
 
 async function setup(fault?: (point: ThreadFaultPoint) => void | Promise<void>) {
   const root = await mkdtemp(path.join(os.tmpdir(), 'unicomp-thread-repository-'));
@@ -39,6 +44,91 @@ function records(sequence: number): { readonly turn: TurnV1; readonly item: Item
 }
 
 describe('ThreadFileRepository commit and recovery protocol', () => {
+  it('reads transcript revision and Items together after an in-flight commit across repository instances', async () => {
+    const { root, repository } = await setup();
+    let release!: () => void, entered!: () => void;
+    const gate = new Promise<void>(resolve => { release = resolve; });
+    const ready = new Promise<void>(resolve => { entered = resolve; });
+    const writer = new ThreadFileRepository(root, { fault: async point => {
+      if (point === 'after_manifest_update') { entered(); await gate; }
+    } });
+    const { item, turn } = records(1);
+    const writing = writer.append({ threadId, idempotencyKey: 'coherent-transcript', occurredAt: t1, items: [item], turns: [turn] });
+    await ready;
+    let settled = false;
+    const reading = repository.readTranscript(threadId).then(snapshot => { settled = true; return snapshot; });
+    try { await new Promise(resolve => setTimeout(resolve, 10)); expect(settled).toBe(false); }
+    finally { release(); await writing; }
+    const snapshot = await reading;
+    expect(snapshot?.thread.generation).toBe(1);
+    expect(snapshot?.items).toEqual([item]);
+  });
+  it('reads only the committed UTF-8 prefix while another instance has appended uncommitted Chinese records', async () => {
+    const { root, repository } = await setup();
+    const first = records(1), second = records(2);
+    const firstItem = { ...first.item, content: '已提交中文事实 🧪'.repeat(80) };
+    await repository.append({ threadId, idempotencyKey: 'utf8-first', occurredAt: t1, turns: [first.turn], items: [firstItem] });
+    let release!: () => void, entered!: () => void;
+    const gate = new Promise<void>(resolve => { release = resolve; });
+    const ready = new Promise<void>(resolve => { entered = resolve; });
+    const writer = new ThreadFileRepository(root, { fault: async point => {
+      if (point === 'after_segment_append') { entered(); await gate; }
+    } });
+    const pending = writer.append({ threadId, idempotencyKey: 'utf8-second', occurredAt: t1,
+      turns: [second.turn], items: [{ ...second.item, content: '尚未提交的中文内容' }] });
+    try {
+      await ready;
+      const reader = new ThreadFileRepository(root);
+      expect((await reader.readItems(threadId)).map(item => item.content)).toEqual([firstItem.content]);
+      expect((await reader.readTurns(threadId)).map(turn => turn.turnId)).toEqual([first.turn.turnId]);
+    } finally { release(); await pending; }
+    expect((await repository.readItems(threadId)).map(item => item.content)).toEqual([firstItem.content, '尚未提交的中文内容']);
+    expect((await new ThreadFileRepository(root).recover(threadId)).status).toBe('ready');
+  });
+
+  it('coordinates manifest replacement with readers across repository instances without retrying a commit', async () => {
+    const { root, repository } = await setup();
+    const first = records(1), second = records(2);
+    await repository.append({ threadId, idempotencyKey: 'reader-before', occurredAt: t1, turns: [first.turn], items: [first.item] });
+    const target = path.join(root, 'entities/threads', String(threadId), 'manifest.v1.json');
+    const actual = await vi.importActual<typeof filesystem>('node:fs/promises');
+    const read = actual.readFile, replace = actual.rename;
+    let held = false, holdReader = false, entered!: () => void, release!: () => void;
+    const ready = new Promise<void>(resolve => { entered = resolve; });
+    const gate = new Promise<void>(resolve => { release = resolve; });
+    vi.spyOn(filesystem, 'readFile').mockImplementation((async (...args: Parameters<typeof read>) => {
+      if (holdReader && String(args[0]) === target && !held) {
+        held = true; entered(); await gate;
+        try { return await read(...args); } finally { held = false; }
+      }
+      return read(...args);
+    }) as typeof read);
+    const rename = vi.spyOn(filesystem, 'rename').mockImplementation(async (source, destination) => {
+      if (String(destination) === target && held) throw Object.assign(new Error('synthetic Windows sharing violation'), { code: 'EPERM' });
+      return replace(source, destination);
+    });
+    let writerReady!: () => void, resumeWriter!: () => void;
+    const beforeReplace = new Promise<void>(resolve => { writerReady = resolve; });
+    const writerGate = new Promise<void>(resolve => { resumeWriter = resolve; });
+    const blockedWriter = new ThreadFileRepository(root, { fault: async point => {
+      if (point === 'before_manifest_update') { writerReady(); await writerGate; }
+    } });
+    const writer = blockedWriter.append({ threadId, idempotencyKey: 'reader-after', occurredAt: t1, turns: [second.turn], items: [second.item] });
+    void writer.catch(() => undefined);
+    await beforeReplace;
+    holdReader = true;
+    const reader = new ThreadFileRepository(root).getManifest(threadId);
+    await ready;
+    try {
+      resumeWriter();
+      await new Promise<void>(resolve => setImmediate(resolve));
+      expect(rename.mock.calls.filter(([, destination]) => String(destination) === target)).toHaveLength(0);
+    } finally { release(); }
+    await Promise.all([reader, writer]);
+    expect(rename.mock.calls.filter(([, destination]) => String(destination) === target)).toHaveLength(1);
+    expect((await repository.getManifest(threadId)).committedSequence).toBe(2);
+  });
+
   it('writes Thread metadata, JSONL segments and one durable Commit boundary', async () => {
     const { root, repository } = await setup();
     const { turn, item } = records(1);

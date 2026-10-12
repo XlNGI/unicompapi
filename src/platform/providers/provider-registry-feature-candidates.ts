@@ -1,20 +1,14 @@
 import { supportsConversationImageInput } from './conversation-image-input';
+import { latestCapabilityEvidenceByCapability, pinCapabilityEvidence } from './model-capability-selection';
 import { createHash } from 'node:crypto';
 import {
   parseUsageSchema,
-  toIsoTimestamp,
   toProtocolBindingId,
   validateParameterSchemaV2,
   type ParameterSchemaV2,
   type ProductFeature,
   type UsageSchemaV1
 } from '../../domain';
-import {
-  routeOpenAiCompatibleImageEditProfilesForEnabledModels,
-  routeOpenAiCompatibleImageProfilesForEnabledModels,
-  routeOpenAiCompatibleReferenceImageProfilesForEnabledModels
-} from './newapi/openai-compatible-image-routing';
-import { routeOpenAiCompatibleVideoProfilesForEnabledModels } from './newapi/openai-compatible-video-routing';
 import {
   isKnownUniCompApiModel,
   isUniCompApiPackage,
@@ -90,58 +84,13 @@ export class RegistryFeatureCandidateSource implements FeatureCandidateSourcePor
     private readonly registry: JsonProviderRegistryStore,
     private readonly packages: ProviderPackageRegistry,
     private readonly contracts: ProviderFeatureContractRegistry,
-    private readonly authorization: ProviderCandidateRuntimeAuthorizationPort
-  ) {}
+    private readonly authorization: ProviderCandidateRuntimeAuthorizationPort,
+    private readonly ready?: Promise<void>
+  ) { void ready?.catch(() => undefined); }
 
   async list(subject: ResolvedFeatureSubjectV1): Promise<readonly ResolvedFeatureCandidateV1[]> {
-    let snapshot = await this.registry.load();
-    if (subject.productFeature === 'text_to_image') {
-      const routed = await this.registry.mutate((current) => {
-        const next = routeOpenAiCompatibleImageProfilesForEnabledModels(
-          current,
-          this.packages,
-          toIsoTimestamp(new Date().toISOString())
-        );
-        return { snapshot: next, result: next };
-      });
-      snapshot = routed;
-    }
-    if (subject.productFeature === 'image_edit') {
-      const routed = await this.registry.mutate((current) => {
-        const next = routeOpenAiCompatibleImageEditProfilesForEnabledModels(
-          current,
-          this.packages,
-          toIsoTimestamp(new Date().toISOString())
-        );
-        return { snapshot: next, result: next };
-      });
-      snapshot = routed;
-    }
-    if (subject.productFeature === 'reference_to_image') {
-      const routed = await this.registry.mutate((current) => {
-        const next = routeOpenAiCompatibleReferenceImageProfilesForEnabledModels(
-          current,
-          this.packages,
-          toIsoTimestamp(new Date().toISOString())
-        );
-        return { snapshot: next, result: next };
-      });
-      snapshot = routed;
-    }
-    if (
-      subject.productFeature === 'text_to_video' ||
-      subject.productFeature === 'image_to_video'
-    ) {
-      const routed = await this.registry.mutate((current) => {
-        const next = routeOpenAiCompatibleVideoProfilesForEnabledModels(
-          current,
-          this.packages,
-          toIsoTimestamp(new Date().toISOString())
-        );
-        return { snapshot: next, result: next };
-      });
-      snapshot = routed;
-    }
+    await this.ready;
+    const snapshot = await this.registry.load();
     const candidates: ResolvedFeatureCandidateV1[] = [];
 
     for (const model of snapshot.models) {
@@ -211,6 +160,17 @@ export class RegistryFeatureCandidateSource implements FeatureCandidateSourcePor
           const policyId = runtime.policyId ?? 'runtime-policy-unavailable';
           const policyRevision = runtime.policyRevision ?? 1;
           const adapterVersion = adapterBinding?.adapterVersion ?? 'unavailable';
+          const modelEvidence = snapshot.capabilities.filter(evidence => evidence.modelId === model.id);
+          const featureEvidence = modelEvidence.filter(evidence => evidence.capability === feature.productFeature ||
+            feature.internalPurpose !== undefined && evidence.capability === feature.internalPurpose);
+          const latestEvidence = latestCapabilityEvidenceByCapability(featureEvidence);
+          const routeEvidence = latestEvidence.get(feature.internalPurpose ?? '') ?? latestEvidence.get(feature.productFeature);
+          const imageEvidence = subject.surface === 'conversation' && subject.imageCount > 0
+            ? modelEvidence.filter(evidence => evidence.capability === 'image_understanding') : [];
+          const pinnedEvidence = modelEvidence.filter(evidence => profile.evidenceIds.includes(evidence.id) ||
+            featureEvidence.includes(evidence) || imageEvidence.includes(evidence));
+          const capabilityEvidenceFingerprint = createHash('sha256').update(JSON.stringify(pinnedEvidence
+            .sort((left, right) => left.id.localeCompare(right.id)))).digest('hex');
 
           candidates.push({
             candidateId: featureCandidateId(model.id, profile.profileId, feature.productFeature),
@@ -226,12 +186,13 @@ export class RegistryFeatureCandidateSource implements FeatureCandidateSourcePor
               revision: contract.usageSchema.revision
             },
             cost: { state: 'unknown' },
+            capabilityEvidenceFingerprint,
             eligibility: {
               modelEnabled: model.enabled,
               catalogState: model.catalogState ?? 'present',
               connectionState: connection.state,
               profileStatus: profile.status,
-              featureSupported: supportsRequestedImageCount(
+              featureSupported: [...latestEvidence.values()].every(evidence => ['verified_supported', 'user_confirmed', 'declared_supported'].includes(evidence.state)) && supportsRequestedImageCount(
                 subject,
                 feature.productFeature,
                 contract.parameterSchema.schemaId,
@@ -240,12 +201,13 @@ export class RegistryFeatureCandidateSource implements FeatureCandidateSourcePor
                 profile.packageId
               ) &&
                 (subject.surface !== 'conversation' || !['text_chat', 'text_reasoning'].includes(subject.productFeature) || subject.imageCount === 0 ||
-                  supportsConversationImageInput(profile.adapterKey, snapshot.capabilities.filter(evidence => evidence.modelId === model.id && evidence.capability === 'image_understanding'))),
+                  supportsConversationImageInput(profile.adapterKey, imageEvidence)),
               bindingAvailable,
               runtimeAllowed: runtime.allowed,
               schemasInterpretable: true
             },
             routeTemplate: {
+              ...(routeEvidence ? { capabilityEvidencePin: pinCapabilityEvidence(routeEvidence) } : {}),
               packageId: profile.packageId,
               packageVersion: connection.packageVersion ?? provider.packageVersion ?? 'unavailable',
               adapterKey: profile.adapterKey,

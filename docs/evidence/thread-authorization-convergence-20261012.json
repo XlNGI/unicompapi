@@ -1,0 +1,164 @@
+{
+  "schemaVersion": 1,
+  "date": "2026-10-12",
+  "baseline": "53fcba0",
+  "branch": "feature/office-agent-thread-model-convergence",
+  "scope": "Thread authority for authorization, references and local transcript replies",
+  "authorizationBoundary": "Offline synthetic projects and controlled in-process Provider transports; no external requests or real user project mutation",
+  "regression": {
+    "before": "message_not_completed when Legacy message saves fail",
+    "after": "One generated and physically read PPT, one Work, completed parent, committed Thread tools and receipt while Legacy remains empty",
+    "newTests": 13
+  },
+  "validation": {
+    "nodeUi": {
+      "passed": 400,
+      "failed": 0,
+      "skipped": 0
+    },
+    "fullVitestCheckpoint": {
+      "files": 335,
+      "passed": 3450,
+      "failed": 0,
+      "skipped": 0,
+      "mode": "one worker, fileParallelism=false, unchanged timeouts"
+    },
+    "finalAuthorizationRegression": {
+      "passed": 55,
+      "failed": 0,
+      "skipped": 0,
+      "includesAdditionalNewTests": 2,
+      "note": "Runs after the final search-consent User publication change; counts overlap with the full checkpoint and must not be summed as a single full-suite run"
+    },
+    "authorityRegression": {
+      "passed": 88,
+      "failed": 0,
+      "skipped": 0
+    },
+    "typecheck": "passed",
+    "lint": "passed",
+    "build": "passed",
+    "electron": {
+      "agent": {
+        "status": "passed",
+        "entry": "responses.startAgent",
+        "parentState": "completed",
+        "generatedWorks": 1,
+        "toolFacts": [
+          {
+            "kind": "tool_call_projection",
+            "status": "completed"
+          },
+          {
+            "kind": "tool_result_projection",
+            "status": "completed"
+          },
+          {
+            "kind": "tool_call_projection",
+            "status": "completed"
+          },
+          {
+            "kind": "tool_result_projection",
+            "status": "completed"
+          }
+        ],
+        "threadReceipt": true,
+        "officeKinds": [
+          "word",
+          "excel"
+        ]
+      },
+      "compatibility": {
+        "status": "passed",
+        "entry": "responses.start",
+        "generatedWorks": 1,
+        "threadReceipt": true,
+        "toolFacts": [
+          {
+            "kind": "tool_call_projection",
+            "status": "completed"
+          },
+          {
+            "kind": "tool_result_projection",
+            "status": "completed"
+          },
+          {
+            "kind": "tool_call_projection",
+            "status": "completed"
+          },
+          {
+            "kind": "tool_result_projection",
+            "status": "completed"
+          }
+        ]
+      },
+      "navigation": {
+        "thread": "passed",
+        "legacy": "passed",
+        "conversationsPerMode": 3,
+        "messagesPerConversation": 120
+      }
+    }
+  },
+  "observedFailures": [
+    {
+      "scope": "initial default parallel baseline",
+      "failed": 10,
+      "causeObserved": "5s/10s test timeouts",
+      "resolution": "All 45 tests in the four affected files passed serially at original timeouts; final serial checkpoint passed"
+    },
+    {
+      "scope": "new partial User snapshot test during implementation",
+      "causeObserved": "Snapshot parsing and explicit attachment selection semantics",
+      "resolution": "Controlled metadata restoration implemented and source regression passed"
+    }
+  ],
+  "externalProviderRequests": 0,
+  "automaticUnknownResultRetries": 0,
+  "realUserDataMutations": 0,
+  "remaining": [
+    "Direct Legacy writes during startup/interruption recovery",
+    "Independent DocumentGeneration Office paths",
+    "General Conversation CRUD and some Context compatibility consumers",
+    "Historical Capability/Profile/Route compatibility and shared acceptance/base64 write amplification",
+    "Real external Provider matrix under a separate explicit budget"
+  ],
+  "evidenceLogs": [
+    {
+      "localLog": "outputs/thread-authority-maintenance/vitest-final.log",
+      "sha256": "cb02720128f454e5fccb6a39e7a43bdf23adb04aa66a41702591f3fee6e0198f"
+    },
+    {
+      "localLog": "outputs/thread-authority-maintenance/authority-targeted.log",
+      "sha256": "ae01454b0ddaac1757101f3f8e9d0b7baa5b2bc823255cd70c1e343516f06547"
+    },
+    {
+      "localLog": "outputs/thread-authority-maintenance/authorization-final.log",
+      "sha256": "e7ddccf244d6184d649720880dd6d18899d708ac3ca896b04465fad71c004a91"
+    },
+    {
+      "localLog": "outputs/thread-authority-maintenance/node-ui.log",
+      "sha256": "8a423656761725e010ef23b39104bf48491135888c931aa91e84d19f4ed0bfed"
+    },
+    {
+      "localLog": "outputs/thread-authority-maintenance/build-final.log",
+      "sha256": "67f129b807284468bb17a21a794e246e3c49cde67756698363a2cb02c2a35954"
+    },
+    {
+      "localLog": "outputs/thread-authority-maintenance/electron-agent-final.log",
+      "sha256": "b4ff3c23f97911e14af32b3ae920f80945ab286bc9209967091964f9f147bca1"
+    },
+    {
+      "localLog": "outputs/thread-authority-maintenance/electron-compatibility.log",
+      "sha256": "79510d59c5f0bbe5dc079b2dd6639bfe0ae92bab0e170364287b8d9bdb2afabb"
+    },
+    {
+      "localLog": "outputs/thread-authority-maintenance/electron-thread-navigation.log",
+      "sha256": "c75b40cb5ff8fc703bf59043cb3279b957f95ea1b465d3e2589172cdda9f08fb"
+    },
+    {
+      "localLog": "outputs/thread-authority-maintenance/electron-legacy-navigation.log",
+      "sha256": "85b3dd3c4013061107bb70fbc3da1f294478d9191dc09ab233a334513c78c874"
+    }
+  ]
+}

@@ -82,13 +82,15 @@ export class ProjectMetadataUnitOfWork {
       (current) => {
         const document = current === undefined
           ? emptyDocument(this.now())
-          : parseProjectMetadataDocument(current);
+          : validateProjectMetadataDocument(current);
         if (document.revision !== expectedRevision) {
           throw new JsonRevisionConflictError(expectedRevision, document.revision);
         }
+        // Draft construction isolates storage input; entries() isolates the commit
+        // from a callback that retains its draft. Validation needs no extra copies.
         const draft = new ProjectMetadataDraft(document.entries);
         mutate(draft);
-        return parseProjectMetadataDocument({
+        return validateProjectMetadataDocument({
           schemaVersion: 1,
           revision: document.revision + 1,
           updatedAt: toIsoTimestamp(this.now()),
@@ -101,6 +103,16 @@ export class ProjectMetadataUnitOfWork {
 }
 
 export function parseProjectMetadataDocument(value: unknown): ProjectMetadataDocumentV1 {
+  const document = validateProjectMetadataDocument(value);
+  return {
+    ...document,
+    entries: document.entries.map(({ key, value }) => ({ key, value: structuredClone(value) }))
+  };
+}
+
+// Internal validation borrows values only while the transaction owns its input
+// or a snapshot already detached from the draft. Public reads remain defensive.
+function validateProjectMetadataDocument(value: unknown): ProjectMetadataDocumentV1 {
   const item = requireExactRecord(
     value,
     ['schemaVersion', 'revision', 'updatedAt', 'entries'],
@@ -122,7 +134,7 @@ export function parseProjectMetadataDocument(value: unknown): ProjectMetadataDoc
     }
     keys.add(key);
     assertSafeJsonValue(entry.value, `project metadata ${key}`);
-    return { key, value: structuredClone(entry.value) };
+    return { key, value: entry.value };
   });
   return {
     schemaVersion: 1,

@@ -49,6 +49,7 @@ interface WireMessage {
 }
 interface WireRequest {
   readonly model: string;
+  readonly tool_choice?: string;
   readonly messages: readonly WireMessage[];
   readonly tools?: readonly { readonly type: string; readonly function: {
     readonly name: string; readonly description?: string; readonly parameters: Record<string, unknown>;
@@ -134,6 +135,9 @@ async function fixture(mode: 'document' | 'page' | 'workflow' | 'revoked' | 'cha
   const transport = { send: async (request: { readonly body?: Uint8Array }): Promise<DeepSeekHttpTransportResponse> => {
     const payload = JSON.parse(Buffer.from(request.body!).toString('utf8')) as WireRequest;
     requests.push(payload);
+    if (mode !== 'chat') {
+      expect(payload.tool_choice).toBe(requests.length === 1 ? 'required' : undefined);
+    }
     if (mode === 'chat') return stream(modelKey, { content: '普通聊天完成' }, 'stop');
     if (requests.length === 1) {
       if (mode === 'revoked') {

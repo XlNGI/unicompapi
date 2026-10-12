@@ -74,7 +74,7 @@ import type { ConversationDocumentToolSelection, ConversationDocumentToolSession
 export interface ConversationResponseControllerRuntime {
   readonly nativeSearch?: ConversationNativeSearch;
   readonly conversationService: ConversationApplicationService;
-  readonly conversations: ProjectConversationRepository;
+  readonly conversations: Pick<ProjectConversationRepository, 'projectId' | 'get'>;
   readonly drafts: ConversationResponseDraftRepository;
   readonly contexts: ProjectContextRepository;
   readonly candidates: ProviderFeatureCandidateService;
@@ -623,12 +623,12 @@ export class ConversationResponseController {
         title: input.title,
         messageId,
         content: input.content,
-        ...(attachments ? { legacyMessageSnapshot: { attachments, ...(input.displayContent !== undefined ? { displayContent: input.displayContent } : {}) } } : {}),
+        ...((attachments || input.displayContent !== undefined) ? { legacyMessageSnapshot: { ...(attachments ? { attachments } : {}), ...(input.displayContent !== undefined ? { displayContent: input.displayContent } : {}) } } : {}),
         createdAt: toIsoTimestamp(this.now()),
         clientCommandId: input.clientCommandId
       }));
       preacceptedThreadTurn = true;
-      await step(() => runtime.legacyProjection?.drain(String(conversationId)) ?? Promise.resolve({ projected: 0, pending: 0 }));
+      await step(() => this.drainLegacyProjection(runtime, String(conversationId)));
       conversation = await step(() => runtime.conversationService.get(conversationId));
     } else {
       conversation = await step(() => runtime.conversationService.create({
@@ -671,10 +671,11 @@ export class ConversationResponseController {
           title: conversation.title,
           messageId,
           content: input.content,
+          ...((attachments || input.displayContent !== undefined) ? { legacyMessageSnapshot: { ...(attachments ? { attachments } : {}), ...(input.displayContent !== undefined ? { displayContent: input.displayContent } : {}) } } : {}),
           createdAt: toIsoTimestamp(this.now()),
           clientCommandId: input.clientCommandId
         }));
-        await step(() => runtime.legacyProjection?.drain(String(conversation.id)) ?? Promise.resolve({ projected: 0, pending: 0 }));
+        await step(() => this.drainLegacyProjection(runtime, String(conversation.id)));
         preacceptedThreadTurn = true;
         conversation = await step(() => runtime.conversationService.get(conversation.id));
       } else {
@@ -806,7 +807,7 @@ export class ConversationResponseController {
       const disclosure = localSources
         ? '已检索到本地资料，本次优先使用本地资料制作，不联网搜索；最新公开信息未联网核实。'
         : '本次制作不联网搜索，将依据当前需求、可用资料和模型已有知识生成内容；最新数据、政策等信息未联网核实。';
-      conversation = await step(() => runtime.turnCoordinator && runtime.legacyProjection ? runtime.conversationService.ensureLocalReply(conversation.id,
+      conversation = await step(() => !runtime.conversationService.writesTranscript && runtime.turnCoordinator && runtime.legacyProjection ? runtime.conversationService.ensureLocalReply(conversation.id,
         `sources-${workflow!.id}-${workflow!.revision}`, disclosure, { beforeSave: async message => {
           await runtime.turnCoordinator!.projectAssistantMessage({
             threadId: conversation.id,
@@ -832,7 +833,7 @@ export class ConversationResponseController {
       ...(workflow
         ? {
             promptContent: workflow.plan.kind === 'document'
-              ? buildDocumentGenerationPrompt(input.content, workflow.plan)
+              ? buildDocumentGenerationPrompt(input.content, workflow.plan, Boolean(input.agentNative))
               : input.content
           }
         : {}),
@@ -874,7 +875,7 @@ export class ConversationResponseController {
       draft = contextualized;
     }
     if (runtime.documentTools?.prepare) {
-      toolSelection = await step(() => runtime.documentTools!.prepare!({ conversation, draft, signal })) ?? toolSelection;
+      toolSelection = await step(() => runtime.documentTools!.prepare!({ conversation, draft, workflow, signal })) ?? toolSelection;
     }
     if (toolSelection) await step(() => runtime.documentTools!.pinDraft({ draft, selection: toolSelection!, signal }));
     if (workflow && runtime.nativeSearch && prepareNativeSearch) {
@@ -1044,6 +1045,14 @@ export class ConversationResponseController {
       throw error;
     } finally { removeStartedCancellation?.(); }
     });
+  }
+
+  private async drainLegacyProjection(runtime: ConversationResponseControllerRuntime, conversationId: string): Promise<void> {
+    try { await runtime.legacyProjection?.drain(conversationId); }
+    catch (error) {
+      if (!runtime.conversationService.writesTranscript) throw error;
+      this.dependencies.onError?.(error);
+    }
   }
 
   private async requireReadyWorkflow(
@@ -1262,7 +1271,8 @@ async function waitForResponseStart<T>(operation: () => Promise<T>, signal: Abor
  */
 function buildDocumentGenerationPrompt(
   rawText: string,
-  plan: ConversationIntentPlan
+  plan: ConversationIntentPlan,
+  agentNative = false
 ): string {
   const operation = plan.action === 'revise'
     ? 'edit'
@@ -1291,8 +1301,14 @@ function buildDocumentGenerationPrompt(
     JSON.stringify(contract),
     '【当前用户需求】',
     rawText,
-    buildDocumentOutlinePrompt(outlineKind),
-    '【输出要求】不要输出路径、凭证、Provider、模型选择、工具调用、权限或 JSON 之外的解释。正文内容必须服从上述合同；合同未提供的事实不得臆造。'
+    ...(agentNative && plan.documentKind === 'ppt' ? [
+      '【执行要求】应用已确认此计划。新建 PPT 必须调用 generate_pptx，生成后通过 read_document_structure 读取实际文件并核对；修改 PPT 使用当前获准的修改工具。',
+      '不要用大纲 JSON 代替文件交付。只有工具确认本地文件校验、作品登记与读回后才能声明文档已交付；失败或未知结果须如实说明，不得自动重发。',
+      '正文内容必须服从上述合同；合同未提供的事实不得臆造。不得输出路径、凭证、Provider、模型选择或权限信息。'
+    ] : [
+      buildDocumentOutlinePrompt(outlineKind),
+      '【输出要求】不要输出路径、凭证、Provider、模型选择、工具调用、权限或 JSON 之外的解释。正文内容必须服从上述合同；合同未提供的事实不得臆造。'
+    ])
   ].join('\n');
 }
 

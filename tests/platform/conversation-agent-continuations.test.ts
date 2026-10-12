@@ -16,6 +16,9 @@ import { JsonConversationAgentRunRepository } from '../../src/platform/repositor
 import { JsonConversationAgentSessionRepository } from '../../src/platform/repositories/json-conversation-agent-session-repository';
 import { NodeProjectStorage } from '../../src/platform/storage';
 import type { ConversationAgentResponseStartDto, StartResponseRequest } from '../../src/shared/chat-context-ipc';
+import { ThreadFileRepository } from '../../src/platform/repositories/thread-file-repository';
+import { ThreadModelHistorySource } from '../../src/platform/repositories/thread-model-history-source';
+import { ModelHistoryReader, ThreadCommandService, ThreadProjectionCoordinator, ConversationTurnCoordinator } from '../../src/application';
 
 const roots: string[] = [], services: ConversationAgentSessionService[] = [];
 const start = Date.parse('2026-10-04T12:00:00.000Z'), projectId = toProjectId('continuation-project');
@@ -27,15 +30,24 @@ afterEach(async () => {
     await rm(root, { recursive: true, force: true });
   }));
 });
-async function setup(classifier?: ConversationIntentClassifierPort, supportsMutation?: boolean) {
+async function setup(classifier?: ConversationIntentClassifierPort, supportsMutation?: boolean, threadFirst = false) {
   const root = await mkdtemp(path.join(os.tmpdir(), 'unicomp-continuations-')); roots.push(root);
   let now = start, messageIndex = 0, tokenIndex = 0, current = true;
   const at = () => new Date(now).toISOString(), storage = new NodeProjectStorage(root);
   const conversationsRepository = new JsonConversationRepository(path.join(root, 'conversations.json'), at);
+  const threads = new ThreadFileRepository(root);
+  const source = new ThreadModelHistorySource(threads, projectId);
+  const coordinator = new ConversationTurnCoordinator(new ThreadCommandService(threads), new ThreadProjectionCoordinator(threads));
   const conversations = new ConversationApplicationService(conversationsRepository, {
     nextConversationId: () => toConversationId('continuation-conversation'), nextMessageId: () => toMessageId(`continuation-message-${++messageIndex}`)
-  }, at);
+  }, at, threadFirst ? { get: id => source.getConversation(id), publishAssistant: async input => {
+    const message = input.message;
+    await coordinator.projectAssistantMessage({ threadId: input.conversationId, sourceMessageId: input.sourceMessageId,
+      assistantMessageId: message.id, messageRevision: message.revision, status: 'completed', content: message.content,
+      createdAt: message.createdAt, updatedAt: message.updatedAt, legacyMessageSnapshot: message as unknown as Readonly<Record<string, unknown>> });
+  } } : undefined);
   const conversation = await conversations.create({ title: 'Continuation fixture', projectId });
+  if (threadFirst) await coordinator.createThread({ threadId: conversation.id, projectId, title: conversation.title, createdAt: conversation.createdAt });
   const sessions = new JsonConversationAgentSessionRepository(storage, projectId, at), agentRuns = new JsonConversationAgentRunRepository(storage, projectId, at);
   let runtime: ConversationAgentContinuationRuntime;
   const service = new ConversationAgentSessionService({ repository: sessions, ownerId: 'continuation-host', now: () => now, hash,
@@ -46,7 +58,8 @@ async function setup(classifier?: ConversationIntentClassifierPort, supportsMuta
   }));
   const cancelExecution = vi.fn(async (_responseExecutionId: string) => undefined);
   runtime = new ConversationAgentContinuationRuntime({ storage, projectId, sessions, sessionService: service, agentRuns, conversations,
-    isCurrent: () => current, now: at, classifier, supportsGeneration: true, supportsMutation, replayExecution: replay, cancelExecution });
+    isCurrent: () => current, now: at, classifier, supportsGeneration: true, supportsMutation, replayExecution: replay, cancelExecution,
+    ...(threadFirst ? { modelHistory: new ModelHistoryReader(source) } : {}) });
   const request = (content: string, continuation?: StartResponseRequest['continuation'], commandId = `command-${messageIndex + 1}`): StartResponseRequest => ({
     clientCommandId: commandId, conversation: { conversationId: conversation.id, expectedRevision: 0, editedMessageId: null },
     title: 'Continuation fixture', content, continuation, productFeature: 'text_chat', candidateId: 'synthetic-candidate',
@@ -55,7 +68,12 @@ async function setup(classifier?: ConversationIntentClassifierPort, supportsMuta
   const prepare = async (input: StartResponseRequest, signal = new AbortController().signal) => {
     let latest = await conversations.get(conversation.id);
     await runtime.controller.validate!({ conversation: latest, input, signal });
-    latest = await conversations.addUserMessage({ conversationId: latest.id, expectedRevision: latest.revision, content: input.content,
+    if (threadFirst) {
+      await coordinator.acceptUserTurn({ threadId: latest.id, projectId, title: latest.title, messageId: conversations.nextMessageId(),
+        content: input.content, createdAt: toIsoTimestamp(at()), clientCommandId: input.clientCommandId,
+        ...(input.displayContent === undefined ? {} : { legacyMessageSnapshot: { displayContent: input.displayContent } }) });
+      latest = await conversations.get(latest.id);
+    } else latest = await conversations.addUserMessage({ conversationId: latest.id, expectedRevision: latest.revision, content: input.content,
       ...(input.displayContent === undefined ? {} : { displayContent: input.displayContent }) });
     const userMessageId = latest.messages.at(-1)!.id;
     const result = await runtime.controller.prepare({ conversation: latest, userMessageId, input, signal });
@@ -72,7 +90,7 @@ async function setup(classifier?: ConversationIntentClassifierPort, supportsMuta
     await runtime.controller.bindExecution({ sessionId: prepared.agentSession.sessionId, runId, responseExecutionId: responseId });
     return run;
   };
-  return { root, storage, sessions, agentRuns, conversations, conversationsRepository, runtime, service, replay, cancelExecution, conversation, request, prepare, bind, getSession,
+  return { root, storage, threads, coordinator, sessions, agentRuns, conversations, conversationsRepository, runtime, service, replay, cancelExecution, conversation, request, prepare, bind, getSession,
     setTime(value: number) { now = value; }, setCurrent(value: boolean) { current = value; } };
 }
 function continuation(session: { sessionId: string; revision: number; resumeToken?: string }, action: 'reply' | 'authorize' | 'continue' = 'reply'): NonNullable<StartResponseRequest['continuation']> {
@@ -80,6 +98,48 @@ function continuation(session: { sessionId: string; revision: number; resumeToke
 }
 
 describe('Host conversation continuations', () => {
+  it('pins Thread-only clarification and continuation messages when Legacy saves fail', async () => {
+    const f = await setup(undefined, true, true);
+    const save = vi.spyOn(f.conversationsRepository, 'save').mockRejectedValue(new Error('Legacy denied'));
+    const waiting = await f.prepare(f.request('制作一个PPT'));
+    expect(waiting).toMatchObject({ waiting: true, agentSession: { state: 'waiting_user' } });
+    const conversation = await f.conversations.get(f.conversation.id);
+    expect(conversation.messages.at(-1)).toMatchObject({ state: 'completed', workflowReply: { revision: 0 } });
+    const resumed = await f.prepare(f.request('关于龙的传说，给小学生看，做10页', continuation(waiting.agentSession), 'thread-answer'));
+    expect(resumed.waiting).toBe(false);
+    await f.bind(resumed);
+    expect((await f.getSession(waiting.agentSession.sessionId)).inputReferences).toHaveLength(2);
+    expect((await f.conversationsRepository.get(f.conversation.id))?.messages).toHaveLength(0);
+    expect(save).not.toHaveBeenCalled();
+  });
+
+  it('rejects a changed Thread input pin even when Legacy and the earlier command snapshot are unchanged', async () => {
+    const f = await setup(undefined, true, true);
+    const waiting = await f.prepare(f.request('制作一个PPT'));
+    const task = await f.getSession(waiting.agentSession.sessionId);
+    const item = (await f.threads.readItems(f.conversation.id as never)).find(item => item.type === 'user_message')!;
+    const message = (await f.conversations.get(f.conversation.id)).messages.find(message => message.id === item.messageSource!.messageId)!;
+    await f.threads.append({ threadId: item.threadId, idempotencyKey: 'edit-source-pin', occurredAt: item.updatedAt,
+      items: [{ ...item, content: '变更后的需求', messageSource: { ...item.messageSource!, messageRevision: 1 },
+        legacyMessageSnapshot: { ...message, revision: 1, content: '变更后的需求' } }] });
+    await expect(f.runtime.validateReferences(task)).rejects.toMatchObject({ code: 'reference_changed' });
+    expect((await f.conversationsRepository.get(f.conversation.id))?.messages).toHaveLength(0);
+  });
+
+  it('uses a Thread-only PPT receipt for the initial bounded mutation budget', async () => {
+    const f = await setup(undefined, true, true);
+    await f.coordinator.acceptUserTurn({ threadId: f.conversation.id, projectId, title: f.conversation.title,
+      messageId: toMessageId('thread-original'), content: '生成PPT', createdAt: f.conversation.createdAt, clientCommandId: 'thread-original' });
+    const current = await f.conversations.get(f.conversation.id);
+    const reply = addCompletedAssistantMessage(current, { id: toMessageId('thread-delivery'), content: '已交付', createdAt: current.updatedAt });
+    const delivery = attachDocumentResultToMessage(reply, toMessageId('thread-delivery'),
+      { workId: toWorkId('thread-work'), kind: 'ppt', fileName: '已保存.pptx', sizeBytes: 100 }, current.updatedAt).messages.at(-1)!;
+    await f.coordinator.projectAssistantMessage({ threadId: current.id, sourceMessageId: 'thread-original', assistantMessageId: delivery.id,
+      messageRevision: delivery.revision, status: 'completed', content: delivery.content, createdAt: delivery.createdAt, updatedAt: delivery.updatedAt,
+      legacyMessageSnapshot: delivery as unknown as Readonly<Record<string, unknown>> });
+    const prepared = await f.prepare(f.request('先讨论一下文案'));
+    expect((await f.getSession(prepared.agentSession.sessionId)).budget).toMatchObject({ maxToolCalls: 12, budgetUnits: 32, deadlineAt: start + 540_000 });
+  });
   it('keeps existing-PPT discussion within the available generation profile when mutation rendering is unavailable', async () => {
     const f = await setup(undefined, false), base = await f.conversations.get(f.conversation.id);
     const withReply = addCompletedAssistantMessage(base, { id: toMessageId('offline-renderer-artifact'), content: '已交付', createdAt: toIsoTimestamp(new Date(start).toISOString()) });

@@ -25,6 +25,7 @@ let abortCount = 0;
 let transportMode = 'normal';
 let toolCallCount = 0;
 let toolCallId;
+const hostDiagnostics = [];
 
 function sseResponse(model, text) {
   const chunk = { id: 'agent-mock-electron', object: 'chat.completion.chunk', created: 1, model,
@@ -98,9 +99,17 @@ async function run() {
       platform.newApiProviderPackageDescriptor
     ]),
     runtimeAuthorization: providers.authorization,
+    onError: error => {
+      const messages = [];
+      for (let depth = 0, current = error; depth < 5 && current; depth += 1, current = current.cause) {
+        messages.push(current instanceof Error ? current.stack : String(current));
+      }
+      hostDiagnostics.push(messages.join('\nCaused by: '));
+    },
     textSubmission: { credentialVault: providers.vault, deepSeekRuntime, newApiRuntime }
   });
   documentLifecycle = registerDocumentGenerationIpcHandlers({
+    getConversationRepository: lifecycle.getConversationRepository,
     sessionRegistry: sessions,
     providerRegistry: providers.registry,
     providerPackages: new platform.ProviderPackageRegistry([
@@ -123,6 +132,12 @@ async function run() {
   const candidateResult = await js('window.unicomp.chatContexts.listTextCandidates("text_chat")');
   if (!candidateResult?.ok || !candidateResult.value?.length) throw new Error(`No synthetic candidate: ${JSON.stringify(candidateResult)}`);
   const candidateId = candidateResult.value[0].candidateId;
+  if (process.argv.includes('--ui-navigation')) {
+    const result = await require('./lib/verify-document-navigation.cjs')({ browserWindow, lifecycle,
+      session: sessions.get(), candidateId, setTransportMode: mode => { transportMode = mode; } });
+    process.stdout.write(`${JSON.stringify(result)}\n`);
+    return;
+  }
   const request = (id, content) => ({ clientCommandId: id, conversation: null, title: 'Agent mock Electron', content,
     productFeature: 'text_chat', candidateId, contextSelections: [], parameterValues: {} });
   const normal = await js(`window.unicomp.chatContexts.startAgentResponse(${JSON.stringify(request('mock-normal', '普通聊天'))})`);
@@ -134,6 +149,13 @@ async function run() {
     await delay(100);
   }
   if (!normalRead?.ok || normalRead.value.state !== 'completed') throw new Error(`Normal execution not completed: ${JSON.stringify(normalRead)}`);
+  let threadRuntimeControls;
+  if (process.env.UNICOMP_THREAD_FIRST !== '0') {
+    const detail = await js(`window.unicomp.chatContexts.getThread(${JSON.stringify(normal.value.execution.conversationId)})`);
+    threadRuntimeControls = Boolean(detail?.ok && detail.value.parentRuns?.some(run =>
+      run.responseExecutionId === normal.value.execution.responseExecutionId) && Array.isArray(detail.value.agentSessions));
+    if (!threadRuntimeControls) throw new Error('Thread detail lost Runtime execution/session controls');
+  }
 
   transportMode = 'cancel';
   await js(`window.__agentMockPending = window.unicomp.chatContexts.startAgentResponse(${JSON.stringify(request('mock-cancel', '取消测试'))})`);
@@ -154,7 +176,11 @@ async function run() {
   await js('window.__agentMockPending');
 
   transportMode = 'tool-call';
-  const toolStart = await js(`window.unicomp.chatContexts.startAgentResponse(${JSON.stringify(request('mock-tool-call', '生成一个测试 PPT'))})`);
+  const compatibilityToolEntry = process.env.UNICOMP_MOCK_COMPATIBILITY === '1';
+  const toolRequest = compatibilityToolEntry
+    ? { ...request('mock-tool-call-compatibility', '生成3页PPT，主题是产品研发进展，受众是管理层，简洁商务风格，现在直接生成。'), confirmed: true }
+    : request('mock-tool-call', '生成一个测试 PPT');
+  const toolStart = await js(`window.unicomp.chatContexts.${compatibilityToolEntry ? 'startResponse' : 'startAgentResponse'}(${JSON.stringify(toolRequest)})`);
   if (!toolStart?.ok || !toolStart.value?.execution?.responseExecutionId) throw new Error(`Tool-call Agent start failed: ${JSON.stringify(toolStart)}`);
   let toolExecution;
   for (let attempt = 0; attempt < 120; attempt += 1) {
@@ -168,15 +194,42 @@ async function run() {
   if (!toolExecution) throw new Error('Tool-call execution did not reach a terminal state');
   const toolConversation = await js(`window.unicomp.chatContexts.getConversation(${JSON.stringify(toolExecution.conversationId)})`);
   const artifactMessage = toolConversation?.ok && toolConversation.value.messages?.find(message => message.documentResult);
+  const generatedWorks = await new platform.JsonWorkRepository(new platform.NodeProjectStorage(rootDirectory), projectId).list(projectId);
+  if (toolExecution.state !== 'completed' || !artifactMessage?.documentResult || generatedWorks.length !== 1 ||
+      generatedWorks[0].id !== artifactMessage.documentResult.workId) {
+    throw new Error('Isolated tool case did not settle exactly one registered Work');
+  }
   let threadArtifact;
-  if (process.env.UNICOMP_THREAD_FIRST === '1') {
+  let threadDocumentReceipt;
+  let threadToolParentState;
+  let threadToolFacts;
+  if (process.env.UNICOMP_THREAD_FIRST !== '0') {
     for (let attempt = 0; attempt < 40; attempt += 1) {
       const page = await js(`window.unicomp.chatContexts.getThreadItemsPage(${JSON.stringify({ threadId: toolExecution.conversationId, limit: 200, direction: 'older', cursor: null })})`);
       threadArtifact = page?.ok
         ? page.value.items.find(item => item.itemType === 'document_artifact_projection')
         : undefined;
-      if (threadArtifact?.artifact?.workId) break;
+      threadDocumentReceipt = page?.ok
+        ? page.value.items.find(item => item.itemType === 'assistant_message' && item.message?.documentResult)?.message.documentResult
+        : undefined;
+      threadToolFacts = page?.ok ? page.value.items.filter(item => ['tool_call_projection', 'tool_result_projection'].includes(item.itemType)) : [];
+      const detail = await js(`window.unicomp.chatContexts.getThread(${JSON.stringify(toolExecution.conversationId)})`);
+      threadToolParentState = detail?.value?.parentRuns?.find(run => run.responseExecutionId === toolExecution.responseExecutionId)?.state;
+      if (threadArtifact?.artifact?.workId && threadDocumentReceipt?.workId === threadArtifact.artifact.workId &&
+        (compatibilityToolEntry || threadToolParentState === 'completed') &&
+        threadToolFacts.some(item => item.itemType === 'tool_call_projection') && threadToolFacts.some(item => item.itemType === 'tool_result_projection')) break;
       await delay(100);
+    }
+    if (!threadDocumentReceipt?.workId || threadDocumentReceipt.workId !== threadArtifact?.artifact?.workId ||
+        (!compatibilityToolEntry && threadToolParentState !== 'completed') ||
+        !threadToolFacts.some(item => item.itemType === 'tool_call_projection') || !threadToolFacts.some(item => item.itemType === 'tool_result_projection')) {
+      const detail = await js(`window.unicomp.chatContexts.getThread(${JSON.stringify(toolExecution.conversationId)})`);
+      const tasks = await new platform.JsonDocumentTaskRuntimeRepository(new platform.NodeProjectStorage(rootDirectory), projectId).list();
+      throw new Error('Thread Assistant lost the verified document receipt; ' + JSON.stringify({
+        state: toolExecution.state, parentRuns: detail?.value?.parentRuns, threadArtifact: Boolean(threadArtifact),
+        threadDocumentReceipt: Boolean(threadDocumentReceipt), threadToolFacts,
+        tasks: tasks.filter(task => task.executionId === toolExecution.responseExecutionId).map(task => ({ status: task.status,
+          tools: task.toolCalls.map(call => ({ toolId: call.toolId, status: call.status })), observations: task.observations.length })), hostDiagnostics }));
     }
   }
   const toolCalling = {
@@ -185,7 +238,13 @@ async function run() {
     toolCallId,
     observationReturned: toolExecution.content?.includes('工具观察结果') ?? false,
     artifactRegistered: Boolean(artifactMessage?.documentResult),
+    generatedWorkCount: generatedWorks.length,
     documentResult: artifactMessage?.documentResult ?? null,
+    threadDocumentReceipt: threadDocumentReceipt ?? null,
+    threadToolParentState,
+    entry: compatibilityToolEntry ? 'responses.start' : 'responses.startAgent',
+    threadToolFacts: threadToolFacts?.map(item => ({ itemType: item.itemType, status: item.status,
+      eventSystem: item.projectionSource?.eventSystem, responseExecutionId: item.projectionSource?.responseExecutionId })) ?? null,
     threadArtifact: threadArtifact ? {
       workId: threadArtifact.artifact?.workId ?? null,
       fileName: threadArtifact.artifact?.fileName ?? null,
@@ -212,6 +271,13 @@ async function run() {
     if (!prepared?.ok) throw new Error(`${kind} prepare failed: ${JSON.stringify(prepared)}`);
     const generated = await js(`window.unicomp.documentGeneration.generateFromMessage(${JSON.stringify({ conversationId: execution.conversationId, expectedRevision: conversation.value.revision, messageId: assistant.messageId, kind })})`);
     if (!generated?.ok) throw new Error(`${kind} generation failed: ${JSON.stringify(generated)}`);
+    if (process.env.UNICOMP_THREAD_FIRST !== '0') {
+      const page = await js(`window.unicomp.chatContexts.getThreadItemsPage(${JSON.stringify({ threadId: execution.conversationId, limit: 200, direction: 'older', cursor: null })})`);
+      const receipt = page?.ok && page.value.items.find(item => item.itemType === 'assistant_message' && item.message?.documentResult?.workId === generated.value.workId);
+      const artifact = page?.ok && page.value.items.find(item => item.itemType === 'document_artifact_projection' && item.artifact?.workId === generated.value.workId);
+      if (!receipt || !artifact || receipt.message.documentResult.kind !== kind || artifact.artifact.kind !== kind) throw new Error(`${kind} generated Work lost its Thread receipt or Artifact`);
+      return { ...generated.value, threadDocumentReceipt: true, threadArtifact: true };
+    }
     return generated.value;
   }
   additionalRootDirectory = await mkdtemp(path.join(os.tmpdir(), 'unicomp-agent-mock-electron-docs-'));
@@ -222,7 +288,7 @@ async function run() {
   const report = { schemaVersion: 1, status: 'passed',
     boundary: 'real Electron BrowserWindow + production preload + production IPC + controlled in-process Provider transport',
     checks: ['normal Agent response', 'persistent execution identity', 'cancel start boundary', 'Provider tool call through the real Electron IPC path', 'Word physical file generation', 'Excel physical file generation'],
-    requestCount, abortCount, toolCalling,
+    requestCount, abortCount, toolCalling, threadRuntimeControls,
     office: { word: wordResult, excel: excelResult },
     externalProvider: 'blocked: no authorized external credentials used' };
   const output = path.resolve('outputs/conversation-phase6/agent-provider-mock-e2e.json');
@@ -250,6 +316,5 @@ async function cleanup() {
 run().catch(error => { process.stderr.write(`${error.stack ?? error}\n`); process.exitCode = 1; })
   .finally(async () => {
     await cleanup();
-    app.quit();
-    setTimeout(() => process.exit(process.exitCode ?? 0), 2_000).unref();
+    app.exit(process.exitCode ?? 0);
   });

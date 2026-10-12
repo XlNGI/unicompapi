@@ -19,7 +19,7 @@ import type { ConversationDocumentToolSessionService } from '../documents/conver
 export class ProjectConversationResponseSubjectResolver
   implements FeatureSubjectResolverPort {
   constructor(
-    private readonly conversations: ProjectConversationRepository,
+    private readonly conversations: Pick<ProjectConversationRepository, 'projectId' | 'get'>,
     private readonly drafts: ConversationResponseDraftRepository,
     private readonly contexts: ProjectContextRepository,
     private readonly documentPages?: Pick<ConversationDocumentPageContextService, 'resolve'>,

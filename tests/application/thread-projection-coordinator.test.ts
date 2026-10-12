@@ -28,6 +28,31 @@ function repository() {
 }
 
 describe('ThreadProjectionCoordinator', () => {
+  it('keeps reused Provider step references isolated by response execution', async () => {
+    const repo = repository();
+    const coordinator = new ThreadProjectionCoordinator(repo);
+    const common = { threadId: 'thread-projection', sourceMessageId: 'message-projection', toolCallId: 'provider-tool-0-0',
+      toolId: 'generate_pptx', status: 'completed' as const, content: 'generate_pptx',
+      createdAt: toIsoTimestamp('2026-10-10T00:00:01.000Z'), updatedAt: toIsoTimestamp('2026-10-10T00:00:02.000Z') };
+    const first = await coordinator.projectTool({ ...common, responseExecutionId: 'response-one', agentRunId: 'run-one', kind: 'tool_call_projection' });
+    const second = await coordinator.projectTool({ ...common, responseExecutionId: 'response-two', agentRunId: 'run-two', kind: 'tool_call_projection' });
+    expect(second.alreadyCommitted).toBe(false);
+    expect(second.item.itemId).not.toEqual(first.item.itemId);
+    expect(second.item.projectionSource).toMatchObject({ responseExecutionId: 'response-two', agentRunId: 'run-two' });
+    const replay = await coordinator.projectTool({ ...common, responseExecutionId: 'response-two', agentRunId: 'run-two', kind: 'tool_call_projection' });
+    expect(replay.alreadyCommitted).toBe(true);
+  });
+  it('retains snapshot metadata updates on an existing Assistant Item revision', async () => {
+    const repo = repository();
+    const coordinator = new ThreadProjectionCoordinator(repo);
+    const input = { threadId: 'thread-projection', sourceMessageId: 'message-projection', assistantMessageId: 'assistant-snapshot',
+      messageRevision: 0, status: 'streaming' as const, content: '正文', createdAt: toIsoTimestamp('2026-10-10T00:00:01.000Z'), updatedAt: toIsoTimestamp('2026-10-10T00:00:02.000Z') };
+    await coordinator.projectAssistantMessage(input);
+    const updated = await coordinator.projectAssistantMessage({ ...input, legacyMessageSnapshot: { reasoningContent: '已保存推理' } });
+    expect(updated.alreadyCommitted).toBe(false);
+    expect(updated.item.legacyMessageSnapshot).toEqual({ reasoningContent: '已保存推理' });
+    expect((await coordinator.projectAssistantMessage({ ...input, legacyMessageSnapshot: updated.item.legacyMessageSnapshot })).alreadyCommitted).toBe(true);
+  });
   it('links one Agent Run to a Turn and treats replay as idempotent', async () => {
     const repo = repository();
     const coordinator = new ThreadProjectionCoordinator(repo);

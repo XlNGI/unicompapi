@@ -11,6 +11,127 @@
 隔离 Electron 验证通过：五种图片/视频历史模式、导航保留、60 次生成状态变化期间的图片历史滚轮输入；图片/视频提交与旧历史 Worker 整理性能对照；Thread-first/Legacy 双模式会话重启恢复；活跃 Mock Provider 会话期间完成 Worker 准备、等待取消落盘、打开目标项目并按队列关闭；服务商单层滚动六场景。图片本地提交 9.17–9.40 秒降至 0.61–0.63 秒，视频 7.54–7.64 秒降至 0.48–0.52 秒。详情与复现入口见[提交历史存储性能验收](docs/current/provider-result-history-performance-validation.md)。
 
 边界：本轮未执行全量测试、真实收费生成、用户原项目迁移或 macOS 实机。视频提交进度保留由定向测试覆盖，未以真实服务商完成回调作端到端证明。既有 Agent Mock 脚本虽通过，但 PPT artifactRegistered=false，不计为 PPT 生成验收；Word/Excel 文件登记通过。改动保留在恢复分支工作区，未创建新提交、推送或合入 develop，等待负责人决定。
+### 维护修复：文档生成切页恢复、PPT 执行确认与正文遮挡（2026-10-12）
+
+针对本轮用户截图继续维护，未新增付费请求。只读记录确认原 PPT Response 已收到大纲 JSON，但 Document Runtime 没有工具调用和正式 Work；后续取消记录不能单独证明由切页触发。修复 ready PPT Workflow 仍发送“仅 JSON、禁止工具”的旧提示，以及工具必须执行只判断原 User 措辞的问题。Agent 工具 prepare 消费应用校验的 ready 计划，确认 create/PPT 后固定生成和读回，禁止用修改旧 PPT 代替新建；结算从绑定 execution 的持久 Workflow 保留要求。同 Root 连续澄清允许保留原需求来源，仍校验项目、会话、来源顺序；普通讨论及旧 Outline 路径保持。
+
+切页返回现在从已保存的来源说明恢复文档草稿正文预览；只有大纲时显示“尚未生成可交付文件”，不把回复完成记成文件交付。本地 validating_outline/generating_file 恢复原会话/消息的停止控制和有限轮询，Word/Excel/PPT 三类回归均通过；不重发生成，不因页面挂载写 interrupted，生成期间回车不会重复发送。虚拟消息偏移补齐 24px 间距，输入框遮挡留白按实际高度更新，跟随输出时同步滚动。
+
+隔离真实 Electron + React + preload + IPC + Mock Provider 连续三次卸载/返回，Response streaming / Parent executing_tool 均保持，停止按钮恢复；释放本地执行后仅生成一次、登记一个 Work，完成后再次切页正式卡片仍可恢复。15 节长正文与加高输入框验收，末条消息距输入框约 24px、无原始大纲 JSON、状态如实保留。Thread/Legacy 各 3 会话 × 120 消息历史导航也通过。
+
+最终相关 6 文件 **244/244**，最新 ChatPage **61/61**、Node/UI **401/401**，typecheck、lint、生产 build 通过。中间全量曾发现来源校验过严，已修复并复核；随后全量 **3482/3485**，3 个新增夹具按钮名期待错误，修正为“停止文档生成”后整文件及相关回归通过。原失败日志保留，不把中间全量改写为一次全部通过。本轮外部请求 **0**、未知结果重试 **0**，原用户任务不自动补生成、不伪造交付；未主动重启用户应用。后台修复需要新主进程加载，macOS 实机与真实 Provider 切页矩阵未运行。工程说明见 [切页维护记录](docs/current/document-navigation-maintenance-20261012.md)，验收见 [机器证据](docs/evidence/document-navigation-maintenance-20261012.json)。
+
+### 持续维护收敛：共享 Thread 仓储、恢复/Office/CRUD 与真实交付核验（2026-10-12）
+
+从 `d589426` 继续，未以单批提交作为整体停点。新增 `ThreadConversationRepository` 实现原 Conversation 仓储合同，所有写入仍经过唯一 Turn Coordinator/Thread Commit。默认 Thread 模式的创建、消息、改名、归档/恢复/删除、取消后编辑、Context Registry、最近项目摘要、本地恢复以及独立 Office 读写均已接入；Legacy 保留为首次迁移、只读兼容、Outbox 投影和显式回滚。元数据 Outbox 与消息同一 Commit，metadata 投影中断时仍能读回已提交标题/状态/revision；已切换 fence 的重启先恢复 Thread，不重新拿滞后 Legacy 做权威准入。投影遇到失败保留顺序欠账，不重发 Provider/工具。
+
+Word/Excel/PPT 正式收据在 Work/File/大小/Hash 重验后写入 Thread 并附到 Artifact。修复同 User Item 被不同 Host 命令重复接管造成的 Turn 重复，以及 Turn 写入/读回中将结构化 Item identity 当成字符串造成多个 Assistant 合并。新增原生消息、Office 元数据/收据、CAS 冲突、越界、metadata 中断、重启、Context 和回滚摘要回归。
+
+能力侧：旧图片预检的 4 个失败复现确认其会跳过最新负向/未知证据并复活历史支持；现与统一候选共用按 revision 选最新的规则。新 Route Snapshot 可固定 Capability Evidence ID/revision/指纹，图片/视频 Task 与 Vidu 执行读取同一已接受快照，变更/越界/篡改在外发前拒绝。历史 Task/Route 保留 immutable 合同；参数继续来自同一 Feature Contract/Schema，费用无可靠证据继续 unknown，不根据模型名称推断能力。
+
+真实 Electron 再次复现切页后尾部消息不可见：数据完整，但列表异步出现后挂载期 ResizeObserver 未重新绑定。现按已解析会话和消息数量观察实际消息列表；新 hook 回归在原实现 `observe=0` 稳定失败，修复后通过。Thread 导航连续两次、Legacy 导航、Agent-native/兼容响应与 Legacy 回滚 Mock Provider/Office 均通过；Word/Excel 增加 Thread 正式收据与 Artifact 断言。最后静态全量 Vitest **337 文件、3475/3475**，Node/UI **401/401**，typecheck、lint、生产 build 和脚本 lint/语法通过，未放宽时限。旧可选 `verify-conversation-runtime.cjs` 因历史夹具未选择语义模型而报 `model_selection_required`，不列为通过；补齐共享仓储入口及失败 5 秒退出，未将生产流程回退到本地猜测路由。当前必需 Electron 门禁使用正式 Mock/导航套件。
+
+负责人本轮明确批准 `glm-5.2` 单个合成生成/读回用例：总请求最多 5、普通输出 1024 token、Art Direction 4096 token、自动重试 0、费用 unknown。首次本地夹具仍写 Legacy，被 Thread 控制器拦截，**0 外发**；修正为共享仓储后 dry-run 实际确认 2 条种子消息已提交到 Thread、0 解密调用/0 外发。实际外部请求 **4 次**，生成 1 个正式 Work、4 页 PPT、70,285 bytes、Hash `7aa967878c5771a800cf8eed07e96b626488b68def386d7a73110d0749a31033`；Response/Document 均 completed，生成/读取收据成功，最终回答页数和两个标记匹配物理文件。
+
+原严格验收脚本仍记录 `production_tool_roundtrip_not_verified / FAIL`：final-answer 分支提前返回漏记读取校验，终态检查又早于本地 close/结算。已补共用完整工具 transcript 校验及 `waitForMutations()`，Node 新回归覆盖去除工具后的最终请求、错配 call id 和篡改页面拒绝；未为补记录再次发费。对保留现场进行只读本地复核，确认 Work=1、读回 Observation 的作品/版本/页数匹配 Hash、Thread Call/Result=2/2、Artifact=1、Assistant 正式收据一致，结论为 **verified_delivery**。原报告不覆盖，原逐页 wire 文本比对 **not_recorded**，不追记为通过；Art Direction 曾进入已允许的设计回退，不记为 D3 视觉方案全量验收。真实用户配置 Hash 保持、用户项目未改写、unknown 重试 0。
+
+负责人最终明确选择“按当前交付结果收口，不再付费”。本地目标按上述已核实交付边界完成，本轮外部请求固定为 4，不再追加。原严格 wire 记录缺口及其他 Provider 的外部矩阵继续如实保留，不追认为全量通过；不再以补证为由重发请求。共享 acceptance/base64 写放大另属性能维护，不以本批冒称已消除。验收证据见 [统一收敛证据](docs/evidence/thread-model-convergence-20261012.json)，真实预算与命令见 [验收方案](docs/current/thread-model-provider-acceptance-proposal-20261012.md)，实际调用方见 [源码审计](docs/current/office-agent-convergence-audit-20261012.md)。
+
+### 维护收敛：Thread 授权/引用及澄清、Workflow、联网确认回复（2026-10-12）
+
+从 `feature/office-agent-thread-model-convergence@53fcba0` 干净工作区继续统一目标。隔离 composed Host 先复现所有 Legacy message save 拒绝时请求报 `message_not_completed`；修复后在相同故障下完成一次 PPT 生成、物理文件读回、唯一 Work 登记和父任务 completed，Thread 有两组 Call/Result、Artifact 与正式 Assistant 收据，Legacy 仍为空。收费请求 0、未知结果重试 0，真实用户数据未改写。
+
+Thread 写模式的 Response Draft/Controller、Subject Resolver、Artifact Factory、Document Tool Session 重验、Continuation 引用/预算/重放、Workflow 与联网确认统一消费完整已提交 Thread DTO；恢复绑定 CAS 也从 Thread 核对输入 pin，保留主 Run/Response WAL、租约和预算门禁。新增 `readTranscript` 在跨实例共享 Thread 锁内读取 revision 和已提交消息，补齐原生 User Item 附件/displayContent 简写和显式附件选择语义。项目、会话、Draft/User 版本和正式 Work/File/Hash 继续重验。
+
+本地澄清、Workflow/来源/搜索说明和联网确认 User 回复现在通过既有 Coordinator/Commit/Outbox 持久化，保留 workflowReply 幂等标记；Workflow 追问先写 Thread。Legacy 故障只留可恢复投影欠账，不回退正文或重发工具。联网授权仍要求当前问题和明确确认；过期会话快照拒绝，测试只生成/消费本地授权合同，没有联网。
+
+新增 13 项回归；串行全量 Vitest 335 文件、3450/3450 通过，随后最终联网确认补修的 55 项定向（含另 2 个新增项）通过；Node/UI 400/400、typecheck、lint、生产 build 通过。初次默认并发全量 10 项超时在原时限下串行复核 45/45，最终串行全量无超时；中间新附件夹具暴露的简写解析/选择语义缺口已修复并复核。真实 Electron Thread/Legacy 各 3 会话 × 120 消息导航、Agent-native 与兼容 `responses.start` Mock Provider/Office 链路通过，工具读回、唯一 Work、Thread 收据与父任务终态均保留。构建只保留既有 CJS API、大 chunk 与 PDF.js 字体提示。
+
+未完成及下一步：继续迁移启动/中断恢复的直接 Legacy 写入、独立 DocumentGeneration Office 路径、通用会话 CRUD 和部分 Context 兼容读取，再核对剩余 Capability/Profile/Route 历史协议接线。共享 acceptance/base64 写放大和真实外部 Provider 矩阵仍独立记录；不能将本批主路径通过标成整个目标全部完成。详情见 [本轮源码审计](docs/current/office-agent-convergence-audit-20261012.md)，脱敏机器证据见 [Thread 授权收敛验收](docs/evidence/thread-authorization-convergence-20261012.json)。
+
+### 模型接线修复：能力证据与选型令牌统一重验（2026-10-12）
+
+从 `80dfb3c` 继续。3 个失败复现确认：Profile/Route 未变化时，新增同功能 supported/unsupported/unknown 能力证据不影响候选或已准备令牌。Registry Candidate Source 现消费模型中与 Feature Contract 的 productFeature/internalPurpose 对应的最新能力状态；新选型对明确 unsupported/unknown/restricted/verification_failed 拒绝。证据 ID/版本/参数内容的内部指纹纳入既有 token bindingFingerprint，支持证据更新后也要求重新准备；绑定 profile evidence 与会话图片能力时同样纳入指纹，公开 DTO 不外露证据与路由字段。
+
+参数继续来自同一 Feature Contract/Parameter Schema，价格无可信证据继续 unknown；查询不补写 Profile，也不根据模型名猜能力。历史 Legacy Task 的 immutable capabilityEvidenceId 合同保持，旧任务支持证据的路由回归仍通过；本批修复新候选/准备/提交链路，不把历史协议迁移记为全部完成。新增 5 个证据测试覆盖新增状态、旧支持证据被 supersede 和无关能力更新不使当前令牌失效；模型管理、候选、图片/视频及包安装共 64 项定向通过，typecheck、lint 和生产 build 通过，完整本地门禁继续执行。
+
+### 维护收敛：兼容 Tool/Artifact 投影与跨执行步骤身份（2026-10-12）
+
+从 `3173882` 继续。新增失败复现：同一 Thread 两次 Response 使用相同 `provider-tool-0-0` 时第二次 Tool Item 被旧幂等匹配吞掉。工具身份现在包含来源、Response/Agent 身份、toolId 和 stepRef；相同执行重放保持幂等，旧同执行投影继续可更新，不跨执行复用 Item。
+
+兼容 `responses.start` 未建立 Agent Runtime 时，从现有 Document Runtime 的已保存 Tool Call/Observation 构建 Thread Call/Result；严格核对 project/conversation/source/execution，公开内容只含工具/状态/安全诊断，不包含参数或 observation payload。Session close 完成后由既有结算回调补投影，避免初次 acceptance 返回早于工具完成造成永久 streaming；已完成并经读回和发布收据证明的 Work 再通过原本文件/Hash 门禁附到 Thread Artifact/Assistant，不新增执行系统。
+
+Electron Mock 增加显式兼容入口用例：生成/读回 Tool Call/Result 各 2 条 completed、Artifact 和 Assistant 正式收据一致；Agent-native 用例保留父任务 completed 验收。工具/读回/Thread/恢复定向 130 项、typecheck、lint 和 Electron 编译通过，合成 Provider 运行只在临时项目/profile，不外发，不重试未知结果。剩余授权/引用、恢复兼容写入及模型证据版本问题沿审计继续。
+
+### 维护修复：子工具取消后禁止继续本地编译/发布（2026-10-12）
+
+从 `0042a2f` 继续。4 项定向复现先失败：Stop/子工具截止发生在 awaited progress 持久化期间，父预算仍可用时，Runner 曾继续 document-file-write、structure check、atomic publish 或 Art Direction fallback 后的编译。现每个 observed action 在进度之前和等待之后都检查输入 signal，并在 sync 临时文件后、rename 之前再检查。已开始的原子写/登记仍等待真实结果，不把迟到成功视为可重发。
+
+新用例明确保持父预算 signal 未取消且剩余 90 秒，仅中断子工具 signal；4/4 阻断后续生成/发布、Work=0、临时文件清理且本地 Execution 为 cancelled。Document Runner、Tool Bridge、Art Direction 和 Trace 回归 149/149；typecheck、lint、生产构建和两种 Electron Mock 链路已通过。今天真实未知执行的结果仍保留 needs_reconciliation，未重试，也不以此离线修复宣称真实 Provider 已验收。
+
+### 维护收敛：Thread 回复正文与正式文档收据优先提交（2026-10-12）
+
+从 `061e878` 继续。两项 composed Host 定向复现确认：Response 已保存增量时 Thread 曾读取旧 Legacy 正文；Legacy streaming 写入失败又阻断普通回复。Thread 写模式现从已提交 Response 构建当前正文/推理/终态，从 Thread snapshot 保留 Host 元数据；pending、start、delta、complete、fail、cancel 不再直接写 Legacy，统一走 Thread Commit/Outbox。正式 PPT 收据在本地 Work/File/Hash 重验后先附到 Thread Assistant；终态补投影也读取 Thread 正文。Legacy 回滚模式保留原路径，Legacy 故障只形成可重放投影欠账，不重发 Provider。
+
+回归新增 Thread 故障/正常流、同一个 Assistant Item、失败/取消/中断与 reasoning/Host 元数据、pending 两种模式，以及本地异常 safe code 正规化。`EPERM` 等大写代码转为可持久的受控代码，非法字符串回退，避免原故障再被 invocation safe code 校验遮盖。当前本轮 270 项定向、Node/UI 400/400、typecheck、lint、build 与 Thread/Legacy Electron 导航及 Mock Provider/Office 均通过；正式收据可从 Thread 页读取且 PPT 父任务为 `completed` 的追加断言通过。验收脚本同步修复默认 Thread 模式判断和 Electron 失败退出码，新增断言曾发现本批收据补写未同步终态时间戳，修正后通过。收费请求 0、未知结果重试 0，真实数据未改写。
+
+仍未完成：恢复器、澄清回复、Workflow 与其他 Office 路径存在兼容写入；授权/引用/revision 仍有 Legacy 读取；兼容 `responses.start` 的 Tool facts 与具体 Capability/Profile/Route 版本接线待继续。不能将本批主回复路径收敛记成所有会话事实源已经统一。
+
+### 维护修复：Thread 提交可见性与 Windows 原子读写（2026-10-12）
+
+从 `feature/office-agent-thread-model-convergence@cf1d724` 干净工作区继续按统一目标修复。离线发送回归抓到 manifest 替换的 Windows `EPERM`，其后中文 JSONL 读取又失败；不是外部 Provider 无响应的证据。仓储实际还会读取 manifest 之后的未提交完整记录：隔离旧版/新版对照在第二次 Commit 前分别看到 2/1 条 Item，提交后均为 2 条，证据见 [Thread 已提交前缀](docs/evidence/thread-committed-prefix-20261012.json)。
+
+修复 `readCommittedRecords` 与恢复验证只解析 `committedBytes` 前缀，Turn/Item hydration 共用同一 manifest；上一记录 Hash 从 UTF-8 字节切片取得；Thread JSON 原子替换与读取使用共享文件锁，临时文件使用唯一名、独占打开、fsync 和 finally 清理。没有重放 Provider/工具、改写真实项目或扩大正式 Work 门禁。仓储 15/15、迁移 11/11 通过；Windows 共享冲突用例模拟持有的读取，要求替换等待读句柄释放且只执行一次 Commit。
+
+### 维护优化：会话历史持久化开销与整体审查（2026-10-12）
+
+本批继续处理共享 `project-metadata.json` 的重复深拷贝：事务内部改为借用已校验的输入值，仅保留 Draft 建立和提交快照两次隔离；公开解析、`get`、`set`、`entries`、备份、CAS、敏感字段校验和原子写入合同不变。新增 5 组基础隔离/失败/损坏数据回归，存储、锁、Session、Runtime、Completion、Provider 恢复定向共 116 项通过。
+
+隔离 32.4 MB 合成元数据（13 个大结果、1,028 个 canonical event）基准：事务核心中位 79.6→38.3 ms，深拷贝字节 129.2→64.6 MB；包含备份与 JSON 原子落盘的事务中位 295.3→243.0 ms（约 -18%）。证据见 [元数据持久化基准](docs/evidence/chat-metadata-persistence-20261012.json)，仅代表本地合成样本，不代表端到端 Provider 或页面响应时间。`scripts/verify-chat-metadata-persistence.cjs` 为本地隔离脚本，收费请求 0。
+
+当前仍待处理：共享 acceptance/base64 内容造成的全量 JSON 写放大、canonical/Trace 与 Legacy 投影写入频率、工具迟到取消及剩余 Legacy/Capability 接线；本批没有拆分存储格式、裁剪历史、改写真实用户目录或重试未知 Provider 结果。
+
+继续启动/恢复修复 `cc99df9`。Response Lifecycle append 复用可选 committed snapshot，减少一次完整文件读取/校验；Repository 校验按 execution id 分组，避免每个 execution 扫描全部 event。保留原子追加、连续序列、项目/身份/重试校验、备份和 unknown 门禁；并发快照过期继续拒绝冲突，不隐式重试。
+
+隔离合成 165 次执行、22,037 个 event、7,103 个 trace event：5 次样本中位数，纯 Response 校验 101.9→73.2 ms，一次 content append 457.6→247.5 ms（约 -46%），未包含 Thread/Legacy/canonical 回调或真实 Provider。基准脚本和机器证据已保存，不能据此宣称端到端生成耗时减少 46%。用户数据只读审查还发现共享 metadata 33.8 MB、acceptance value 约 31 MB、Provider operation 13 个 base64 值共约 29.34 MB；本轮不裁剪历史或改变存储格式。
+
+累计不同定向测试 159 项、UI 合同 27/27，typecheck、lint、生产 build 通过；Electron Thread/Legacy 导航与 Mock Provider/Office 保持通过。Legacy Electron 有一次末条显示等待超时，新增页面状态诊断后复跑通过，原因仍未证实，保留风险记录。整体问题、今天现场时间线、已修复与剩余优先级见 [会话稳定性审查](docs/current/chat-startup-stability-review-20261012.md)，性能证据见 [合成持久化基准](docs/evidence/chat-history-persistence-20261012.json)。下一批先量化共享元数据/canonical 写放大及迟到工具取消，再继续剩余 Legacy/Capability 接线；本轮收费请求 0、未知结果自动重试 0。
+
+### 维护修复：Agent 启动反馈与切页执行控制恢复（2026-10-12）
+
+在 `feature/office-agent-thread-model-convergence@78718ed` 的干净工作区继续审查。今天现场取证已从项目内 Response Execution/Production Trace/Document Runtime 补齐：14:42 建立执行、14:46 因 `newapi.tool_loop_unknown_result` 失败，已调用生成工具和 Art Direction；Agent/Document 为 `needs_reconciliation`，Observation 为空且未新增正式 Work。`renderer-trace.log` 停在 10 月 10 日并不表示今天没有执行记录；HTTP 200 不是整条流完成。
+
+5 个 ChatPage 定向复现先失败后修复：普通 Agent 启动缺少 command 进度订阅、React 更新前 Enter+点击重复提交、Thread 页面返回丢失澄清/核对/执行订阅与停止控制。共用现有 Workflow/Agent command 订阅，进度到达后快速绑定会话/已接受消息，失败/停止前保留草稿；同步 ref 拦截重复发送；现有 `getThread` 接入 Agent Runtime/Completion Journal，后台恢复执行控制，正文继续来自 Thread Items，保留项目切换与过期异步返回边界。
+
+已验证 ChatPage/Thread Adapter 与取消/Runtime/Continuation 回归，UI 合同 27/27，typecheck、lint、build 通过；Thread/Legacy Electron 各 3 会话 × 120 消息切页返回/分页通过，Electron Mock Provider/Office 链路及 Thread Runtime controls 通过。本批没有收费请求、未知结果重试、真实数据改写或用户应用重启。整体审查及后续持久化瓶颈见 [会话稳定性审查](docs/current/chat-startup-stability-review-20261012.md)；不能宣称所有卡顿已消除。
+
+### 维护修复：会话页切页返回后消息消失（2026-10-12）
+
+实际复现确认，Thread 读取模式下 ChatPage 卸载后 App 保留 selected conversation id；重新挂载时 Thread Item Page 读取可能先于会话 Summary 完成。Item 读取结果写入空 `conversations` 后，Summary 只提供无消息的 sidebar DTO，页面没有再次触发 Item 读取，导致返回会话页显示空内容。修复将 Item Page effect 绑定到已解析的 `selected?.conversationId`，在会话列表尚未恢复时等待，不再使用仅由父级保留的过早 selectedId 发起并丢弃读取。
+
+新增 ChatPage remount 定向回归，覆盖 Summary/Item 两种返回顺序；修复前 Summary 后返回用例稳定失败、Item 后返回通过，修复后均通过。`tests/electron/conversation-phase6-e2e.mjs` 增加真实 Electron Thread/Legacy 连续切页返回检查并使用动态 CDP/Vite 端口，避免占用用户运行中的开发服务；显式设置 main Thread-first/Legacy 模式。验证：ChatPage/VirtualMessageList 51/51、UI 合同 6/6、typecheck、lint、build 通过；Thread-first 与 Legacy adapter 真实 Electron 各 3 会话/120 条消息，作品库→返回、设置→返回、作品库→返回均恢复选中会话和末条消息，会话切换/虚拟列表/更早分页保持通过。长会话验收只断言末条内容可见，不把虚拟列表测量过程中的暂时 DOM 尾行当作消息终态。
+
+日志只读核对：真实用户 `application.log` 在 2026-10-10 以来共 42 条 Provider 成功记录，最近一条 2026-10-12 14:04:39（北京时间）、HTTP 200；没有本次页面异常记录。`renderer-trace.log` 最后更新时间 2026-10-10 17:42:06；源码 `UNICOMP_RENDERER_TRACE`/`VITE_UNICOMP_RENDERER_TRACE` 显式开关控制写入，未取证当时启动环境，不能断言具体停写原因。该日志缺口不影响定向竞态复现。本批没有读取凭证、修改真实项目/会话文件或发起 Provider 请求；下一步继续原会话事实源与模型适配维护审计中的剩余调用方。
+
+### Office Agent 会话/模型维护第二批：Thread 模型历史与候选查询收敛（2026-10-12）
+
+在 `feature/office-agent-thread-model-convergence` 继续第一批 `c7004af`。新增 `ThreadModelHistorySource` 接入现有 `ModelHistoryReader`，Response Artifact Factory 的模型上下文和 Agent Continuation 语义上下文读取完整 Thread 消息，独立于 UI 分页；附件/reasoning/收据来自持久 snapshot，状态/正文以 Item 为准。Thread 写模式缺少 Thread、损坏或越界时阻断，仅只读模式未迁移数据保留明确 Legacy fallback。修复同 revision Assistant 更新遗漏 snapshot 元数据与其幂等键问题。
+
+模型接线实查：文本、图片、视频和文档 Agent 已使用统一候选服务，复用 Parameter Schema、Route Snapshot 和提交重验。本批将原图片/视频候选查询中的包合同 profile 补写移至 Runtime 初始化屏障；`mutateIfChanged` 保持写锁、历史校验、原子发布和备份，无变化不推进 revision/改写文件。模型启用命令同步补齐 reference image profile。回归覆盖旧已启用模型初始化一次、所有 feature 重复查询、准备选型不被查询失效、多图有界门禁不变。
+
+验证：Node/UI 400/400；串行全量 Vitest 335 文件、3398/3400（仅两个旧多图夹具依赖隐式初始化失败），夹具迁移至显式初始化后定向 2/2 通过，3398 个其余测试已通过，无未决失败，未放宽时限或多图规则。Thread Reader/Factory/Coordinator、Provider Candidate/启用、Continuation/Runtime 定向回归通过。`pnpm typecheck`、`pnpm lint`、`pnpm build` 通过；夹具后续测试类型/定向 lint 再检通过；Thread-first 真实 Electron + Mock Transport 普通 Agent、取消、PPT Tool Calling/Artifact、Word/Excel 登记通过；真实生成脚本 dry-run 通过（0 外发、未解密凭证）。构建仅有既有 CJS API、大 chunk 与 PDF.js 字体提示。
+
+剩余未完成：Legacy pending/stream/恢复/收据仍有直接写入，Document Tool 授权/brief、Continuation 引用/预算和 Workflow 等仍读取 Legacy DTO；兼容 `responses.start` 的 Tool facts 未观察到 Thread Call/Result；具体模型 Capability Evidence/profile/version 与旧 capabilityEvidenceId 路由仍需逐项收敛，费用继续保留 unknown。真实 `kimi-k3` 生成/校验失败及现场清理限制沿用第一批证据，未自动重试。完整实际调用方与下一批边界见 [本轮源码审计](docs/current/office-agent-convergence-audit-20261012.md)。本轮不宣称唯一会话事实源或完整外部 Provider 矩阵已经全部完成。
+
+### Office Agent 会话/模型维护第一批：工具选择、Legacy 投影与真实验收分类（2026-10-12）
+
+重新核对执行基线：初始 `HEAD = develop = origin/develop = d863d3f4a7fdc850880d493ee146d7b7d1a27420`，工作区干净；当前独立分支 `feature/office-agent-thread-model-convergence`。属于既定功能收口后的维护治理，复用已存在的 Thread Coordinator/Outbox/分页/虚拟列表、Agent Runtime、Document Runtime 和 Completion Journal，历史计划中的阶段状态不覆盖真实源码。
+
+本批修复：成功读取 Observation 后取消 `providerToolChoice=required` 的重复强制，保留读取权限/版本重验；普通 Agent 讨论和待澄清请求不被工具可用性强制转为生成，明确批准生成和必要读回保留门禁。Legacy Outbox 首次恢复完整 Message snapshot，保留 streaming/failed/cancelled、reasoning/附件/文档收据，并修复相同 revision 的元数据缺失。真实生成验收依据 Tool Receipt、Art Direction、Trace 和 Work 计数区分本地拦截、工具/未知、渲染、校验、登记及重复 Work，取消笼统 `expected_one_generated_work` 诊断；后续真实用例保留隔离项目。
+
+真实 Provider 验收按负责人预算使用最近有效 `kimi-k3`：最多 5 次请求、外层 1024 输出 token、Art Direction 4096、自动重试 0，实际 2 次请求均 HTTP 200，费用 `unknown`。Content Planning 和 Art Direction 已执行，`generate_pptx` failed，Trace `document_check failed`，Work=0，判定生成/校验链路 `FAIL`，不能断言模型未调用工具。后续失败反馈被验收脚本本地阻断，外层 `newapi.network_error` 不覆盖前面的真实失败。旧清理已经删除本次隔离项目，仅报告保留；保留修复在调用之后生效，未重发收费请求。具体校验原因仍 unknown，真实连续读回/Provider 矩阵未通过。脱敏证据见 [Provider 验收记录](docs/evidence/office-agent-convergence-provider-20261012.json)。
+
+验证：文档生成/读取/Session 与 Legacy Worker 共 109 项定向回归通过；证据分类 Node 4/4；Node/UI 全量 400/400、typecheck、lint、生产 build、Thread-first Electron Mock Provider/Office 链路通过。生成验收 dry-run 通过（0 请求、未解密凭证），脚本语法和 `git diff --check` 通过。前一检查点串行全量 Vitest 3389/3389 通过；新增模型历史/profile 收敛门禁在下一批单独记录。用户数据和源分支保留。
 
 ### Thread-first 写入收敛实施（2026-10-11）
 

@@ -1,0 +1,59 @@
+{
+  "schemaVersion": 1,
+  "date": "2026-10-12",
+  "paidRequests": 0,
+  "baseline": "c9c5cf3",
+  "fixture": {
+    "metadataBytes": 32363190,
+    "entries": 3,
+    "acceptanceRecords": 25,
+    "largePayloads": 13,
+    "canonicalEvents": 1028
+  },
+  "transactionCore": {
+    "baseline": {
+      "samples": [
+        77.6,
+        76.1,
+        79.6,
+        83.2,
+        115.3
+      ],
+      "medianMs": 79.6,
+      "clonedValueBytes": 129179249
+    },
+    "current": {
+      "samples": [
+        39.4,
+        66.8,
+        36.8,
+        37.5,
+        38.3
+      ],
+      "medianMs": 38.3,
+      "clonedValueBytes": 64589642
+    }
+  },
+  "transactionWithAtomicBackup": {
+    "baseline": {
+      "samples": [
+        295.3,
+        255.1,
+        298.4,
+        297.3,
+        262.6
+      ],
+      "medianMs": 295.3
+    },
+    "current": {
+      "samples": [
+        286.8,
+        221.7,
+        243,
+        232,
+        264.4
+      ],
+      "medianMs": 243
+    }
+  }
+}

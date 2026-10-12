@@ -23,6 +23,7 @@ interface SummarySnapshot {
 export interface ThreadFileReadAdapterOptions {
   readonly getRepository: () => ThreadFileRepository | undefined;
   readonly projectId: () => string | undefined;
+  readonly readExecutionState?: (threadId: string) => Promise<Pick<ThreadDto, 'parentRuns' | 'agentSessions'>>;
 }
 
 export interface ThreadReadApi {
@@ -68,11 +69,16 @@ export class ThreadFileReadAdapter implements ThreadReadApi {
 
   async getThread(request: unknown): Promise<ChatContextIpcResult<ThreadDto>> {
     try {
+      const projectId = this.options.projectId();
       const threadId = parseId(request);
       const thread = await this.requireRepository().getThread(threadId as ThreadId);
       if (!thread) return failure('thread_not_found', '会话不存在或不可读取。');
       if (!this.isThreadInScope(thread)) return failure('project_scope_mismatch', '会话不属于当前项目。');
-      return { ok: true, value: toThreadDto(thread) };
+      const executionState = await this.options.readExecutionState?.(threadId);
+      // A project switch while Runtime state is loading must not leak the
+      // previous project's controls into the newly selected project.
+      if (this.options.projectId() !== projectId || !this.isThreadInScope(thread)) return failure('project_scope_mismatch', '会话不属于当前项目。');
+      return { ok: true, value: { ...toThreadDto(thread), ...executionState } };
     } catch (error) { return failure('storage_error', error instanceof Error ? error.message : 'Thread read failed'); }
   }
 

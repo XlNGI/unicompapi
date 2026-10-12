@@ -310,7 +310,7 @@ async function createSyntheticDocument(platform, rootDirectory, projectId) {
 async function seedConversation(platform, domain, storage, projectId, fixture) {
   const now = domain.toIsoTimestamp(new Date().toISOString());
   let conversation = domain.createConversation({ id: domain.toConversationId('conversation-update-' + randomUUID()), projectId, title: '合成文本修改验收', createdAt: now });
-  const repository = new platform.JsonProjectConversationRepository(storage, projectId);
+  const repository = await runtime.getConversationRepository({ projectId, projectName: '合成文档修改验收', rootDirectory: isolatedProjectAtStartup });
   await repository.create(conversation);
   const messageId = domain.toMessageId('source-document-' + randomUUID());
   let previous = conversation.revision;

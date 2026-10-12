@@ -58,6 +58,15 @@ function startingDispatchFixture(forExecution: NonNullable<ConversationTextSubmi
 }
 
 describe('conversation dispatch starting cancellation', () => {
+  it.each([
+    [{ code: 'EPERM' }, 'deepseek.chat.eperm'],
+    [{ code: 'private C:/synthetic credential' }, 'deepseek.chat.failed_before_submission'],
+    [{ safeCode: 'Invalid.Code' }, 'deepseek.chat.failed_before_submission']
+  ])('returns a persistable safe code for a local startup failure: %j', async (error, safeCode) => {
+    const data = startingDispatchFixture(async () => undefined);
+    vi.spyOn(DeepSeekChatAdapter.prototype, 'submit').mockRejectedValue(error);
+    expect(await data.run()).toEqual({ kind: 'failed_before_submission', safeCode });
+  });
   it.each(['timeout', 'cancelled'] as const)('retains the real %s reason across normal handle close and durable settlement', async reason => {
     const startedAt = Date.now();
     const budget = new HostExecutionBudget({ startedAt, deadlineAt: startedAt + 90_000, maxToolCalls: 8, budgetUnits: 8 });

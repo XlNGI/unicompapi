@@ -41,6 +41,10 @@ export class ConversationTurnCoordinator {
     return this.projections.projectAssistantMessage(input);
   }
 
+  saveConversation(input: Parameters<ThreadProjectionCoordinator['saveConversation']>[0]) {
+    return this.projections.saveConversation(input);
+  }
+
   projectDocumentArtifact(input: Parameters<ThreadProjectionCoordinator['projectDocumentArtifact']>[0]) {
     return this.projections.projectDocumentArtifact(input);
   }

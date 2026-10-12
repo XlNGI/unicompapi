@@ -58,6 +58,8 @@ interface ReadResult { readonly status: string; readonly observation?: { readonl
 
 async function fixture(revokeAfterAdvertisingRead = false, invalidArtDirection = false, agentChatOnly = false, agentConversation = false,
   planningPageGoal?: number, holdProviderResponse = false, flowOptions?: {
+    readonly threadFirst?: boolean;
+    readonly holdRendering?: boolean;
     readonly staleAfterKnownFailure?: boolean;
     readonly terminalAfterGeneration?: 'failed' | 'cancelled' | 'unknown';
   }) {
@@ -84,9 +86,13 @@ async function fixture(revokeAfterAdvertisingRead = false, invalidArtDirection =
   let activeResponseId: string | undefined;
   const readSpy = vi.spyOn(RegisteredPresentationReader.prototype, 'read');
   const beginSpy = vi.spyOn(DocumentTaskRuntimeService.prototype, 'beginToolCall');
-  const render = vi.fn(async (temporaryPath: string) => ({
-    previewCount: (await readPptxDocument(await readFile(temporaryPath))).length, diagnostics: []
-  }));
+  let releaseRendering!: () => void;
+  const renderingGate = new Promise<void>(resolve => { releaseRendering = resolve; });
+  cleanups.push(async () => releaseRendering());
+  const render = vi.fn(async (temporaryPath: string) => {
+    if (flowOptions?.holdRendering) await renderingGate;
+    return { previewCount: (await readPptxDocument(await readFile(temporaryPath))).length, diagnostics: [] };
+  });
   // Keep the production executor, writer, structure QA, hashes and Work
   // registration real. Only the external Office renderer is an offline adapter.
   const execute = PlatformDocumentGenerationExecutor.prototype.run;
@@ -140,7 +146,9 @@ async function fixture(revokeAfterAdvertisingRead = false, invalidArtDirection =
       return { status: 200, headers: { 'content-type': 'text/event-stream' },
         stream: (async function* () { yield await stopped; })() };
     }
-    if (agentChatOnly) return stream(provider.modelKey, { content: '可以把冲突提前，让场景一更有张力。' }, 'stop');
+    if (agentChatOnly) {
+      return stream(provider.modelKey, { content: '可以把冲突提前，让场景一更有张力。' }, 'stop');
+    }
     if (agentConversation) {
       if (requests.length <= 3) return stream(provider.modelKey, { content: '这个方向已经清楚了，我们继续细化人物和冲突。' }, 'stop');
       if (requests.length === 4) return stream(provider.modelKey, { tool_calls: [{ index: 0, ...generationCall }] }, 'tool_calls');
@@ -187,6 +195,7 @@ async function fixture(revokeAfterAdvertisingRead = false, invalidArtDirection =
   const newApiRuntime = new NewApiSharedRuntime({ transport });
   const deepSeekRuntime = new DeepSeekSharedRuntime({ transport: { send: async () => { throw new Error('Unexpected provider'); } } });
   const runtime = createChatContextRuntime({ userDataDirectory, providerRegistry: provider.registry, runtimeAuthorization: provider.authorization,
+    ...(flowOptions?.threadFirst ? { threadFileWriteEnabled: true, threadFileReadEnabled: true } : {}),
     getSession: () => ({ projectId, projectName: 'Synthetic generation/read test', rootDirectory }),
     textSubmission: { credentialVault: provider.vault, deepSeekRuntime, newApiRuntime }, now: () => now, onError: error => errors.push(error) });
   cleanups.push(async () => {
@@ -278,10 +287,72 @@ async function fixture(revokeAfterAdvertisingRead = false, invalidArtDirection =
       traces: await new ConversationProductionTraceStore(storage, projectId).list({ conversationId: conversation.id }),
       runtimes: await new JsonDocumentTaskRuntimeRepository(storage, projectId).list() };
   }
-  return { start, run, runAgentConversation, runtime, userDataDirectory, rootDirectory, files, works, requests, providerSignals, artRequests, writes, designSnapshots, errors, render, generationSpy, readSpy, beginSpy, generationCall, readCall };
+  return { start, run, runAgentConversation, runtime, conversations, conversation, userDataDirectory, rootDirectory, files, works, requests, providerSignals, artRequests, writes, designSnapshots, errors, render, releaseRendering, generationSpy, readSpy, beginSpy, generationCall, readCall };
 }
 
 describe('production NewAPI generation to verified-file read continuation', () => {
+  it('keeps a confirmed ordinary-worded creation required when the model ignores the tool request', async () => {
+    const data = await fixture(false, false, true, false, undefined, false, { threadFirst: true });
+    const { execution } = await data.run(true, '帮我生成一个测试ppt');
+    expect(execution).toMatchObject({ state: 'completed', parentRun: { state: 'failed', registeredWorkCount: 0 } });
+    const facts = await new ConversationDocumentToolSessionService({ rootDirectory: data.rootDirectory, projectId,
+      conversations: await data.runtime.getConversationRepository({ projectId, rootDirectory: data.rootDirectory, projectName: 'Test' }) })
+      .collectResponseFacts(execution.responseExecutionId);
+    expect(facts.documentTasks).toMatchObject([{ required: true, active: false }]);
+    expect(await data.works.list(projectId)).toHaveLength(0);
+  });
+
+  it('keeps a confirmed PPT execution live through page reads during rendering and publishes once', async () => {
+    const data = await fixture(false, false, false, false, undefined, false, { threadFirst: true, holdRendering: true });
+    const started = await data.start(true, '帮我生成一个测试ppt');
+    expect(started).toMatchObject({ ok: true });
+    if (!started.ok || !('execution' in started.value)) throw new Error('Expected executable document workflow');
+    const executionId = started.value.execution.responseExecutionId;
+    await vi.waitFor(() => expect(data.render).toHaveBeenCalledOnce(), { timeout: 10_000, interval: 25 });
+    expect(data.requests[0].tool_choice).toBe('required');
+    expect(data.requests[0].messages.some(message => message.content.includes('不要输出路径、凭证、Provider、模型选择、工具调用'))).toBe(false);
+    for (let visit = 0; visit < 3; visit += 1) {
+      const results = await Promise.all([
+        data.runtime.threadReads.getThread({ threadId: data.conversation.id }),
+        data.runtime.threadReads.getThreadItemsPage({ threadId: data.conversation.id, direction: 'older', limit: 100 }),
+        data.runtime.responses.getExecution({ responseExecutionId: executionId })
+      ]);
+      expect(results[0]).toMatchObject({ ok: true, value: { parentRuns: [expect.objectContaining({ state: 'executing_tool' })] } });
+      expect(results[1]).toMatchObject({ ok: true });
+      expect(results[2]).toMatchObject({ ok: true, value: { state: 'streaming', parentRun: { state: 'executing_tool' } } });
+      expect((await new JsonDocumentTaskRuntimeRepository(new NodeProjectStorage(data.rootDirectory), projectId).list())[0])
+        .toMatchObject({ status: 'running', toolCalls: [{ toolId: 'generate_pptx', status: 'started' }] });
+      expect(await data.works.list(projectId)).toHaveLength(0);
+    }
+    data.releaseRendering();
+    await vi.waitFor(async () => expect(await data.runtime.responses.getExecution({ responseExecutionId: executionId }))
+      .toMatchObject({ ok: true, value: { state: 'completed', parentRun: { state: 'completed', registeredWorkCount: 1 } } }),
+    { timeout: 10_000, interval: 25 });
+    await data.runtime.waitForMutations();
+    expect(data.generationSpy).toHaveBeenCalledOnce();
+    expect(await data.works.list(projectId)).toHaveLength(1);
+    expect(data.errors).toEqual([]);
+  });
+
+  it('generates and reads from the committed Thread when all Legacy message saves fail', async () => {
+    const data = await fixture(false, false, false, false, undefined, false, { threadFirst: true });
+    await data.runtime.conversations.list({ readMode: 'full' });
+    const save = vi.spyOn(JsonProjectConversationRepository.prototype, 'save').mockRejectedValue(Object.assign(new Error('Synthetic projection denied'), { code: 'EPERM' }));
+    const { execution } = await data.run(true);
+    expect(execution).toMatchObject({ state: 'completed', parentRun: { state: 'completed', registeredWorkCount: 1 } });
+    expect(data.requests).toHaveLength(3);
+    expect(data.generationSpy).toHaveBeenCalledTimes(1);
+    expect(await data.works.list(projectId)).toHaveLength(1);
+    expect(save).toHaveBeenCalled();
+    const legacy = await data.conversations.get(data.conversation.id);
+    expect(legacy?.messages).toHaveLength(0);
+    const page = await data.runtime.threadReads.getThreadItemsPage({ threadId: data.conversation.id, limit: 100, direction: 'older' });
+    expect(page).toMatchObject({ ok: true });
+    if (!page.ok) throw new Error(page.error.code);
+    expect(page.value.items.filter(item => item.itemType === 'tool_call_projection')).toHaveLength(2);
+    expect(page.value.items.filter(item => item.itemType === 'tool_result_projection')).toHaveLength(2);
+    expect(page.value.items.some(item => item.itemType === 'assistant_message' && item.status === 'completed' && item.message?.documentResult)).toBe(true);
+  });
   it('settles and revokes the owned document session when startup is cancelled after durable Run creation', async () => {
     const data = await fixture(false, false, true);
     const open = ConversationAgentRuntimeService.prototype.open;
@@ -689,6 +760,7 @@ describe('production NewAPI generation to verified-file read continuation', () =
     expect(execution.state).toBe('completed');
     expect(execution.content).toContain('场景一');
     expect(data.requests).toHaveLength(1);
+    expect(data.requests[0].tool_choice).toBeUndefined();
     expect(data.requests[0].messages.some(message => message.role === 'assistant' && message.tool_calls)).toBe(false);
     expect(await data.works.list(projectId)).toHaveLength(0);
     expect(data.generationSpy).not.toHaveBeenCalled();

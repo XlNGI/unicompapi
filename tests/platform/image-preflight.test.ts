@@ -145,6 +145,15 @@ function createRegistry(
 }
 
 describe('image submission preflight', () => {
+  it.each(['unsupported', 'unknown', 'restricted', 'verification_failed'] as const)('does not revive older supported evidence after the latest revision is %s', state => {
+    const registry = createRegistry(), original = registry.capabilities[0];
+    const latest = createModelCapabilityEvidence({ ...original, id: toCapabilityEvidenceId(`evidence-latest-${state}`),
+      revision: original.revision + 1, supersedesEvidenceId: original.id, state,
+      recordedAt: toIsoTimestamp('2026-07-22T04:00:00.000Z') });
+    const result = buildImagePreflight(createDraft(), { ...registry, capabilities: [original, latest] });
+    expect(result.candidates).toHaveLength(0);
+    expect(result.blockers).toContain('capability_unverified');
+  });
   it('returns only verified routable candidates with schema-derived parameters', () => {
     const result = buildImagePreflight(createDraft(), createRegistry());
 

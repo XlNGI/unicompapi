@@ -2,7 +2,7 @@ import { mkdtemp, rm } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { ConversationApplicationService } from '../../src/application';
+import { ConversationApplicationService, ConversationTurnCoordinator, ThreadCommandService, ThreadProjectionCoordinator } from '../../src/application';
 import { createConversationResponseDraft, createConversationWorkflow, toConversationId, toConversationResponseDraftId, toConversationWorkflowId, toIsoTimestamp, toMessageId, toProjectId } from '../../src/domain';
 import { JsonProjectConversationRepository } from '../../src/platform/repositories';
 import { NodeProjectStorage, toProjectRelativePath } from '../../src/platform/storage';
@@ -10,16 +10,30 @@ import { ConversationNativeSearch, NativeSearchAuthorizationError } from '../../
 import type { JsonProviderRegistryStore } from '../../src/platform/providers/provider-registry';
 import type { ResolvedFeatureCandidateV1 } from '../../src/platform/providers/provider-feature-candidates';
 import type { NativeSearchEvidence } from '../../src/domain/entities/native-search';
+import { ThreadFileRepository } from '../../src/platform/repositories/thread-file-repository';
+import { ThreadModelHistorySource } from '../../src/platform/repositories/thread-model-history-source';
 const roots: string[] = [];
 afterEach(async () => { await Promise.all(roots.splice(0).map(p => rm(p, { recursive: true, force: true }))); });
-async function setup(packageId = 'provider-package-kimi') {
+async function setup(packageId = 'provider-package-kimi', threadFirst = false) {
   const root = await mkdtemp(path.join(os.tmpdir(), 'native-grant-')); roots.push(root);
   const storage = new NodeProjectStorage(root), projectId = toProjectId('project-native');
   let time = '2026-09-11T00:00:00.000Z', sequence = 0;
   const now = () => time;
   const repo = new JsonProjectConversationRepository(storage, projectId, now);
-  const service = new ConversationApplicationService(repo, { nextConversationId: () => toConversationId('conversation-native'), nextMessageId: () => toMessageId(`message-${++sequence}`) }, now);
+  const threads = new ThreadFileRepository(root), source = new ThreadModelHistorySource(threads, projectId);
+  const coordinator = new ConversationTurnCoordinator(new ThreadCommandService(threads), new ThreadProjectionCoordinator(threads));
+  const service = new ConversationApplicationService(repo, { nextConversationId: () => toConversationId('conversation-native'), nextMessageId: () => toMessageId(`message-${++sequence}`) }, now,
+    threadFirst ? { get: id => source.getConversation(id), publishUser: async ({ conversation, message, clientCommandId }) => {
+      await coordinator.acceptUserTurn({ threadId: conversation.id, projectId, title: conversation.title, messageId: message.id,
+        messageRevision: message.revision, content: message.content, createdAt: message.createdAt, clientCommandId,
+        legacyMessageSnapshot: message as unknown as Readonly<Record<string, unknown>> });
+    }, publishAssistant: async ({ conversationId, sourceMessageId, message }) => {
+      await coordinator.projectAssistantMessage({ threadId: conversationId, sourceMessageId, assistantMessageId: message.id,
+        messageRevision: message.revision, status: 'completed', content: message.content, createdAt: message.createdAt, updatedAt: message.updatedAt,
+        legacyMessageSnapshot: message as unknown as Readonly<Record<string, unknown>> });
+    } } : undefined);
   const initial = await service.create({ title: '公开新闻', projectId });
+  if (threadFirst) await coordinator.createThread({ threadId: initial.id, projectId, title: initial.title, createdAt: initial.createdAt });
   const conversation = await service.addUserMessage({ conversationId: initial.id, expectedRevision: 0, content: '联网查询公开新闻' });
   const workflow = createConversationWorkflow({ id: toConversationWorkflowId('workflow-native'), projectId, conversationId: conversation.id, sourceMessageId: conversation.messages[0].id,
     plan: { schemaVersion: 1, kind: 'chat', sourcePolicy: 'web', parameters: {}, missing: [], ambiguities: [], confidence: 'high', needsConfirmation: false }, createdAt: toIsoTimestamp(now()) });
@@ -42,6 +56,27 @@ async function submitted() {
 }
 const ledgerFile = toProjectRelativePath('entities/conversation-native-search.json');
 describe('durable conversational native search authorization', () => {
+  it.each([false, true])('binds explicit search consent to current Thread facts with Legacy saves denied (stale: %s)', async stale => {
+    const f = await setup('provider-package-kimi', true);
+    const save = vi.spyOn(f.repo, 'save').mockRejectedValue(new Error('Legacy denied'));
+    try {
+      await expect(f.native.prepare(f.input)).rejects.toBeInstanceOf(NativeSearchAuthorizationError);
+      const question = await f.service.get(f.input.conversation.id);
+      const answer = { workflow: f.input.workflow, conversation: question, candidateId: f.input.candidate.candidateId, content: '允许本次联网' };
+      if (stale) {
+        await f.service.addUserMessage({ conversationId: question.id, expectedRevision: question.revision, content: '先不要搜索' });
+        await expect(f.native.answer(answer)).rejects.toMatchObject({ code: 'revision_conflict' });
+        expect(await f.native.dispatch(f.input.draft, f.input.candidate)).toBeUndefined();
+      } else {
+        expect(await f.native.answer(answer)).toBe('authorized');
+        expect((await f.service.get(question.id)).messages.at(-1)?.content).toContain('已允许本次联网');
+        expect(await f.native.dispatch(f.input.draft, f.input.candidate)).toMatchObject({ protocol: 'kimi_builtin' });
+        expect(await f.native.dispatch(f.input.draft, f.input.candidate)).toBeUndefined();
+      }
+      expect((await f.repo.get(question.id))?.messages).toHaveLength(0);
+      expect(save).not.toHaveBeenCalled();
+    } finally { save.mockRestore(); }
+  });
   it('persists a single question, restores it after restart, and only grants the exact reply', async () => {
     const f = await setup();
     await expect(f.native.prepare(f.input)).rejects.toBeInstanceOf(NativeSearchAuthorizationError);

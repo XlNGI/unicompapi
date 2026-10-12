@@ -9,6 +9,8 @@ import type {
   StorageProjectSessionDto
 } from '../../shared/storage-ipc';
 import { JsonProjectConversationRepository, JsonProjectRepository } from '../repositories';
+import { hasCommittedThreadAuthority } from '../repositories/thread-conversation-repository';
+import { ThreadFileRepository } from '../repositories/thread-file-repository';
 import {
   NodeProjectStorage,
   projectStoragePaths,
@@ -39,6 +41,7 @@ export class StorageProjectSessionRegistry {
 }
 
 export interface ProjectSessionControllerDependencies {
+  readonly threadConversationsEnabled?: boolean;
   readonly registry: StorageProjectSessionRegistry;
   chooseProjectDirectory(): Promise<string | undefined>;
   catalog?: ProjectCatalogService;
@@ -170,6 +173,18 @@ export class ProjectSessionController {
             message: 'The recent project could not be found'
           }
         };
+      }
+      const threadAuthority = this.dependencies.threadConversationsEnabled !== false && await hasCommittedThreadAuthority(entry.rootDirectory);
+      if (threadAuthority) {
+        const threads = new ThreadFileRepository(entry.rootDirectory);
+        const conversations = [];
+        for (const summary of await threads.listThreadSummaries()) {
+          if (summary.projectId !== projectId) throw new Error('thread_project_scope_mismatch');
+          const thread = await threads.getThread(summary.threadId);
+          if (thread && thread.status !== 'deleted') conversations.push({ conversationId: thread.threadId, projectId,
+            title: thread.title, status: thread.status === 'archived' ? 'archived' as const : 'active' as const, updatedAt: thread.updatedAt });
+        }
+        return { ok: true, value: conversations };
       }
       const conversations = await new JsonProjectConversationRepository(
         new NodeProjectStorage(entry.rootDirectory),

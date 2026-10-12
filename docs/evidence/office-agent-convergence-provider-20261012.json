@@ -1,0 +1,38 @@
+{
+  "schemaVersion": 1,
+  "date": "2026-10-12",
+  "baseline": "d863d3f4a7fdc850880d493ee146d7b7d1a27420",
+  "sourceReport": "outputs/office-convergence-provider-live/real-provider.json",
+  "sourceReportSha256": "7a4faee6cfa57f73c849058acfc86ed338461727b3c6afc9886ac356e2c8e2e5",
+  "model": "kimi-k3",
+  "outboundScope": "One synthetic isolated PPT generation/read case; no user files, attachments or history",
+  "maximumRequests": 5,
+  "outerMaximumOutputTokens": 1024,
+  "artDirectionMaximumOutputTokens": 4096,
+  "automaticRetries": 0,
+  "actualRequests": 2,
+  "providerStages": [
+    { "stage": "content_planning", "httpStatus": 200 },
+    { "stage": "art_direction", "httpStatus": 200 }
+  ],
+  "cost": "unknown",
+  "workCount": 0,
+  "generationToolStatus": "failed",
+  "generationToolDiagnostic": "generation_failed",
+  "trace": [
+    { "code": "tool_call", "status": "started", "tool": "write_document" },
+    { "code": "document_check", "status": "failed", "tool": "check" },
+    { "code": "tool_result", "status": "failed", "tool": "write_document" }
+  ],
+  "sourceClassification": "generation_tool_failed",
+  "refinedClassification": "document_validation_failed",
+  "localFeedbackInterception": "generation_tool_failed",
+  "outerTerminalDiagnostic": "newapi.network_error",
+  "threadFacts": { "turns": 1, "assistantItems": 1, "toolCalls": 0, "toolResults": 0, "artifacts": 0 },
+  "isolatedProjectRetained": false,
+  "retentionLimitation": "The old cleanup ran before the retention fix; report retained, project no longer present",
+  "protectedUserConfigurationUnchanged": true,
+  "generationAcceptance": "failed",
+  "providerMatrixAcceptance": "not_run",
+  "concreteValidationCause": "unknown"
+}

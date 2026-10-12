@@ -1,0 +1,216 @@
+{
+  "schemaVersion": 1,
+  "date": "2026-10-12",
+  "baseline": "d589426",
+  "branch": "feature/office-agent-thread-model-convergence",
+  "scope": "Thread-authoritative recovery, Office, CRUD/Context and exact capability route evidence",
+  "validation": {
+    "vitest": {
+      "files": 337,
+      "passed": 3475,
+      "failed": 0,
+      "skipped": 0,
+      "mode": "one worker and unchanged timeouts"
+    },
+    "nodeUi": {
+      "passed": 401,
+      "failed": 0,
+      "skipped": 0
+    },
+    "typecheck": "passed",
+    "lint": "passed",
+    "productionBuild": "passed",
+    "electron": {
+      "agent": {
+        "status": "passed",
+        "workCount": 1,
+        "parent": "completed",
+        "wordReceipt": true,
+        "wordArtifact": true,
+        "excelReceipt": true,
+        "excelArtifact": true
+      },
+      "compatibility": {
+        "status": "passed",
+        "entry": "responses.start",
+        "toolItems": 4
+      },
+      "legacyRollback": {
+        "status": "passed"
+      },
+      "navigation": {
+        "threadAfterFix": "passed_twice",
+        "legacy": "passed",
+        "threadsPerMode": 3,
+        "messagesPerThread": 120
+      }
+    },
+    "dryRun": {
+      "status": "dry_run_passed",
+      "model": "glm-5.2",
+      "networkRequests": 0,
+      "sharedThreadFixtureVerified": true
+    }
+  },
+  "regressions": [
+    {
+      "name": "Late-loaded message list resize observer",
+      "oldImplementation": "new regression failed with observe=0",
+      "fixedImplementation": "56 ChatPage plus 1 VirtualMessageList tests passed; two Thread Electron navigation runs passed"
+    },
+    {
+      "name": "Latest capability evidence",
+      "oldImplementation": "four image preflight cases revived older supported evidence",
+      "fixedImplementation": "latest revision gate plus exact Route id/revision/fingerprint; old accepted tasks remain immutable"
+    },
+    {
+      "name": "Metadata projection interruption",
+      "fixedImplementation": "committed title/status/revision readable before recovery and restored on restart"
+    },
+    {
+      "name": "Multiple Assistant identities",
+      "fixedImplementation": "structured Item identity retained in Turn write and hydration"
+    },
+    {
+      "name": "Old manual conversation smoke",
+      "outcome": "fails model_selection_required because its historical fixture has no selected semantic model",
+      "boundary": "not the current mandatory Electron Agent/Office or navigation suite",
+      "cleanup": "failure now exits within five seconds; no Provider requests"
+    }
+  ],
+  "authorization": {
+    "model": "glm-5.2",
+    "maximumExternalRequests": 5,
+    "maximumOuterOutputTokens": 1024,
+    "maximumArtDirectionOutputTokens": 4096,
+    "automaticRetries": 0,
+    "source": "User explicitly approved this turn; no enterprise data or user attachments",
+    "supplementalBudget": "declined_by_user"
+  },
+  "realProvider": {
+    "schemaVersion": 1,
+    "status": "verified_delivery",
+    "model": "glm-5.2",
+    "networkRequests": 4,
+    "reconciliationNetworkRequests": 0,
+    "automaticRetries": 0,
+    "cost": "unknown",
+    "originalLiveGateStatus": "failed",
+    "originalSafeCode": "production_tool_roundtrip_not_verified",
+    "originalReportSha256": "f759df027989aaec87d18341c84b139ec90f52f2478b6d2827bfa1ff7973c009",
+    "file": {
+      "physicalPages": 4,
+      "sizeBytes": 70285,
+      "sha256": "7aa967878c5771a800cf8eed07e96b626488b68def386d7a73110d0749a31033",
+      "hashVerified": true
+    },
+    "workCount": 1,
+    "responseState": "completed",
+    "documentState": "completed",
+    "savedObservationMatchesPhysicalIdentity": true,
+    "finalAnswerMatchesPhysicalFacts": true,
+    "thread": {
+      "toolCalls": 2,
+      "toolResults": 2,
+      "artifacts": 1,
+      "assistantReceipt": true
+    },
+    "limitations": [
+      "Original final-request inspector returned before recording per-page wire text equality; this verifier checks saved Host observation identity and final answer without claiming that missing wire record was captured."
+    ],
+    "finishedAt": "2026-10-12T16:33:53.913Z",
+    "initialLocalFixtureFailure": {
+      "safeCode": "controller_conversation_not_found",
+      "networkRequests": 0
+    },
+    "protectedUserConfigurationUnchanged": true,
+    "isolatedProjectRetained": true,
+    "strictOriginalHarness": {
+      "status": "failed",
+      "safeCode": "production_tool_roundtrip_not_verified",
+      "wirePerPageTextEquality": "not_recorded",
+      "originalReportPreserved": true
+    },
+    "artDirection": {
+      "httpAccepted": true,
+      "validated": false,
+      "fallbackOccurred": true
+    },
+    "patchedHarness": "final tool transcript validates generation and read observations before returning; terminal inspection waits for owned completion; no new paid request used to validate this patch"
+  },
+  "boundaries": {
+    "realUserProjectWrites": 0,
+    "unknownResultRetries": 0,
+    "scopeOfExternalEvidence": "one glm-5.2 generation/readback; does not claim every Provider protocol or D3 visual direction",
+    "macosRealDevice": "deferred per existing owner boundary",
+    "performanceFollowup": "shared acceptance/base64 write amplification remains separate maintenance"
+  },
+  "logs": [
+    {
+      "path": "outputs/thread-authority-maintenance/complete-vitest-final.log",
+      "sha256": "78dc435ad9bb8981a79e2eb7af95c9e442db0526e7081c9554f9628b84816c6c"
+    },
+    {
+      "path": "outputs/thread-authority-maintenance/complete-node-ui-final.log",
+      "sha256": "a14db358ef4b270c675b5d22b277e61f540c9659d50866f8c08ed7da599739b3"
+    },
+    {
+      "path": "outputs/thread-authority-maintenance/complete-typecheck-final.log",
+      "sha256": "653f5d9eecbb94f6ba67b87d1c6c8b26060bbc0ec8411260069aa069341c6232"
+    },
+    {
+      "path": "outputs/thread-authority-maintenance/complete-lint-final.log",
+      "sha256": "cc5a0b39c7052d24c24888403c48018b4fcccc9d799f81be6c9c30c9e19c85fc"
+    },
+    {
+      "path": "outputs/thread-authority-maintenance/complete-build-final.log",
+      "sha256": "92a868d5cad825df60f3580fbea816db7bf5338584b9e9832dd65889c6c38a69"
+    },
+    {
+      "path": "outputs/thread-authority-maintenance/convergence-electron-agent.log",
+      "sha256": "9aee45bd00a18bf9dd5b635f226d1a969890f284772e273301042450e6668116"
+    },
+    {
+      "path": "outputs/thread-authority-maintenance/complete-electron-compatibility.log",
+      "sha256": "f6f97b5055fe7114b97d3af7bb3c425ddc826c5ba18cde139abe3eb34954f77e"
+    },
+    {
+      "path": "outputs/thread-authority-maintenance/convergence-electron-legacy-mock.log",
+      "sha256": "9c111484cb7e814311e3e41948dd61c9c198be63a139532bfe4e9a9dfc8d1485"
+    },
+    {
+      "path": "outputs/thread-authority-maintenance/convergence-electron-thread-final.log",
+      "sha256": "6de59e7c1e52242be8e4b56a10beb491fbde81316f8d9cb7179892049c9d177c"
+    },
+    {
+      "path": "outputs/thread-authority-maintenance/convergence-electron-thread-repeat.log",
+      "sha256": "9a15d5ee2be81cdfe2aa6685afe51b08e32b602879271d3ef2b75ad1c0f0da97"
+    },
+    {
+      "path": "outputs/thread-authority-maintenance/convergence-electron-legacy.log",
+      "sha256": "944bd9dd6f25a918e37e1f6bf17fd33553052d19f57b839fc5aaaa63e0817d24"
+    },
+    {
+      "path": "outputs/thread-authority-maintenance/chat-resize-before.log",
+      "sha256": "289fe315d9d258865fa19d0b25dd685b6589e78c76c9abad4039491f0f40e001"
+    },
+    {
+      "path": "outputs/thread-authority-maintenance/chat-resize-final.log",
+      "sha256": "c7cb498a8b3685ffc748b0a08c3453ad762b0a0971a4c1e120501873c0283d0f"
+    },
+    {
+      "path": "outputs/thread-authority-maintenance/provider-dry-run-final.log",
+      "sha256": "159068819c013027e81a651c45bc556a4ac47151533ab6e4cc7498f6a7173944"
+    },
+    {
+      "path": "outputs/thread-authority-maintenance/provider-reconciliation.log",
+      "sha256": "ae35baafc45fc93df87fd2fea44cf23f8d6a33500b99ff472b17e32e4364825d"
+    }
+  ],
+  "closure": {
+    "source": "User explicitly selected: close on the verified delivery and do not incur further charges",
+    "status": "closed_with_recorded_acceptance_boundary",
+    "externalRequests": 4,
+    "furtherPaidRequestsAllowed": false
+  }
+}

@@ -4,6 +4,14 @@ import { renderToStaticMarkup } from 'react-dom/server';
 import { VirtualMessageList } from '../../src/pages/chat/VirtualMessageList';
 
 describe('VirtualMessageList', () => {
+  it('reserves the visible row gap in absolute offsets and total height', () => {
+    const html = renderToStaticMarkup(<VirtualMessageList itemIds={['one', 'two', 'three']}
+      containerRef={createRef<HTMLDivElement>()} estimatedItemHeight={100} rowGap={24}
+      renderItem={id => <li>{id}</li>} />);
+    expect(html).toContain('translateY(124px)');
+    expect(html).toContain('translateY(248px)');
+    expect(html).toContain('height:348px');
+  });
   it('renders only the initial viewport plus overscan for a long history', () => {
     const ids = Array.from({ length: 5_000 }, (_, index) => `message-${index}`);
     const html = renderToStaticMarkup(<VirtualMessageList itemIds={ids} containerRef={createRef<HTMLDivElement>()} overscan={3} renderItem={id => <li data-message-id={id}>{id}</li>} />);

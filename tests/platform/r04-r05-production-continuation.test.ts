@@ -32,6 +32,11 @@ import { ProjectMetadataUnitOfWork } from '../../src/platform/storage/project-me
 import { ProjectSubmissionAcceptanceStore } from '../../src/platform/storage/project-submission-acceptance';
 import { ConversationDocumentToolSessionService } from '../../src/platform/documents/conversation-document-tool-session';
 import type { ConversationAgentSessionDto, StartResponseRequest } from '../../src/shared/chat-context-ipc';
+import { ThreadFileRepository } from '../../src/platform/repositories/thread-file-repository';
+import { toThreadId } from '../../src/domain';
+import { ThreadLegacyProjectionWorker } from '../../src/application/thread-legacy-projection-worker';
+import { ThreadModelHistorySource } from '../../src/platform/repositories/thread-model-history-source';
+import { conversationToThreadProjection } from '../../src/application/conversation-thread-adapter';
 
 const projectId = toProjectId('project-r45-production');
 const timestamp = toIsoTimestamp('2026-10-04T00:00:00.000Z');
@@ -42,7 +47,8 @@ afterEach(async () => {
   vi.restoreAllMocks();
 });
 
-async function fixture(options: { readonly holdResponse?: boolean; readonly leaseTtlMs?: number; readonly lateToolCall?: boolean; readonly initialClock?: number; readonly maximumSubmissions?: number } = {}) {
+async function fixture(options: { readonly holdResponse?: boolean; readonly leaseTtlMs?: number; readonly lateToolCall?: boolean; readonly initialClock?: number; readonly maximumSubmissions?: number;
+  readonly threadFirst?: boolean; readonly streamingGate?: Promise<void> } = {}) {
   const rootDirectory = await mkdtemp(path.join(os.tmpdir(), 'unicomp-r45-production-'));
   const userDataDirectory = path.join(rootDirectory, 'isolated-profile');
   await mkdir(userDataDirectory);
@@ -60,11 +66,26 @@ async function fixture(options: { readonly holdResponse?: boolean; readonly leas
   const requests: NewApiHttpTransportRequest[] = [];
   const errors: unknown[] = [];
   let lateStreamReads = 0;
+  const streamPhases: string[] = [];
   let releaseResponse!: () => void;
   const released = new Promise<void>(resolve => { releaseResponse = resolve; });
   const newApiRuntime = new NewApiSharedRuntime({ transport: { send: async request => {
     requests.push(request);
     if (options.holdResponse) await released;
+    if (options.streamingGate) return { status: 200, headers: { 'content-type': 'text/event-stream' }, stream: {
+      async *[Symbol.asyncIterator]() {
+        const chunk = (content: string, finish_reason: string | null) => 'data: ' + JSON.stringify({
+          id: 'synthetic-thread-stream', object: 'chat.completion.chunk', created: 1, model: provider.modelKey,
+          choices: [{ index: 0, delta: { content }, finish_reason }]
+        }) + '\n\n';
+        yield Buffer.from(chunk('已接收补充信息，', null));
+        streamPhases.push('first-yield');
+        await options.streamingGate;
+        streamPhases.push('gate-released');
+        yield Buffer.from(chunk('任务继续。', 'stop') + 'data: [DONE]\n\n');
+        streamPhases.push('second-yield');
+      }
+    } };
     if (options.lateToolCall) return { status: 200, headers: { 'content-type': 'text/event-stream' }, stream: {
       async *[Symbol.asyncIterator]() {
         lateStreamReads += 1;
@@ -85,6 +106,7 @@ async function fixture(options: { readonly holdResponse?: boolean; readonly leas
       getSession: () => ({ projectId, projectName: 'Offline R04/R05 fixture', rootDirectory }),
       textSubmission: { credentialVault: provider.vault, deepSeekRuntime, newApiRuntime },
       now: () => timestamp, executionNow: () => executionClock, executionLeaseTtlMs: options.leaseTtlMs,
+      threadFileReadEnabled: options.threadFirst, threadFileWriteEnabled: options.threadFirst,
       onError: error => errors.push(error) });
     runtimes.push(runtime);
     return runtime;
@@ -149,9 +171,9 @@ async function fixture(options: { readonly holdResponse?: boolean; readonly leas
     expect(path.dirname(path.resolve(rootDirectory))).toBe(path.resolve(os.tmpdir()));
     await rm(rootDirectory, { recursive: true, force: true, maxRetries: 3, retryDelay: 100 });
   });
-  return { runtime, createRuntime, request, getSession, getDto, seedPlanningRoot, conversations, conversation, executions, sessions, runs, storage,
+  return { runtime, createRuntime, request, getSession, getDto, seedPlanningRoot, conversations, conversation, executions, sessions, runs, storage, rootDirectory,
     authorization: provider.authorization,
-    requests, errors, at, releaseResponse, get lateStreamReads() { return lateStreamReads; },
+    requests, errors, streamPhases, at, releaseResponse, get lateStreamReads() { return lateStreamReads; },
     advance(ms: number) { executionClock += ms; }, setTime(ms: number) { executionClock = ms; } };
 }
 
@@ -163,6 +185,57 @@ async function waitForExecution(host: ChatContextRuntime, id: string) {
 }
 
 describe('R04/R05 production Host continuation boundary', () => {
+  it.each([false, true])('commits current streaming content to Thread before a stale or failed Legacy projection (failure: %s)', async failLegacy => {
+    let release!: () => void;
+    const gate = new Promise<void>(resolve => { release = resolve; });
+    cleanups.push(async () => release());
+    const f = await fixture({ threadFirst: true, streamingGate: gate });
+    const save = JsonProjectConversationRepository.prototype.save;
+    const legacySave = vi.spyOn(JsonProjectConversationRepository.prototype, 'save').mockImplementation(async function (this: JsonProjectConversationRepository, conversation, revision) {
+      if (failLegacy && conversation.messages.some(message => message.role === 'assistant' && message.state !== 'pending')) {
+        throw new Error('synthetic Legacy projection unavailable');
+      }
+      return save.call(this, conversation, revision);
+    });
+    const threads = new ThreadFileRepository(f.rootDirectory);
+    try {
+      const started = await f.runtime.responses.startAgent(await f.request('只回复一句话，介绍培训流程。', 'thread-stream-authority'));
+      if (!started.ok || !('execution' in started.value)) throw new Error('Expected normal response: ' + JSON.stringify(started));
+      const id = started.value.execution.responseExecutionId;
+      try {
+        await vi.waitFor(async () => expect((await threads.readItems(toThreadId(f.conversation.id))).find(item => item.type === 'assistant_message'))
+          .toMatchObject({ status: 'streaming', content: '已接收补充信息，', legacyMessageSnapshot: { content: '已接收补充信息，', state: 'streaming' } }),
+        { timeout: 5_000, interval: 25 });
+      } catch (error) {
+        throw new Error(String(error) + '; synthetic phases: ' + f.streamPhases.join(',') + '; events: ' +
+          (await f.executions.listEvents(toConversationResponseExecutionId(id))).map(event => event.type).join(',') +
+          '; synthetic Host diagnostics: ' + f.errors.map(value => value instanceof Error ? value.stack : String(value)).join('; '));
+      }
+      release();
+      try { await waitForExecution(f.runtime, id); }
+      catch (error) {
+        throw new Error(String(error) + '; synthetic phases: ' + f.streamPhases.join(',') + '; events: ' +
+          (await f.executions.listEvents(toConversationResponseExecutionId(id))).map(event => event.type).join(',') +
+          '; synthetic Host diagnostics: ' + f.errors.map(value => value instanceof Error ? value.stack : String(value)).join('; '));
+      }
+      const items = (await threads.readItems(toThreadId(f.conversation.id))).filter(item => item.type === 'assistant_message');
+      expect(items).toHaveLength(1);
+      expect(items[0]).toMatchObject({ status: 'completed', content: '已接收补充信息，任务继续。' });
+      expect(f.requests).toHaveLength(1);
+      if (failLegacy) {
+        const outbox = await threads.readProjectionOutbox(toThreadId(f.conversation.id));
+        const receipts = await threads.readProjectionReceipts(toThreadId(f.conversation.id));
+        expect(outbox.some(event => event.eventType === 'item_upsert' && event.item.type === 'assistant_message' && event.item.status === 'completed' &&
+          !receipts.some(receipt => receipt.eventId === event.eventId))).toBe(true);
+        legacySave.mockRestore();
+        const replayed = await new ThreadLegacyProjectionWorker(threads, f.conversations, () => timestamp).drain(f.conversation.id);
+        expect(replayed.pending).toBe(0);
+        expect((await f.conversations.get(f.conversation.id))!.messages.at(-1)).toMatchObject({ state: 'completed', content: '已接收补充信息，任务继续。' });
+        expect(f.requests).toHaveLength(1);
+      }
+    } finally { release(); }
+  }, 15_000);
+
   async function seedBindingCrash(f: Awaited<ReturnType<typeof fixture>>, paidUnknown: boolean) {
     const original = await f.seedPlanningRoot(false), current = (await f.conversations.get(f.conversation.id))!;
     const childId = toConversationAgentRunId('agent-child-binding-crash'), responseId = toConversationResponseExecutionId('response-binding-crash');
@@ -202,6 +275,32 @@ describe('R04/R05 production Host continuation boundary', () => {
     f.setTime(original.budget.deadlineAt);
     return { original: unbound, child, responseId };
   }
+  it.each(['valid', 'changed', 'unavailable'] as const)('uses committed Thread input pins under the recovery metadata CAS: %s', async mode => {
+    const f = await fixture(), crash = await seedBindingCrash(f, false);
+    const conversation = (await f.conversations.get(f.conversation.id))!;
+    const projection = conversationToThreadProjection(conversation);
+    const source = new ThreadModelHistorySource({ getThread: async () => mode === 'unavailable' ? undefined : projection.thread,
+      readItems: async () => projection.items.map(item => mode === 'changed' && item.type === 'user_message'
+        ? { ...item, content: 'changed input', legacyMessageSnapshot: { ...item.legacyMessageSnapshot, content: 'changed input' } } : item) }, projectId);
+    const read = f.storage.readJsonWithBackup.bind(f.storage);
+    const legacyRead = vi.spyOn(f.storage, 'readJsonWithBackup').mockImplementation((async (location: Parameters<typeof read>[0], parser: Parameters<typeof read>[1]) => {
+      if (location === projectStoragePaths.entities.conversations) throw new Error('Legacy identity read denied');
+      return read(location, parser);
+    }) as typeof f.storage.readJsonWithBackup);
+    const repository = new JsonConversationAgentSessionRepository(f.storage, projectId, f.at, { get: id => source.getConversation(id) });
+    const input = { sessionId: crash.original.id, runId: crash.child.id, responseExecutionId: crash.responseId,
+      expectedRevision: crash.original.revision, expectedLeaseEpoch: crash.original.leaseEpoch };
+    if (mode === 'valid') {
+      const bound = await repository.recordVerifiedResponseBinding(input);
+      expect(bound.childSegments[1].responseExecutionId).toBe(crash.responseId);
+    } else {
+      await expect(repository.recordVerifiedResponseBinding(input)).rejects.toThrow(mode === 'changed' ? 'source pin changed' : 'storage_reconciliation');
+      expect((await repository.get(crash.original.id))?.revision).toBe(crash.original.revision);
+    }
+    expect(legacyRead.mock.calls.some(([location]) => location === projectStoragePaths.entities.conversations)).toBe(false);
+    expect(f.requests).toHaveLength(0);
+    legacyRead.mockRestore();
+  });
   async function seedAuthorizationClaim(f: Awaited<ReturnType<typeof fixture>>, responseId: string, started = false) {
     const response = (await f.executions.get(toConversationResponseExecutionId(responseId)))!;
     const claimId = 'authorization-binding-crash', candidate = response.snapshot.candidate;

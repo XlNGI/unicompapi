@@ -7,7 +7,7 @@ import {
   type ConversationAgentSessionV1, type ConversationAgentSessionRepository, type ConversationAgentRunId,
   type ConversationAgentExecutionFence, type ConversationAgentExecutionLeaseV1, type ConversationAgentSessionBeginResumeInput,
   type ProjectId, type WorkId, type ConversationAgentSessionSegmentV1, type ControlledConversationInputReferenceV1, type ConversationAgentRunV1,
-  type ConversationResponseExecutionId
+  type ConversationResponseExecutionId, type Conversation, type ConversationId
 } from '../../domain';
 import { createHash } from 'node:crypto';
 import { parseCompletionIntent } from './json-conversation-completion-journal';
@@ -31,7 +31,8 @@ export class ConversationAgentSessionStorageReconciliationError extends Error {
 /** All continuation claims and fencing facts share the project metadata CAS with the existing completion WAL. */
 export class JsonConversationAgentSessionRepository implements ConversationAgentSessionRepository {
   private readonly unit: ProjectMetadataUnitOfWork;
-  constructor(private readonly storage: ProjectStorageAdapter, readonly projectId: ProjectId, private readonly now: () => string = () => new Date().toISOString()) {
+  constructor(private readonly storage: ProjectStorageAdapter, readonly projectId: ProjectId, private readonly now: () => string = () => new Date().toISOString(),
+    private readonly conversationFacts?: { get(id: ConversationId): Promise<Conversation | undefined> }) {
     this.unit = new ProjectMetadataUnitOfWork(storage, now);
   }
   async get(sessionId: ConversationAgentRunId): Promise<ConversationAgentSessionV1 | undefined> { return structuredClone((await this.loadAuthoritative()).collection.sessions.find(session => session.id === sessionId)); }
@@ -147,21 +148,20 @@ export class JsonConversationAgentSessionRepository implements ConversationAgent
       if (!previous || previous.revision !== input.expectedRevision || previous.leaseEpoch !== input.expectedLeaseEpoch) throw new ConversationAgentSessionConflictError(input.sessionId, 'revision_conflict');
       // Read primary identity while the metadata CAS is held. A backup or a
       // missing canonical WAL cannot manufacture a binding or prove no effect.
-      const [runDocument, responseDocument, conversationDocument] = await Promise.all([
+      const [runDocument, responseDocument, conversation] = await Promise.all([
         this.storage.readJsonWithBackup(projectStoragePaths.entities.conversationAgentRuns, value => value as { runs: readonly unknown[] }),
         this.storage.readJsonWithBackup(projectStoragePaths.entities.conversationResponseExecutions, value => value as { executions: readonly unknown[] }),
-        this.storage.readJsonWithBackup(projectStoragePaths.entities.conversations, parseConversationDocument)
+        this.readPrimaryConversation(previous.conversationId)
       ]);
       if (!runDocument || runDocument.source !== 'primary' || !Array.isArray(runDocument.value.runs) ||
         !responseDocument || responseDocument.source !== 'primary' || !Array.isArray(responseDocument.value.executions) ||
-        !conversationDocument || conversationDocument.source !== 'primary') throw new ConversationAgentSessionStorageReconciliationError();
+        !conversation) throw new ConversationAgentSessionStorageReconciliationError();
       const run = runDocument.value.runs.map(parseConversationAgentRun).find(item => item.id === input.runId);
       const parent = runDocument.value.runs.map(parseConversationAgentRun).find(item => item.id === previous.id);
       const response = responseDocument.value.executions.map(parseConversationResponseExecution).find(item => item.id === input.responseExecutionId);
-      const conversation = conversationDocument.value.conversations.find(item => item.id === previous.conversationId);
       if (!run || !response || !parent || parent.responseExecutionId || parent.projectId !== previous.projectId ||
         parent.conversationId !== previous.conversationId || parent.sourceMessageId !== previous.sourceMessageId ||
-        !conversation || conversation.projectId !== previous.projectId || conversation.status !== 'active') throw new TypeError('Invalid primary binding ownership');
+        conversation.id !== previous.conversationId || conversation.projectId !== previous.projectId || conversation.status !== 'active') throw new TypeError('Invalid primary binding ownership');
       for (const reference of previous.inputReferences) {
         const message = conversation.messages.find(item => item.id === reference.id && item.role === 'user' && item.state === 'completed');
         if (reference.kind !== 'message' || !message || message.revision !== reference.version ||
@@ -329,6 +329,13 @@ export class JsonConversationAgentSessionRepository implements ConversationAgent
     const loaded = await this.unit.load(); if (loaded.source === 'backup') throw new ConversationAgentSessionStorageReconciliationError();
     const value = loaded.document.entries.find(entry => entry.key === metadataKey)?.value;
     return { revision: loaded.document.revision, signature: JSON.stringify(value), collection: this.parseCollection(value) };
+  }
+  private async readPrimaryConversation(conversationId: ConversationId): Promise<Conversation | undefined> {
+    // Thread mode supplies a committed, scoped reader with no Legacy fallback.
+    if (this.conversationFacts) return this.conversationFacts.get(conversationId);
+    const loaded = await this.storage.readJsonWithBackup(projectStoragePaths.entities.conversations, parseConversationDocument);
+    if (!loaded || loaded.source !== 'primary') throw new ConversationAgentSessionStorageReconciliationError();
+    return loaded.value.conversations.find(conversation => conversation.id === conversationId);
   }
   private async mutate<T>(operation: (collection: SessionCollectionV1) => { readonly collection: SessionCollectionV1; readonly result: T; readonly changed: boolean }, validate?: (draft: ProjectMetadataDraft) => void): Promise<T> {
     for (let attempt = 0; attempt < 8; attempt++) {

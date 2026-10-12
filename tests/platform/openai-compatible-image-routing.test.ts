@@ -1,4 +1,7 @@
-import { describe, expect, it } from 'vitest';
+import { mkdtemp, readFile, rm } from 'node:fs/promises';
+import os from 'node:os';
+import path from 'node:path';
+import { afterEach, describe, expect, it } from 'vitest';
 import {
   createProvider,
   createProviderConnection,
@@ -12,6 +15,7 @@ import {
 } from '../../src/domain';
 import {
   NEWAPI_IMAGE_ADAPTER_ID,
+  JsonProviderRegistryStore,
   ProviderPackageRegistry,
   routeOpenAiCompatibleImageEditProfile,
   routeOpenAiCompatibleReferenceImageProfile,
@@ -24,10 +28,31 @@ import {
   UNICOMPAPI_PROVIDER_PACKAGE_VERSION,
   type ProviderRegistrySnapshot
 } from '../../src/platform';
+import { initializeProviderFeatureProfiles } from '../../src/platform/providers/provider-feature-profile-initialization';
+
+const roots: string[] = [];
+afterEach(async () => { await Promise.all(roots.splice(0).map(root => rm(root, { recursive: true, force: true }))); });
 
 const now = toIsoTimestamp('2026-08-11T06:00:00.000Z');
 
 describe('UniCompAPI reference image soft routing', () => {
+  it('initializes an old enabled model once, preserving the committed profile identity on every later initialization', async () => {
+    const root = await mkdtemp(path.join(os.tmpdir(), 'unicomp-profile-initialization-'));
+    roots.push(root);
+    const registryPath = path.join(root, 'registry.json');
+    const registry = new JsonProviderRegistryStore(registryPath);
+    await registry.save(baseSnapshot());
+    const packages = new ProviderPackageRegistry([unicompapiProviderPackageDescriptor]);
+    const before = await registry.load();
+    await initializeProviderFeatureProfiles(registry, packages);
+    const initialized = await registry.load();
+    expect(initialized.modelProfiles?.some(profile => profile.features.some(feature => feature.productFeature === 'reference_to_image'))).toBe(true);
+    expect(initialized.registryRevision).toBe(before.registryRevision! + 1);
+    const bytes = await readFile(registryPath, 'utf8');
+    await initializeProviderFeatureProfiles(registry, packages);
+    expect(await registry.load()).toEqual(initialized);
+    expect(await readFile(registryPath, 'utf8')).toBe(bytes);
+  });
   it('routes qwen-image-edit-2509 as reference_to_image through newapi.image', () => {
     const packages = new ProviderPackageRegistry([unicompapiProviderPackageDescriptor]);
     const snapshot = baseSnapshot();

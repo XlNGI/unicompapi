@@ -8511,7 +8511,7 @@ button.uc-project-center__project-card:disabled {
   min-width: 0;
   padding: var(--uc-space-5) var(--uc-space-6) 0;
   line-height: var(--uc-line-height-body);
-  scroll-padding-bottom: 180px;
+  scroll-padding-bottom: var(--uc-chat-composer-clearance, 180px);
 }
 
 .uc-chat-page__messages-inner {
@@ -8519,7 +8519,7 @@ button.uc-project-center__project-card:disabled {
   min-width: 0;
   min-height: 100%;
   margin: 0 auto;
-  padding-bottom: 180px;
+  padding-bottom: var(--uc-chat-composer-clearance, 180px);
 }
 
 .uc-chat-page__empty {

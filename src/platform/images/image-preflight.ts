@@ -14,6 +14,7 @@ import type {
   ImageSubmissionErrorCode
 } from '../../shared/image-submission-ipc';
 import type { ProviderRegistrySnapshot } from '../providers';
+import { latestCapabilityEvidenceByCapability } from '../providers/model-capability-selection';
 
 const acceptedCapabilityStates = [
   'verified_supported',
@@ -207,16 +208,8 @@ function selectEvidence(
   modelId: string,
   purpose: string
 ): ModelCapabilityEvidence | undefined {
-  return evidence
-    .filter(
-      (item) =>
-        item.modelId === modelId &&
-        item.capability === purpose &&
-        acceptedCapabilityStates.includes(
-          item.state as (typeof acceptedCapabilityStates)[number]
-        )
-    )
-    .sort((left, right) => right.recordedAt.localeCompare(left.recordedAt))[0];
+  const latest = latestCapabilityEvidenceByCapability(evidence.filter(item => item.modelId === modelId && item.capability === purpose)).get(purpose);
+  return latest && acceptedCapabilityStates.includes(latest.state as (typeof acceptedCapabilityStates)[number]) ? latest : undefined;
 }
 
 function requiresInput(draft: ImageWorkspaceDraft): boolean {

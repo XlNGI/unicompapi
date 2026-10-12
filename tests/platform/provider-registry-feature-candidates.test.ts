@@ -1,4 +1,4 @@
-import { mkdtemp, rm } from 'node:fs/promises';
+import { mkdtemp, readFile, rm } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
@@ -35,6 +35,7 @@ import {
   type ResolvedFeatureCandidateV1,
   type ResolvedFeatureSubjectV1
 } from '../../src/platform';
+import { initializeProviderFeatureProfiles } from '../../src/platform/providers/provider-feature-profile-initialization';
 
 const roots: string[] = [];
 const now = toIsoTimestamp('2026-08-03T16:00:00.000Z');
@@ -51,6 +52,79 @@ afterEach(async () => {
 });
 
 describe('registry-backed feature candidates', () => {
+  it('pins the latest exact capability revision into the admitted route without changing the profile', async () => {
+    const f = await candidateFixture();
+    const original = createModelCapabilityEvidence({ id: toCapabilityEvidenceId('route-pin-original'), modelId: toModelId('model-candidate-official'),
+      revision: 1, capability: 'image_generation', state: 'verified_supported', source: 'system_observed', recordedAt: now });
+    const latest = createModelCapabilityEvidence({ ...original, id: toCapabilityEvidenceId('route-pin-latest'), revision: 2, supersedesEvidenceId: original.id });
+    await f.registry.mutate(snapshot => ({ snapshot: { ...snapshot, capabilities: [...snapshot.capabilities, original, latest] }, result: undefined }));
+    const value = (await f.source.list(resolvedSubject())).find(candidate => candidate.routeTemplate.modelId === original.modelId)!;
+    expect(value.routeTemplate.capabilityEvidencePin).toMatchObject({ id: latest.id, revision: 2, fingerprint: expect.stringMatching(/^[a-f0-9]{64}$/) });
+    const publicValues = await f.service.listFeatureCandidates(subject);
+    expect(JSON.stringify(publicValues)).not.toContain('route-pin-latest');
+    expect(JSON.stringify(publicValues)).not.toContain('capabilityEvidencePin');
+  });
+  it('blocks new image selection after current evidence supersedes a supported profile receipt', async () => {
+    const fixture = await candidateFixture();
+    const original = createModelCapabilityEvidence({ id: toCapabilityEvidenceId('candidate-old-evidence'),
+      modelId: toModelId('model-candidate-official'), revision: 1, capability: 'image_generation',
+      state: 'verified_supported', source: 'system_observed', recordedAt: now });
+    await fixture.registry.mutate(snapshot => ({ snapshot: { ...snapshot, capabilities: [...snapshot.capabilities, original],
+      modelProfiles: snapshot.modelProfiles!.map(profile => profile.modelId === original.modelId ? { ...profile, evidenceIds: [original.id] } : profile) }, result: undefined }));
+    expect((await fixture.service.listFeatureCandidates(subject)).some(item => item.available)).toBe(true);
+    const revoked = createModelCapabilityEvidence({ ...original, id: toCapabilityEvidenceId('candidate-revoked-evidence'),
+      revision: 2, supersedesEvidenceId: original.id, state: 'unsupported' });
+    await fixture.registry.mutate(snapshot => ({ snapshot: { ...snapshot, capabilities: [...snapshot.capabilities, revoked] }, result: undefined }));
+    const candidates = await fixture.service.listFeatureCandidates(subject);
+    expect(candidates.find(item => item.modelName === 'Official image model')).toMatchObject({ available: false, unavailableReasons: ['feature_unsupported'] });
+    expect((await fixture.registry.load()).capabilities).toContainEqual(original);
+  });
+
+  it('keeps unrelated capability updates outside a prepared feature selection', async () => {
+    const fixture = await candidateFixture();
+    const candidate = (await fixture.service.listFeatureCandidates(subject)).find(item => item.available)!;
+    const prepared = await fixture.service.prepareSubmission({ subject, candidateId: candidate.candidateId });
+    const unrelated = createModelCapabilityEvidence({ id: toCapabilityEvidenceId('candidate-unrelated-evidence'),
+      modelId: toModelId('model-candidate-official'), revision: 1, capability: 'audio_understanding',
+      state: 'unknown', source: 'system_observed', recordedAt: now });
+    await fixture.registry.mutate(snapshot => ({ snapshot: { ...snapshot, capabilities: [...snapshot.capabilities, unrelated] }, result: undefined }));
+    await expect(fixture.service.validatePreparedSubmission({ subject, routeSelectionToken: prepared.routeSelectionToken,
+      confirmation: { schemaVersion: 1, confirmationId: prepared.confirmation.confirmationId, confirmed: true } })).resolves.toBeDefined();
+    expect((await fixture.service.listFeatureCandidates(subject)).find(item => item.candidateId === candidate.candidateId)?.cost).toEqual({ state: 'unknown' });
+  });
+  it.each(['verified_supported', 'unsupported', 'unknown'] as const)('revalidates capability evidence after preparation without rewriting the profile (%s)', async state => {
+    const fixture = await candidateFixture();
+    const values = await fixture.service.listFeatureCandidates(subject);
+    const candidate = values.find(item => item.available)!;
+    const prepared = await fixture.service.prepareSubmission({ subject, candidateId: candidate.candidateId });
+    const before = await fixture.registry.load();
+    const evidence = createModelCapabilityEvidence({ id: toCapabilityEvidenceId('candidate-current-evidence'),
+      modelId: toModelId('model-candidate-official'), revision: 1, capability: 'image_generation',
+      state, source: 'system_observed', recordedAt: now });
+    await fixture.registry.mutate(snapshot => ({ snapshot: { ...snapshot, capabilities: [...snapshot.capabilities, evidence] }, result: undefined }));
+    const after = await fixture.service.listFeatureCandidates(subject);
+    expect(after.find(item => item.candidateId === candidate.candidateId)).toMatchObject({ available: state === 'verified_supported' });
+    await expect(fixture.service.validatePreparedSubmission({ subject, routeSelectionToken: prepared.routeSelectionToken,
+      confirmation: { schemaVersion: 1, confirmationId: prepared.confirmation.confirmationId, confirmed: true } }))
+      .rejects.toMatchObject({ code: state === 'verified_supported' ? 'stale_route_selection' : 'candidate_unavailable' });
+    expect((await fixture.registry.load()).modelProfiles).toEqual(before.modelProfiles);
+  });
+  it('queries all product features without rewriting registry facts or invalidating a prepared selection', async () => {
+    const fixture = await candidateFixture();
+    await initializeProviderFeatureProfiles(fixture.registry, new ProviderPackageRegistry([packageDescriptor]));
+    const before = await fixture.registry.load();
+    const bytes = await readFile(fixture.registryPath, 'utf8');
+    const candidates = await fixture.service.listFeatureCandidates(subject);
+    const prepared = await fixture.service.prepareSubmission({ subject, candidateId: candidates.find(candidate => candidate.available)!.candidateId });
+    for (const productFeature of ['text_chat', 'text_reasoning', 'text_to_image', 'reference_to_image', 'image_edit', 'text_to_video', 'image_to_video'] as const) {
+      await fixture.source.list({ ...resolvedSubject(), productFeature });
+    }
+    await initializeProviderFeatureProfiles(fixture.registry, new ProviderPackageRegistry([packageDescriptor]));
+    expect(await fixture.registry.load()).toEqual(before);
+    expect(await readFile(fixture.registryPath, 'utf8')).toBe(bytes);
+    await expect(fixture.service.validatePreparedSubmission({ subject, routeSelectionToken: prepared.routeSelectionToken,
+      confirmation: { schemaVersion: 1, confirmationId: prepared.confirmation.confirmationId, confirmed: true } })).resolves.toBeDefined();
+  });
   it('combines exact profiles, package bindings and runtime policy without exposing route facts', async () => {
     const fixture = await candidateFixture();
     const values = await fixture.service.listFeatureCandidates(subject);
@@ -416,6 +490,8 @@ async function candidateFixture() {
   );
   return {
     registry,
+    registryPath: path.join(root, 'registry.json'),
+    source,
     service: new ProviderFeatureCandidateService(
       resolver(resolvedSubject()),
       source,

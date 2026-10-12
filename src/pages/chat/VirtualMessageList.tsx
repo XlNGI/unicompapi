@@ -7,11 +7,12 @@ export interface VirtualMessageListProps {
   readonly children?: ReactNode;
   readonly estimatedItemHeight?: number;
   readonly overscan?: number;
+  readonly rowGap?: number;
   readonly className?: string;
 }
 
 /** A dependency-free variable-height list for the chat viewport. */
-export function VirtualMessageList({ itemIds, containerRef, renderItem, children, estimatedItemHeight = 112, overscan = 5, className = 'uc-chat-page__message-list' }: VirtualMessageListProps) {
+export function VirtualMessageList({ itemIds, containerRef, renderItem, children, estimatedItemHeight = 112, overscan = 5, rowGap = 24, className = 'uc-chat-page__message-list' }: VirtualMessageListProps) {
   const listRef = useRef<HTMLOListElement>(null);
   const heightsRef = useRef(new Map<string, number>());
   const [layoutVersion, setLayoutVersion] = useState(0);
@@ -38,12 +39,13 @@ export function VirtualMessageList({ itemIds, containerRef, renderItem, children
   const layout = useMemo(() => {
     const offsets: number[] = [];
     let total = 0;
-    for (const itemId of itemIds) {
+    for (const [index, itemId] of itemIds.entries()) {
+      if (index > 0) total += rowGap;
       offsets.push(total);
       total += heightsRef.current.get(itemId) ?? estimatedItemHeight;
     }
     return { offsets, total };
-  }, [estimatedItemHeight, itemIds, layoutVersion]);
+  }, [estimatedItemHeight, itemIds, layoutVersion, rowGap]);
 
   const listTop = listRef.current?.offsetTop ?? 0;
   const localTop = Math.max(0, scrollTop - listTop);
@@ -63,7 +65,7 @@ export function VirtualMessageList({ itemIds, containerRef, renderItem, children
       for (const entry of entries) {
         const itemId = (entry.target as HTMLElement).dataset.virtualItemId;
         if (!itemId) continue;
-        const height = Math.ceil(entry.contentRect.height);
+        const height = Math.ceil(entry.borderBoxSize?.[0]?.blockSize ?? entry.contentRect.height);
         if (height > 0 && heightsRef.current.get(itemId) !== height) {
           heightsRef.current.set(itemId, height);
           changed = true;

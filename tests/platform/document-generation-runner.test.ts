@@ -28,6 +28,8 @@ import {
 import { toExecutionId, toFileReferenceId, toProjectId, toTaskId, toWorkId } from '../../src/domain';
 import type { DocumentGenerationProgressEvent } from '../../src/application/document-generation-service';
 import type { PresentationPageRequirement } from '../../src/domain/entities/presentation-page-requirement';
+import { buildDocumentIRFromOutline } from '../../src/domain/entities/document-agent';
+import { HostExecutionBudget } from '../../src/application/execution-budget';
 
 const temporaryRoots: string[] = [];
 
@@ -1045,6 +1047,46 @@ describe('document generation runner', () => {
     expect(await works.list(projectId)).toHaveLength(0);
     expect(await documentFiles(rootDirectory)).toEqual([]);
   });
+
+  it.each(['document-file-write', 'document-output-structure', 'document-atomic-publish', 'presentation-design-fallback'] as const)(
+    'does not begin the next local effect when cancellation arrives during awaited progress at %s', async operationId => {
+      const rootDirectory = await createProjectRoot();
+      const projectId = toProjectId('doc-project-cancel-await-progress');
+      const abortController = new AbortController();
+      const startedAt = Date.now();
+      const budget = new HostExecutionBudget({ startedAt, deadlineAt: startedAt + 90_000, maxToolCalls: 8, budgetUnits: 24 });
+      const events: DocumentGenerationProgressEvent[] = [];
+      const generate = vi.fn(generateTemporaryDocumentFile);
+      const publish = vi.fn(rename);
+      const requestArtDirection = vi.fn(async () => { throw new Error('semantic_response_incomplete'); });
+      const isFallback = operationId === 'presentation-design-fallback';
+      const runner = new DocumentGenerationRunner({ rootDirectory, projectId,
+        generateTemporaryFile: generate, publishFile: publish, now: () => '2026-10-12T10:00:00.000Z' });
+      try {
+        await expect(runner.run({ kind: isFallback ? 'ppt' : 'word', title: '取消门禁', executionBudget: budget,
+          contentFingerprint: 'e'.repeat(64), draftRevision: 1, sourceDraftId: 'cancel-await-progress',
+          outline: isFallback ? presentationOutline : outline, signal: abortController.signal, userRequirement: '制作项目汇报，保持页面简洁',
+          ...(isFallback ? { requestArtDirection, documentIR: buildDocumentIRFromOutline({ outline: presentationOutline, operation: 'create' }) } : {}),
+          onProgress: async event => {
+            events.push(event);
+            if (event.operationId === operationId && event.status === (isFallback ? 'completed' : 'started')) {
+              await Promise.resolve();
+              abortController.abort();
+            }
+          }
+        })).rejects.toMatchObject({ code: 'cancelled' });
+        if (operationId === 'document-file-write' || isFallback) expect(generate).not.toHaveBeenCalled();
+        expect(publish).not.toHaveBeenCalled();
+        if (!isFallback) expect(events.filter(event => event.operationId === operationId).map(event => event.status)).toEqual(['started', 'cancelled']);
+        if (isFallback) expect(requestArtDirection).toHaveBeenCalledTimes(1);
+        expect(await persistedExecutionStates(rootDirectory)).toEqual(['cancelled']);
+        expect(await new JsonWorkRepository(new NodeProjectStorage(rootDirectory), projectId).list(projectId)).toHaveLength(0);
+        expect(await documentFiles(rootDirectory)).toEqual([]);
+        expect(budget.stopReason).toBeUndefined();
+        expect(budget.signal.aborted).toBe(false);
+        } finally { budget.dispose(); }
+    }
+  );
 
   it('cleans temporary output when cancelled after writing and before verification', async () => {
     const rootDirectory = await createProjectRoot();
