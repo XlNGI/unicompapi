@@ -166,10 +166,20 @@ export class JsonProviderRegistryStore {
       snapshot: ProviderRegistrySnapshot
     ) => ProviderRegistryMutation<T> | Promise<ProviderRegistryMutation<T>>
   ): Promise<T> {
+    return this.mutateSnapshot(mutator, false);
+  }
+
+  /** Explicit, idempotent local migrations must not advance revisions on a no-op. */
+  async mutateIfChanged<T>(mutator: (snapshot: ProviderRegistrySnapshot) => ProviderRegistryMutation<T> | Promise<ProviderRegistryMutation<T>>): Promise<T> {
+    return this.mutateSnapshot(mutator, true);
+  }
+
+  private async mutateSnapshot<T>(mutator: (snapshot: ProviderRegistrySnapshot) => ProviderRegistryMutation<T> | Promise<ProviderRegistryMutation<T>>, skipUnchanged: boolean): Promise<T> {
     return sharedFileWriteCoordinator.runExclusive(this.registryPath, async () => {
       const current = await this.readDisk();
       const base = current ?? emptySnapshot();
       const mutation = await mutator(base);
+      if (skipUnchanged && JSON.stringify(parseSnapshot(mutation.snapshot)) === JSON.stringify(parseSnapshot(base))) return mutation.result;
       const next = parseSnapshot({
         ...mutation.snapshot,
         registryRevision: current

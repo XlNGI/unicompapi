@@ -23,6 +23,7 @@ import {
   ConversationTurnCoordinator,
   ThreadLegacyProjectionWorker,
   ConversationContextReader,
+  ModelHistoryReader,
   ConversationWebResearchService,
   DocumentTaskRuntimeService,
   ProjectContextRegistryService,
@@ -93,6 +94,7 @@ import { toConversationDto } from './conversation-controller';
 import { ConversationThreadReadController } from './conversation-thread-read-controller';
 import { ThreadFileReadAdapter } from './thread-file-read-adapter';
 import { ThreadFileRepository } from '../repositories/thread-file-repository';
+import { ThreadModelHistorySource } from '../repositories/thread-model-history-source';
 import { LegacyThreadMigration, type LegacyConversationSnapshot } from '../repositories/thread-migration';
 import type { ThreadReadApi } from './thread-file-read-adapter';
 import { verifyRetainedDocumentArtifacts } from './retained-document-artifact-projection';
@@ -318,6 +320,10 @@ export function createChatContextRuntime(
           new JsonWorkRepository(storage, session.projectId)
         )
       : undefined;
+    const modelHistory = contextThreadRepository
+      ? new ModelHistoryReader(new ThreadModelHistorySource(contextThreadRepository, session.projectId,
+          dependencies.threadFileWriteEnabled ? undefined : { getConversation: id => projectConversations.get(id) }))
+      : undefined;
     const ownedRunsByResponse = new Map<string, ConversationAgentRunId>();
     const sessions = new JsonConversationAgentSessionRepository(storage, session.projectId, executionTimestamp);
     let continuationRuntime: ConversationAgentContinuationRuntime;
@@ -491,6 +497,7 @@ export function createChatContextRuntime(
       },
       cancelExecution: async id => { await executionCoordinator.cancel(toConversationResponseExecutionId(id)); },
       ...(contextReader ? { contextReader } : {}),
+      ...(modelHistory ? { modelHistory } : {}),
       nextMessageId: () => conversationIds.nextMessageId(),
       projectLocalAssistant: async input => {
         await turnCoordinatorForContinuation?.projectAssistantMessage({
@@ -1042,6 +1049,7 @@ export function createChatContextRuntime(
       const artifacts = new ConversationResponseArtifactFactory({
         nativeSearch,
         conversations: projectConversations,
+        ...(modelHistory ? { modelHistory } : {}),
         drafts: responseDrafts,
         contexts: contextRepository,
         executions: responseExecutions,

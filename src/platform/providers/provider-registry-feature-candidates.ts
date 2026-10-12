@@ -2,19 +2,12 @@ import { supportsConversationImageInput } from './conversation-image-input';
 import { createHash } from 'node:crypto';
 import {
   parseUsageSchema,
-  toIsoTimestamp,
   toProtocolBindingId,
   validateParameterSchemaV2,
   type ParameterSchemaV2,
   type ProductFeature,
   type UsageSchemaV1
 } from '../../domain';
-import {
-  routeOpenAiCompatibleImageEditProfilesForEnabledModels,
-  routeOpenAiCompatibleImageProfilesForEnabledModels,
-  routeOpenAiCompatibleReferenceImageProfilesForEnabledModels
-} from './newapi/openai-compatible-image-routing';
-import { routeOpenAiCompatibleVideoProfilesForEnabledModels } from './newapi/openai-compatible-video-routing';
 import {
   isKnownUniCompApiModel,
   isUniCompApiPackage,
@@ -90,58 +83,13 @@ export class RegistryFeatureCandidateSource implements FeatureCandidateSourcePor
     private readonly registry: JsonProviderRegistryStore,
     private readonly packages: ProviderPackageRegistry,
     private readonly contracts: ProviderFeatureContractRegistry,
-    private readonly authorization: ProviderCandidateRuntimeAuthorizationPort
-  ) {}
+    private readonly authorization: ProviderCandidateRuntimeAuthorizationPort,
+    private readonly ready?: Promise<void>
+  ) { void ready?.catch(() => undefined); }
 
   async list(subject: ResolvedFeatureSubjectV1): Promise<readonly ResolvedFeatureCandidateV1[]> {
-    let snapshot = await this.registry.load();
-    if (subject.productFeature === 'text_to_image') {
-      const routed = await this.registry.mutate((current) => {
-        const next = routeOpenAiCompatibleImageProfilesForEnabledModels(
-          current,
-          this.packages,
-          toIsoTimestamp(new Date().toISOString())
-        );
-        return { snapshot: next, result: next };
-      });
-      snapshot = routed;
-    }
-    if (subject.productFeature === 'image_edit') {
-      const routed = await this.registry.mutate((current) => {
-        const next = routeOpenAiCompatibleImageEditProfilesForEnabledModels(
-          current,
-          this.packages,
-          toIsoTimestamp(new Date().toISOString())
-        );
-        return { snapshot: next, result: next };
-      });
-      snapshot = routed;
-    }
-    if (subject.productFeature === 'reference_to_image') {
-      const routed = await this.registry.mutate((current) => {
-        const next = routeOpenAiCompatibleReferenceImageProfilesForEnabledModels(
-          current,
-          this.packages,
-          toIsoTimestamp(new Date().toISOString())
-        );
-        return { snapshot: next, result: next };
-      });
-      snapshot = routed;
-    }
-    if (
-      subject.productFeature === 'text_to_video' ||
-      subject.productFeature === 'image_to_video'
-    ) {
-      const routed = await this.registry.mutate((current) => {
-        const next = routeOpenAiCompatibleVideoProfilesForEnabledModels(
-          current,
-          this.packages,
-          toIsoTimestamp(new Date().toISOString())
-        );
-        return { snapshot: next, result: next };
-      });
-      snapshot = routed;
-    }
+    await this.ready;
+    const snapshot = await this.registry.load();
     const candidates: ResolvedFeatureCandidateV1[] = [];
 
     for (const model of snapshot.models) {

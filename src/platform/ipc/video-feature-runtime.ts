@@ -1,5 +1,6 @@
 import type { ProviderFailureDiagnosticV1 } from '../../domain';
 import { randomUUID } from 'node:crypto';
+import { initializeProviderFeatureProfiles } from '../providers/provider-feature-profile-initialization';
 import { failureDiagnostic } from '../providers/failure-diagnostic';
 import {
   createProviderInvocationEvent,
@@ -163,7 +164,8 @@ export function createVideoFeatureControllerRuntime(
       options.providerRegistry,
       options.providerPackages,
       contracts,
-      options.runtimeAuthorization
+      options.runtimeAuthorization,
+      initializeProviderFeatureProfiles(options.providerRegistry, options.providerPackages)
     ),
     new RouteSelectionTokenVault()
   );

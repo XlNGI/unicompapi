@@ -2,6 +2,12 @@
 
 日期：2026-10-11
 
+## 2026-10-12 维护事实复核
+
+当前基线为 `origin/develop@d863d3f`，已存在 Coordinator、Thread Commit/Outbox、分页/虚拟列表、Tool/Artifact 投影和启动 authority fence，以下旧阶段描述只保留追溯用途。维护分支 `feature/office-agent-thread-model-convergence` 第一批 `c7004af` 修复工具选择、Legacy snapshot 恢复和真实验收分类；第二批接入完整 Thread 模型历史并将候选查询中的 profile 补写移到幂等初始化。实际完成度、验证和剩余 Legacy/Capability 调用方见 [2026-10-12 源码审计](office-agent-convergence-audit-20261012.md) 与 `PLANS.md` 顶部。
+
+真实 `kimi-k3` 本轮进入 Content Planning/Art Direction，但生成工具及文档校验失败、Work=0；未重试，不能记为 Provider 无工具调用，也不能宣称读回或外部矩阵通过。Legacy 直接执行快照写入和部分 Runtime 授权/引用读取仍待迁移，Thread 唯一会话事实源尚未全量达成。
+
 ## 2026-10-11 实施检查点
 
 ## 2026-10-11 Thread-first 写入收敛检查点

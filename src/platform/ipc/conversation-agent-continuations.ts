@@ -3,6 +3,7 @@ import { AsyncLocalStorage } from 'node:async_hooks';
 import {
   createConversationAgentRun, toConversationAgentRunId,
   toConversationResponseExecutionId, toConversationWorkflowId, toIsoTimestamp,
+  toThreadId,
   type Conversation, type ConversationAgentRunRepository,
   type ConversationAgentSessionRepository, type ConversationAgentSessionV1,
   type ControlledConversationInputReferenceV1, type ProjectId, type Message, type ConversationWorkflowV1
@@ -10,6 +11,7 @@ import {
 import { ConversationAgentSessionError, type ConversationAgentSessionService } from '../../application/conversation-agent-session-service';
 import { ConversationWorkflowService } from '../../application/conversation-workflow-service';
 import type { ConversationContextReader } from '../../application/conversation-context-reader';
+import type { ModelHistoryReader } from '../../application/model-history-reader';
 import { ConversationIntentOrchestrator, type ConversationIntentClassifierPort, type ConversationSemanticContext } from '../../application/conversation-intent-orchestrator';
 import type { ConversationApplicationService } from '../../application/conversation-service';
 import { JsonConversationWorkflowRepository } from '../repositories/json-conversation-workflow-repository';
@@ -41,6 +43,7 @@ export class ConversationAgentContinuationRuntime {
     readonly replayExecution: (responseExecutionId: string) => Promise<ConversationAgentResponseStartDto>;
     readonly cancelExecution: (responseExecutionId: string) => Promise<void>;
     readonly contextReader?: ConversationContextReader;
+    readonly modelHistory?: Pick<ModelHistoryReader, 'readConversation'>;
     readonly nextMessageId?: () => string;
     readonly projectLocalAssistant?: (input: { readonly threadId: string; readonly sourceMessageId: string; readonly assistantMessageId: string; readonly content: string; readonly createdAt: string }) => Promise<void>;
   }) {
@@ -321,8 +324,11 @@ export class ConversationAgentContinuationRuntime {
     }
   }
   private async semanticContext(conversation: Conversation, session: ConversationAgentSessionV1): Promise<ConversationSemanticContext> {
+    if (this.options.modelHistory) {
+      conversation = await this.options.modelHistory.readConversation({ threadId: toThreadId(conversation.id) });
+    }
     let threadItems: readonly { readonly itemId: { readonly namespace: string; readonly value: string }; readonly type: string; readonly content?: string }[] | undefined;
-    if (this.options.contextReader) {
+    if (!this.options.modelHistory && this.options.contextReader) {
       try { threadItems = (await this.options.contextReader.read(conversation.id)).items; } catch { /* compatibility fallback below */ }
     }
     const documents = conversation.messages.flatMap(message => message.state === 'completed' && message.documentResult

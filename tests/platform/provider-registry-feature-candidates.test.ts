@@ -1,4 +1,4 @@
-import { mkdtemp, rm } from 'node:fs/promises';
+import { mkdtemp, readFile, rm } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
@@ -35,6 +35,7 @@ import {
   type ResolvedFeatureCandidateV1,
   type ResolvedFeatureSubjectV1
 } from '../../src/platform';
+import { initializeProviderFeatureProfiles } from '../../src/platform/providers/provider-feature-profile-initialization';
 
 const roots: string[] = [];
 const now = toIsoTimestamp('2026-08-03T16:00:00.000Z');
@@ -51,6 +52,22 @@ afterEach(async () => {
 });
 
 describe('registry-backed feature candidates', () => {
+  it('queries all product features without rewriting registry facts or invalidating a prepared selection', async () => {
+    const fixture = await candidateFixture();
+    await initializeProviderFeatureProfiles(fixture.registry, new ProviderPackageRegistry([packageDescriptor]));
+    const before = await fixture.registry.load();
+    const bytes = await readFile(fixture.registryPath, 'utf8');
+    const candidates = await fixture.service.listFeatureCandidates(subject);
+    const prepared = await fixture.service.prepareSubmission({ subject, candidateId: candidates.find(candidate => candidate.available)!.candidateId });
+    for (const productFeature of ['text_chat', 'text_reasoning', 'text_to_image', 'reference_to_image', 'image_edit', 'text_to_video', 'image_to_video'] as const) {
+      await fixture.source.list({ ...resolvedSubject(), productFeature });
+    }
+    await initializeProviderFeatureProfiles(fixture.registry, new ProviderPackageRegistry([packageDescriptor]));
+    expect(await fixture.registry.load()).toEqual(before);
+    expect(await readFile(fixture.registryPath, 'utf8')).toBe(bytes);
+    await expect(fixture.service.validatePreparedSubmission({ subject, routeSelectionToken: prepared.routeSelectionToken,
+      confirmation: { schemaVersion: 1, confirmationId: prepared.confirmation.confirmationId, confirmed: true } })).resolves.toBeDefined();
+  });
   it('combines exact profiles, package bindings and runtime policy without exposing route facts', async () => {
     const fixture = await candidateFixture();
     const values = await fixture.service.listFeatureCandidates(subject);
@@ -416,6 +433,8 @@ async function candidateFixture() {
   );
   return {
     registry,
+    registryPath: path.join(root, 'registry.json'),
+    source,
     service: new ProviderFeatureCandidateService(
       resolver(resolvedSubject()),
       source,

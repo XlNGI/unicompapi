@@ -9,6 +9,7 @@ import {
   toConversationResponseStreamEventId,
   toIsoTimestamp,
   toMessageId,
+  toThreadId,
   type ConversationResponseDraftRepository,
   type ConversationResponseExecutionRepository,
   type MessageId,
@@ -19,6 +20,7 @@ import { freezeProjectContextOutboundSnapshots } from '../repositories/project-c
 import {
   ConversationContextBuilder,
   AgentContextAssembler,
+  type ModelHistoryReader,
   type ConversationContextReference
 } from '../../application';
 import { DEEPSEEK_PROVIDER_PACKAGE_ID } from './deepseek/deepseek-contracts';
@@ -42,6 +44,7 @@ export interface ConversationResponseArtifactFactoryDependencies {
   readonly executions: ConversationResponseExecutionRepository;
   readonly contextBuilder?: ConversationContextBuilder;
   readonly agentContextAssembler?: AgentContextAssembler;
+  readonly modelHistory?: Pick<ModelHistoryReader, 'readConversation'>;
   readonly attachments?: Pick<ConversationAttachmentContextService, 'resolve'> & Partial<Pick<ConversationAttachmentContextService, 'resolveImage'>>;
   readonly documentPages?: Pick<ConversationDocumentPageContextService, 'resolve'>;
   readonly documentTools?: Pick<ConversationDocumentToolSessionService, 'prepare' | 'registerExecution'>;
@@ -152,15 +155,23 @@ export class ConversationResponseArtifactFactory
       })
     )];
     if (nativeSearch && references.length) throw new TypeError('Native search context exceeds the authorized scope');
+    const modelConversation = this.dependencies.modelHistory
+      ? await this.dependencies.modelHistory.readConversation({ threadId: toThreadId(conversation.id) })
+      : conversation;
+    const modelUser = modelConversation.messages.find(message => message.id === draft.userMessageId);
+    if (!modelUser || modelUser.role !== 'user' || modelUser.state !== 'completed' || modelUser.revision !== draft.userMessageRevision) {
+      throw new TypeError('Authoritative model history user message changed');
+    }
+    assertStartupSignal(startupSignal);
     const contextEnvelope = draft.agentNative
       ? this.agentContextAssembler.assemble({
-          conversation,
+          conversation: modelConversation,
           currentUserMessageId: draft.userMessageId,
           currentUserContent: input.subject.outboundTextSnapshot,
           references
         })
       : this.contextBuilder.build({
-          conversation,
+          conversation: modelConversation,
           currentUserMessageId: draft.userMessageId,
           currentUserContent: input.subject.outboundTextSnapshot,
           omitHistory: pageReferences.length > 0 || !!nativeSearch || !!toolSelection,

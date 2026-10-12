@@ -37,7 +37,8 @@ import {
 } from './newapi/newapi-contracts';
 import {
   routeOpenAiCompatibleImageEditProfile,
-  routeOpenAiCompatibleImageProfile
+  routeOpenAiCompatibleImageProfile,
+  routeOpenAiCompatibleReferenceImageProfile
 } from './newapi/openai-compatible-image-routing';
 import { routeOpenAiCompatibleVideoProfile } from './newapi/openai-compatible-video-routing';
 import {
@@ -1249,6 +1250,9 @@ export class ProviderManagementFramework {
           );
           workingSnapshot = edited.snapshot;
           currentModel = edited.model;
+          const referenced = routeOpenAiCompatibleReferenceImageProfile(workingSnapshot, this.packages, currentModel, now);
+          workingSnapshot = referenced.snapshot;
+          currentModel = referenced.model;
           const videoed = routeOpenAiCompatibleVideoProfile(
             workingSnapshot,
             this.packages,

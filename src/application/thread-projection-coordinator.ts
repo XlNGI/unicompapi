@@ -161,20 +161,22 @@ export class ThreadProjectionCoordinator {
       if (isTerminalItemStatus(existing.status) && input.status !== existing.status) {
         return { thread, item: existing, alreadyCommitted: true };
       }
-      const item = updateItemV1(existing, { status: input.status, content: input.content, updatedAt: input.updatedAt });
+      const item = { ...updateItemV1(existing, { status: input.status, content: input.content, updatedAt: input.updatedAt }),
+        ...(input.legacyMessageSnapshot ? { legacyMessageSnapshot: input.legacyMessageSnapshot } : {}) };
       const updatedTurn = updateTurnForAssistant(turn, item);
       if (item.status === existing.status && item.content === existing.content && item.updatedAt === existing.updatedAt &&
+        JSON.stringify(item.legacyMessageSnapshot) === JSON.stringify(existing.legacyMessageSnapshot) &&
         JSON.stringify(updatedTurn) === JSON.stringify(turn)) {
         return { thread, item: existing, alreadyCommitted: true };
       }
       const result = await this.repository.append({
         threadId,
-        idempotencyKey: `thread-item-update:${threadId}:message:${input.assistantMessageId}:${input.status}:${input.updatedAt}`,
+        idempotencyKey: `thread-item-update:${threadId}:message:${input.assistantMessageId}:${input.status}:${input.updatedAt}:${sha256Hex(JSON.stringify(item.legacyMessageSnapshot ?? null))}`,
         occurredAt: input.updatedAt,
         expectedGeneration: thread.generation,
         turns: [updatedTurn],
         items: [item],
-        projectionOutbox: [projectionEvent(item, `thread-item-update:${threadId}:message:${input.assistantMessageId}:${input.status}:${input.updatedAt}`, input.updatedAt)]
+        projectionOutbox: [projectionEvent(item, `thread-item-update:${threadId}:message:${input.assistantMessageId}:${input.status}:${input.updatedAt}:${sha256Hex(JSON.stringify(item.legacyMessageSnapshot ?? null))}`, input.updatedAt)]
       });
       return { thread: result.thread, item, alreadyCommitted: result.alreadyCommitted };
     }

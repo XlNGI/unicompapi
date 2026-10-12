@@ -1,5 +1,15 @@
 # UniComp 开发计划
 
+### Office Agent 会话/模型维护第二批：Thread 模型历史与候选查询收敛（2026-10-12）
+
+在 `feature/office-agent-thread-model-convergence` 继续第一批 `c7004af`。新增 `ThreadModelHistorySource` 接入现有 `ModelHistoryReader`，Response Artifact Factory 的模型上下文和 Agent Continuation 语义上下文读取完整 Thread 消息，独立于 UI 分页；附件/reasoning/收据来自持久 snapshot，状态/正文以 Item 为准。Thread 写模式缺少 Thread、损坏或越界时阻断，仅只读模式未迁移数据保留明确 Legacy fallback。修复同 revision Assistant 更新遗漏 snapshot 元数据与其幂等键问题。
+
+模型接线实查：文本、图片、视频和文档 Agent 已使用统一候选服务，复用 Parameter Schema、Route Snapshot 和提交重验。本批将原图片/视频候选查询中的包合同 profile 补写移至 Runtime 初始化屏障；`mutateIfChanged` 保持写锁、历史校验、原子发布和备份，无变化不推进 revision/改写文件。模型启用命令同步补齐 reference image profile。回归覆盖旧已启用模型初始化一次、所有 feature 重复查询、准备选型不被查询失效、多图有界门禁不变。
+
+验证：Node/UI 400/400；串行全量 Vitest 335 文件、3398/3400（仅两个旧多图夹具依赖隐式初始化失败），夹具迁移至显式初始化后定向 2/2 通过，3398 个其余测试已通过，无未决失败，未放宽时限或多图规则。Thread Reader/Factory/Coordinator、Provider Candidate/启用、Continuation/Runtime 定向回归通过。`pnpm typecheck`、`pnpm lint`、`pnpm build` 通过；夹具后续测试类型/定向 lint 再检通过；Thread-first 真实 Electron + Mock Transport 普通 Agent、取消、PPT Tool Calling/Artifact、Word/Excel 登记通过；真实生成脚本 dry-run 通过（0 外发、未解密凭证）。构建仅有既有 CJS API、大 chunk 与 PDF.js 字体提示。
+
+剩余未完成：Legacy pending/stream/恢复/收据仍有直接写入，Document Tool 授权/brief、Continuation 引用/预算和 Workflow 等仍读取 Legacy DTO；兼容 `responses.start` 的 Tool facts 未观察到 Thread Call/Result；具体模型 Capability Evidence/profile/version 与旧 capabilityEvidenceId 路由仍需逐项收敛，费用继续保留 unknown。真实 `kimi-k3` 生成/校验失败及现场清理限制沿用第一批证据，未自动重试。完整实际调用方与下一批边界见 [本轮源码审计](docs/current/office-agent-convergence-audit-20261012.md)。本轮不宣称唯一会话事实源或完整外部 Provider 矩阵已经全部完成。
+
 ### Office Agent 会话/模型维护第一批：工具选择、Legacy 投影与真实验收分类（2026-10-12）
 
 重新核对执行基线：初始 `HEAD = develop = origin/develop = d863d3f4a7fdc850880d493ee146d7b7d1a27420`，工作区干净；当前独立分支 `feature/office-agent-thread-model-convergence`。属于既定功能收口后的维护治理，复用已存在的 Thread Coordinator/Outbox/分页/虚拟列表、Agent Runtime、Document Runtime 和 Completion Journal，历史计划中的阶段状态不覆盖真实源码。

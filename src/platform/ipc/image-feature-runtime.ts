@@ -1,4 +1,5 @@
 import { randomUUID } from 'node:crypto';
+import { initializeProviderFeatureProfiles } from '../providers/provider-feature-profile-initialization';
 import {
   createEmptyImageWorkspaceDraft,
   createImageWorkspaceDraft,
@@ -130,7 +131,8 @@ export function createImageFeatureControllerRuntime(
       options.providerRegistry,
       options.providerPackages,
       contracts,
-      options.runtimeAuthorization
+      options.runtimeAuthorization,
+      initializeProviderFeatureProfiles(options.providerRegistry, options.providerPackages)
     ),
     new RouteSelectionTokenVault()
   );

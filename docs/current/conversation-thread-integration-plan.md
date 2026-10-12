@@ -2,6 +2,10 @@
 
 日期：2026-10-10
 
+## 2026-10-12 最新维护检查点
+
+本文件旧阶段状态保留为历史整合计划；当前基线 `origin/develop@d863d3f` 已具备 Thread Coordinator、Durable Outbox、启动迁移/Shadow Compare/authority fence、分页/虚拟列表和执行/作品投影，不再重新开发。本轮维护新增完整 Thread 模型历史读取、修复 Legacy snapshot 恢复与 required 工具选择，并收敛图片/视频候选查询写入。实际证据及剩余直接 Legacy 写入、授权/引用读取、兼容 Tool 投影和模型能力版本问题见 [2026-10-12 源码审计](office-agent-convergence-audit-20261012.md)；验收以 `PLANS.md` 顶部和当前测试为准。
+
 状态：计划已冻结，阶段 0 完成，阶段 1 完成，阶段 2 Renderer 初步接线完成，阶段 3 Shadow Projection 接线完成，阶段 4 Item 索引初步完成，隔离 Electron/Mock Provider 验收完成；已补充一次真实调用生成 PPT 的人工验收事实
 
 ## 1. 基线与范围
