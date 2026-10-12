@@ -2,6 +2,27 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import evidence from '../scripts/lib/document-acceptance-evidence.cjs';
 
+test('validates both completed tool observations in the final request after tools are removed', () => {
+  const pages = [{ pageNumber: 1, contentText: 'MARKER-A' }, { pageNumber: 2, contentText: 'MARKER-B' }];
+  const messages = [
+    { role: 'assistant', tool_calls: [{ id: 'generation', function: { name: 'generate_pptx', arguments: '{"title":"Synthetic"}' } }] },
+    { role: 'tool', tool_call_id: 'generation', content: JSON.stringify({ status: 'success', observation: { generated: true }, artifactRefs: [{ kind: 'work' }] }) },
+    { role: 'assistant', tool_calls: [{ id: 'reading', function: { name: 'read_document_structure', arguments: '{"scope":"document"}' } }] },
+    { role: 'tool', tool_call_id: 'reading', content: JSON.stringify({ status: 'success', observation: { scope: 'document', structureUnit: 'physical_page',
+      pageCount: 2, totalPages: 2, revision: 123, sections: pages.map(page => ({ heading: `第 ${page.pageNumber} 页`, blocks: [{ text: page.contentText }] })) } }) }
+  ];
+  const proof = { pages, revision: 123, markers: ['MARKER-A', 'MARKER-B'] };
+  const checked = evidence.verifyGeneratedReadTranscript(messages, proof);
+  assert.equal(checked.observationMatchesPhysicalFile, true);
+  assert.deepEqual(checked.toolCalls.map(call => call.toolId), ['generate_pptx', 'read_document_structure']);
+  const wrongId = structuredClone(messages); wrongId[3].tool_call_id = 'generation';
+  assert.throws(() => evidence.verifyGeneratedReadTranscript(wrongId, proof), /tool_call_id_mismatch/);
+  const changedPage = structuredClone(messages);
+  const result = JSON.parse(changedPage[3].content); result.observation.sections[1].blocks[0].text = 'changed page';
+  changedPage[3].content = JSON.stringify(result);
+  assert.throws(() => evidence.verifyGeneratedReadTranscript(changedPage, proof), /physical_page_text_mismatch/);
+});
+
 test('Art Direction evidence prevents a false no-generation-tool diagnosis', () => {
   assert.equal(evidence.generationFailure({ workCount: 0, terminalState: 'completed', artDirectionRequests: 1 }),
     'generation_started_without_registered_work');

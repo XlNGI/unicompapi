@@ -4,6 +4,12 @@
 
 ## 2026-10-12 维护事实复核
 
+`d589426` 后继续完成本地收敛：共享 `ThreadConversationRepository` 将恢复、独立 Office、CRUD、Context 与最近项目摘要接入唯一 Coordinator/Commit；metadata 投影债务可从已提交 Outbox 重建，已切换 fence 的启动按 Thread 权威恢复。旧图片预检按最新 revision 判断，新 Route 固定证据 ID/版本/指纹供媒体 Task/Vidu 使用，历史 Task 兼容合同保留。最终全量 3475/3475、Node/UI 401/401、typecheck/lint/build 与默认/回滚 Electron 门禁通过。
+
+真实 `glm-5.2` 在批准的 5 次上限内实际使用 4 次请求，生成并读回唯一 4 页正式 PPT；保存的 Response/Document/Work/File/Hash、Observation 身份/版本、最终回答与 Thread 收据经本地复核得到 `verified_delivery`。原验收器 final 分支漏记及结算时序导致严格脚本 `FAIL`，原逐页 wire 文本记录未捕获，保留该结论而不追改为 PASS；脚本已修复，未自动再次收费。完整事实与外部矩阵边界以 PLANS 顶部及 [机器证据](../evidence/thread-model-convergence-20261012.json) 为准。
+
+负责人最终明确选择“按当前交付结果收口，不再付费”；本轮按该已核实边界完成，不追加外部请求，也不把未捕获的严格 wire 记录或未测试的 Provider 矩阵记为通过。
+
 `53fcba0` 后的本地维护已将授权/引用、Document Tool 重验、Continuation 预算/重放/恢复绑定和 Workflow/联网确认本地回复接到完整 Thread DTO 与 Commit/Outbox。新增隔离回归证明 Legacy message save 持续失败时仍可只生成一次并完成读回、唯一 Work 与 Thread 收据。恢复直接写入、独立 Office、通用会话 CRUD 和部分 Context 兼容路径仍待迁移；最新验收数量见 PLANS 顶部和源码审计，不将本批视为整体目标全量完成。
 
 后续实际收敛：Thread 读取只消费 manifest 已提交字节；Thread 写模式普通回复的 pending/stream/终态和正式 PPT Assistant 收据先进入 Thread Commit/Outbox，Legacy 故障可独立重放。剩余恢复/授权/Workflow/其他 Office 与 Capability 接线沿当前源码审计继续，未标记全部完成。

@@ -1,5 +1,21 @@
 # UniComp 开发计划
 
+### 持续维护收敛：共享 Thread 仓储、恢复/Office/CRUD 与真实交付核验（2026-10-12）
+
+从 `d589426` 继续，未以单批提交作为整体停点。新增 `ThreadConversationRepository` 实现原 Conversation 仓储合同，所有写入仍经过唯一 Turn Coordinator/Thread Commit。默认 Thread 模式的创建、消息、改名、归档/恢复/删除、取消后编辑、Context Registry、最近项目摘要、本地恢复以及独立 Office 读写均已接入；Legacy 保留为首次迁移、只读兼容、Outbox 投影和显式回滚。元数据 Outbox 与消息同一 Commit，metadata 投影中断时仍能读回已提交标题/状态/revision；已切换 fence 的重启先恢复 Thread，不重新拿滞后 Legacy 做权威准入。投影遇到失败保留顺序欠账，不重发 Provider/工具。
+
+Word/Excel/PPT 正式收据在 Work/File/大小/Hash 重验后写入 Thread 并附到 Artifact。修复同 User Item 被不同 Host 命令重复接管造成的 Turn 重复，以及 Turn 写入/读回中将结构化 Item identity 当成字符串造成多个 Assistant 合并。新增原生消息、Office 元数据/收据、CAS 冲突、越界、metadata 中断、重启、Context 和回滚摘要回归。
+
+能力侧：旧图片预检的 4 个失败复现确认其会跳过最新负向/未知证据并复活历史支持；现与统一候选共用按 revision 选最新的规则。新 Route Snapshot 可固定 Capability Evidence ID/revision/指纹，图片/视频 Task 与 Vidu 执行读取同一已接受快照，变更/越界/篡改在外发前拒绝。历史 Task/Route 保留 immutable 合同；参数继续来自同一 Feature Contract/Schema，费用无可靠证据继续 unknown，不根据模型名称推断能力。
+
+真实 Electron 再次复现切页后尾部消息不可见：数据完整，但列表异步出现后挂载期 ResizeObserver 未重新绑定。现按已解析会话和消息数量观察实际消息列表；新 hook 回归在原实现 `observe=0` 稳定失败，修复后通过。Thread 导航连续两次、Legacy 导航、Agent-native/兼容响应与 Legacy 回滚 Mock Provider/Office 均通过；Word/Excel 增加 Thread 正式收据与 Artifact 断言。最后静态全量 Vitest **337 文件、3475/3475**，Node/UI **401/401**，typecheck、lint、生产 build 和脚本 lint/语法通过，未放宽时限。旧可选 `verify-conversation-runtime.cjs` 因历史夹具未选择语义模型而报 `model_selection_required`，不列为通过；补齐共享仓储入口及失败 5 秒退出，未将生产流程回退到本地猜测路由。当前必需 Electron 门禁使用正式 Mock/导航套件。
+
+负责人本轮明确批准 `glm-5.2` 单个合成生成/读回用例：总请求最多 5、普通输出 1024 token、Art Direction 4096 token、自动重试 0、费用 unknown。首次本地夹具仍写 Legacy，被 Thread 控制器拦截，**0 外发**；修正为共享仓储后 dry-run 实际确认 2 条种子消息已提交到 Thread、0 解密调用/0 外发。实际外部请求 **4 次**，生成 1 个正式 Work、4 页 PPT、70,285 bytes、Hash `7aa967878c5771a800cf8eed07e96b626488b68def386d7a73110d0749a31033`；Response/Document 均 completed，生成/读取收据成功，最终回答页数和两个标记匹配物理文件。
+
+原严格验收脚本仍记录 `production_tool_roundtrip_not_verified / FAIL`：final-answer 分支提前返回漏记读取校验，终态检查又早于本地 close/结算。已补共用完整工具 transcript 校验及 `waitForMutations()`，Node 新回归覆盖去除工具后的最终请求、错配 call id 和篡改页面拒绝；未为补记录再次发费。对保留现场进行只读本地复核，确认 Work=1、读回 Observation 的作品/版本/页数匹配 Hash、Thread Call/Result=2/2、Artifact=1、Assistant 正式收据一致，结论为 **verified_delivery**。原报告不覆盖，原逐页 wire 文本比对 **not_recorded**，不追记为通过；Art Direction 曾进入已允许的设计回退，不记为 D3 视觉方案全量验收。真实用户配置 Hash 保持、用户项目未改写、unknown 重试 0。
+
+负责人最终明确选择“按当前交付结果收口，不再付费”。本地目标按上述已核实交付边界完成，本轮外部请求固定为 4，不再追加。原严格 wire 记录缺口及其他 Provider 的外部矩阵继续如实保留，不追认为全量通过；不再以补证为由重发请求。共享 acceptance/base64 写放大另属性能维护，不以本批冒称已消除。验收证据见 [统一收敛证据](docs/evidence/thread-model-convergence-20261012.json)，真实预算与命令见 [验收方案](docs/current/thread-model-provider-acceptance-proposal-20261012.md)，实际调用方见 [源码审计](docs/current/office-agent-convergence-audit-20261012.md)。
+
 ### 维护收敛：Thread 授权/引用及澄清、Workflow、联网确认回复（2026-10-12）
 
 从 `feature/office-agent-thread-model-convergence@53fcba0` 干净工作区继续统一目标。隔离 composed Host 先复现所有 Legacy message save 拒绝时请求报 `message_not_completed`；修复后在相同故障下完成一次 PPT 生成、物理文件读回、唯一 Work 登记和父任务 completed，Thread 有两组 Call/Result、Artifact 与正式 Assistant 收据，Legacy 仍为空。收费请求 0、未知结果重试 0，真实用户数据未改写。

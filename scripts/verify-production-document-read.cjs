@@ -6,7 +6,7 @@ const path = require('node:path');
 const { parseArgs } = require('node:util');
 const { app, safeStorage } = require('electron');
 const JSZip = require('jszip');
-const { toolReceipts, safeCodes, generationFailure } = require('./lib/document-acceptance-evidence.cjs');
+const { toolReceipts, safeCodes, generationFailure, verifyGeneratedReadTranscript } = require('./lib/document-acceptance-evidence.cjs');
 
 // Run only after a production build. Default mode performs local setup without
 // decrypting provider credentials or making a network request. The live mode
@@ -249,6 +249,8 @@ async function inspectOutbound(request, domain, expectedModel) {
         'final_answer_observation_missing');
       requireCondition(toolMessages.some(message => message.content.includes(markers[0]) &&
         message.content.includes(markers[1])), 'final_answer_observation_facts_missing');
+      Object.assign(activeCase, verifyGeneratedReadTranscript(payload.messages, { ...generatedVerification, markers,
+        validateCall: (toolId, args) => domain.validateCanonicalToolArguments(domain.createCanonicalToolRegistry().get(toolId), args) }));
       activeCase.finalAnswerRequests = (activeCase.finalAnswerRequests ?? 0) + 1;
       activeCase.providerStages.push({ stage: 'final_answer', model: safeModel(payload.model),
         status: 'request_started', toolsVisible: false, outputTokenLimit: tokenLimit });
@@ -438,7 +440,7 @@ async function seedGenerationConversation(platform, domain, storage, projectId) 
   const now = domain.toIsoTimestamp(new Date().toISOString());
   let conversation = domain.createConversation({ id: domain.toConversationId('conversation-synthetic-generation-' + randomUUID()),
     projectId, title: '合成生成读回验收', createdAt: now });
-  const repository = new platform.JsonProjectConversationRepository(storage, projectId);
+  const repository = await runtime.getConversationRepository({ projectId, projectName: '合成生成读回验收', rootDirectory: isolatedProjectAtStartup });
   await repository.create(conversation);
   let previousRevision = conversation.revision;
   conversation = domain.addUserMessage(conversation, { id: domain.toMessageId('requirement-' + randomUUID()),
@@ -483,7 +485,7 @@ async function seedConversation(platform, domain, storage, projectId, fixture, l
   const now = domain.toIsoTimestamp(new Date().toISOString());
   const id = domain.toConversationId(`conversation-synthetic-read-${label}-${randomUUID()}`);
   let conversation = domain.createConversation({ id, projectId, title: '合成只读工具验收', createdAt: now });
-  const repository = new platform.JsonProjectConversationRepository(storage, projectId);
+  const repository = await runtime.getConversationRepository({ projectId, projectName: '合成只读工具验收', rootDirectory: isolatedProjectAtStartup });
   await repository.create(conversation);
   const messageId = domain.toMessageId(`message-synthetic-document-${randomUUID()}`);
   const revision = conversation.revision;
@@ -539,6 +541,7 @@ async function executeCase(platform, domain, storage, projectId, fixture, candid
     } catch { /* keep timeout report bounded */ }
     throw Object.assign(new Error('case_deadline_exceeded'), { code: 'case_deadline_exceeded' });
   }
+  await runtime.waitForMutations();
   entry.terminalState = execution.state;
   const executionEvents = await new platform.JsonConversationResponseExecutionRepository(storage, projectId).listEvents(executionId);
   entry.terminalDiagnostics = executionEvents.flatMap(event =>
@@ -804,6 +807,16 @@ async function run() {
   const outerOutputLimit = d3LayoutMode ? 4_096 : 1_024;
   requireCondition(field && (field.minimum ?? 1) <= 1_024 && (field.maximum ?? outerOutputLimit) >= outerOutputLimit, 'bounded_output_unavailable');
   const parameterValues = { [field.fieldId]: Math.min(field.maximum ?? outerOutputLimit, outerOutputLimit) };
+  if (!live) {
+    const seeded = generationMode ? await seedGenerationConversation(platform, domain, storage, projectId)
+      : await seedConversation(platform, domain, storage, projectId, fixture, 'dry-run');
+    const owner = await runtime.getConversationRepository({ projectId, projectName: '合成工具验收', rootDirectory: projectRoot });
+    const committed = await owner.get(seeded.id);
+    requireCondition(committed?.id === seeded.id && committed.projectId === projectId && committed.messages.length === seeded.messages.length,
+      'synthetic_thread_fixture_not_committed');
+    report.fixtureThreadAuthorityVerified = true;
+    report.fixtureMessageCount = committed.messages.length;
+  }
   if (live) {
     requireCondition(safeStorage.isEncryptionAvailable(), 'credential_encryption_unavailable');
     if (liveGeneration) await executeCase(platform, domain, storage, projectId, fixture, candidate, parameterValues, 'document');
@@ -827,6 +840,7 @@ async function cleanup() {
   lifecycleAbort.abort();
   await runtime?.interruptActiveResponses().catch(() => undefined);
   await runtime?.waitForMutations().catch(() => undefined);
+  await collectGenerationEvidence().catch(() => undefined);
   deepSeekRuntime?.dispose();
   newApiRuntime?.dispose();
   proxy?.dispose();

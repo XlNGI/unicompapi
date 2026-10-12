@@ -58,18 +58,32 @@ Continuation 重新读取会话后校验 pinned User、项目与状态；恢复�
 
 ## 剩余实际调用方和下一批边界
 
+### `d589426` 后持续收敛：仓储、恢复、Office、CRUD 与证据快照
+
+默认 Thread 写模式新增 `ThreadConversationRepository`，继续实现原有 `ProjectConversationRepository` 合同，写入经过唯一 `ConversationTurnCoordinator`。通用创建、消息、重命名、归档/恢复/删除、取消后编辑、Context Registry 和本地恢复共享该适配层；不再把 Legacy 的 revision 或消息内容作为这些路径的业务权威。单次保存把变更 Message/Turn、标题/状态和 Outbox 放入同一个 Thread Commit，保留原项目校验和 CAS。
+
+元数据投影也新增可恢复的 `thread_upsert` Outbox；manifest 已提交而 `thread.v1.json` 更新失败时，读取可从提交的元数据/Items 重建当前 revision、状态与计数，重启恢复持久化该结果。已记录 `new_authoritative` fence 的项目启动先恢复 Thread，再重放 Legacy 欠账；不重新把滞后的 Legacy 全量快照当成启动准入基线。首次迁移仍保留备份、Ledger 和 Shadow Compare 门禁。Legacy Outbox 遇到首次失败停止该次顺序投影，避免后来的 Assistant 越过缺失的 User；后续可按原顺序重放，Provider/工具均不重发。
+
+Electron 独立 DocumentGeneration 通过 Chat Runtime 提供的同一受控仓储读写，不再自行实例化生产 Legacy 权威；PPT 修改范围/重试判断也注入相同 Reader。Word/Excel/PPT 正式收据在重新核对 Work、File、大小、Hash 和项目后提交 Thread，并附到 Artifact。项目外的最近会话摘要在 fence 有效时读取 Thread；显式回滚由同一个配置选择 Legacy。取消后编辑和 Workflow 再次接管已提交 User Item 会复用原 Turn；Turn 投影/读回使用结构化 Item identity，避免多个 Assistant 被 `[object Object]` 合并。
+
+模型接线继续保持 Feature Contract 的参数与费用来源；旧图片预检改用统一的 revision 选择函数，最新 unsupported/unknown/restricted/verification_failed 不再使旧 supported 复活。新 Route Snapshot 可保存具体 Capability Evidence 的 ID/revision/Hash，图片/视频 Task 和 Vidu 路由按该快照读取；内容、模型、用途、版本或 Hash 不一致时在外发前拒绝。已接受的历史 Task/Route 继续保留 immutable evidence 合同，未迁移的旧 route 沿原显式兼容读取，不把它记为新候选能力依据。
+
+真实 Electron 还复现切页返回时末条消息不可见：数据已提交，但消息列表延迟出现后原挂载期 ResizeObserver 没有重新绑定。现按已解析会话和显示消息数量绑定实际列表。新增 hook 回归在旧实现下 `observe=0` 失败，修复后通过；修复后 Thread 导航连续两次通过，Legacy 导航保持通过。不能把该失败解释为 Provider 无响应。
+
+本地完成边界及最终数量以 PLANS 顶部和新机器证据为准。负责人批准后，`glm-5.2` 实际 4 次请求完成生成/读回交付，本地只读复核得到 `verified_delivery`；原严格验收器漏记的逐页 wire 比较仍保留 not_recorded。负责人最终明确“按当前交付结果收口，不再付费”，不追加调用。具体预算与结果见 [真实验收方案](thread-model-provider-acceptance-proposal-20261012.md)。共享 acceptance/base64 写放大属于单独性能治理，本批不裁剪真实历史或修改存储内容。
+
 | 实际调用方 | 当前用途及剩余问题 | 迁移目标 |
 |---|---|---|
 | `ConversationResponseArtifactFactory` | Thread 写模式 revision/user、工具/附件授权和模型历史均接入完整 Thread Reader；pending 走 Outbox | 继续审查独立 Office/恢复调用方，保留项目/版本/权限重验 |
 | `conversation-text-submission.createConversationLinkedLifecycle` | Thread 写模式 start/delta/complete/fail/cancel 已由 persisted-event hook 提交 Thread/Outbox；Legacy 回滚路径仍直接保存 | 保留 Completion Journal；继续核对恢复与其他入口 |
-| `chat-context-runtime.projectThreadStreamEvent` | 已从 Response/Thread 构建权威 snapshot；正式 PPT 收据也先提交 Thread；恢复等仍有直接兼容写入 | 继续消除恢复的 Legacy 权威读取/写入，失败只形成 projection debt |
+| `chat-context-runtime.projectThreadStreamEvent` | Response/Thread snapshot、正式 PPT 收据和本地恢复均走 Thread；Legacy 只保留投影与回滚 | 保留失败/取消/unknown、租约和本地恢复门禁 |
 | `ConversationAgentContinuationRuntime`、`JsonConversationAgentSessionRepository` | Thread 写模式引用校验、初始预算、重放 DTO、本地澄清和恢复绑定 CAS 已接入完整 Thread；Run/Response/租约合同保留 | 继续审查恢复终态及其他直接写入 |
 | `ProjectConversationResponseSubjectResolver`、`ConversationDocumentToolSessionService` | Thread 写模式从同一完整 Reader 获取 revision/content/收据、brief 和授权绑定；Work/File/Hash 原门禁保留 | 继续核对变更/撤销/恢复边界，模型不决定正式 Work |
-| Workflow、Document Generation、Attachment/Page Context、Native Search | Workflow/Native Search 的会话读取、本地回复与确认回复已进入 Thread；独立 Document Generation 和部分 Context Registry 仍依赖 Legacy | 逐个替换剩余事实读取/写入，保留离线 Legacy 回滚；不新增执行循环 |
+| Workflow、Document Generation、Attachment/Page Context、Native Search | 默认 Thread 模式会话读取、确认回复、独立 Office、CRUD 与 Context Registry 已接入共享仓储；原 Legacy 构造仅保留显式兼容/回滚 | 后续以外部验收和兼容删除评估为边界，不新增执行循环 |
 | `RegistryFeatureCandidateSource` | 已统一候选入口、参数/Route 重验及相关模型证据指纹；无对应模型证据仍沿已批准包合同，不宣称真实能力验证 | 继续审查完整 Profile/Evidence/Route 持久快照，保持费用 unknown，不猜名称或静默换模型 |
-| `ProviderOperationRouter`、旧 image preflight/draft factory | 历史图像/视频执行仍消费 capabilityEvidenceId；新候选路径消费 Feature Contract | 先补两者等价性与未知证据测试，再收敛为同一能力快照 |
+| `ProviderOperationRouter`、旧 image preflight/draft factory | 新预检按最新 revision 拒绝负向/未知；新 Route pin 固定证据 ID/版本/Hash 并供媒体 Task/Vidu 使用；历史 Task 仍精确消费原 immutable ID | 保留旧协议兼容矩阵，不以旧 Task 合同覆盖当前候选；真实外部 Provider 独立验收 |
 
-后续优先级：授权/引用 Reader 和本地回复的 Thread 主路径已完成本地复现与修补；继续迁移恢复、独立 Office、通用会话 CRUD 和剩余 Context 调用方，并收敛 Capability Evidence/Profile/Route 的统一版本与参数来源。外部 Provider 后续验收需另一个明确预算与新隔离项目，未知结果不自动重发。本轮不把所有待处理调用方标为完成，也不扩展成完整 Provider 矩阵通过。
+本轮本地门禁、脱敏证据及真实交付复核已完成，并按负责人最终选择收口，不再收费。历史协议、显式回滚、只读迁移入口保留；共享 metadata 写放大另按测量治理，不扩大副作用执行入口。未覆盖的外部 Provider/严格 wire 记录不扩展成矩阵通过。
 
 ## 验证
 

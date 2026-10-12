@@ -35,4 +35,34 @@ function generationFailure(evidence) {
   return 'generation_not_verified';
 }
 
-module.exports = { toolReceipts, safeCodes, generationFailure };
+function verifyGeneratedReadTranscript(messages, proof) {
+  const calls = messages.flatMap(message => message.tool_calls ?? []);
+  const results = messages.filter(message => message.role === 'tool');
+  if (calls.length !== 2 || results.length !== 2 || calls[0].function?.name !== 'generate_pptx' ||
+      calls[1].function?.name !== 'read_document_structure' || !calls.every(call => typeof call.id === 'string') || calls[0].id === calls[1].id) throw new Error('final_answer_tool_sequence_invalid');
+  const parsed = results.map((message, index) => {
+    if (message.tool_call_id !== calls[index].id || typeof message.content !== 'string') throw new Error('tool_call_id_mismatch');
+    const args = JSON.parse(calls[index].function.arguments);
+    proof.validateCall?.(calls[index].function.name, args);
+    if (index === 1 && args.scope !== 'document') throw new Error('unexpected_tool_scope');
+    const result = JSON.parse(message.content);
+    if (result.status !== 'success') throw new Error('generation_or_read_tool_failed');
+    return result;
+  });
+  if (parsed[0].observation?.generated !== true || !parsed[0].artifactRefs?.some(ref => ref.kind === 'work')) throw new Error('generation_artifact_missing');
+  const observation = parsed[1].observation;
+  if (!proof.pages?.length || observation?.scope !== 'document' || observation.structureUnit !== 'physical_page' ||
+      observation.pageCount !== proof.pages.length || observation.totalPages !== proof.pages.length ||
+      observation.revision !== proof.revision || observation.sections?.length !== proof.pages.length) throw new Error('physical_observation_metadata_mismatch');
+  for (const [index, page] of proof.pages.entries()) {
+    const section = observation.sections[index];
+    const text = section.blocks?.map(block => block.text ?? '').join('');
+    if (section.heading !== `第 ${page.pageNumber} 页` || text?.trim() !== page.contentText.trim()) throw new Error('physical_page_text_mismatch');
+  }
+  if (!proof.markers.every(marker => results[1].content.includes(marker))) throw new Error('generated_marker_missing');
+  return { toolCalls: calls.map((call, index) => ({ callRef: `call-${index + 1}`, toolId: call.function.name,
+    ...(index === 1 ? { scope: 'document' } : {}) })), toolCallIdMatched: true,
+    observationContainsExpectedFacts: true, observationMatchesPhysicalFile: true };
+}
+
+module.exports = { toolReceipts, safeCodes, generationFailure, verifyGeneratedReadTranscript };
