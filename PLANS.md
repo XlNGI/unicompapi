@@ -1,5 +1,11 @@
 # UniComp 开发计划
 
+### 维护修复：Thread 提交可见性与 Windows 原子读写（2026-10-12）
+
+从 `feature/office-agent-thread-model-convergence@cf1d724` 干净工作区继续按统一目标修复。离线发送回归抓到 manifest 替换的 Windows `EPERM`，其后中文 JSONL 读取又失败；不是外部 Provider 无响应的证据。仓储实际还会读取 manifest 之后的未提交完整记录：隔离旧版/新版对照在第二次 Commit 前分别看到 2/1 条 Item，提交后均为 2 条，证据见 [Thread 已提交前缀](docs/evidence/thread-committed-prefix-20261012.json)。
+
+修复 `readCommittedRecords` 与恢复验证只解析 `committedBytes` 前缀，Turn/Item hydration 共用同一 manifest；上一记录 Hash 从 UTF-8 字节切片取得；Thread JSON 原子替换与读取使用共享文件锁，临时文件使用唯一名、独占打开、fsync 和 finally 清理。没有重放 Provider/工具、改写真实项目或扩大正式 Work 门禁。仓储 15/15、迁移 11/11 通过；Windows 共享冲突用例模拟持有的读取，要求替换等待读句柄释放且只执行一次 Commit。
+
 ### 维护优化：会话历史持久化开销与整体审查（2026-10-12）
 
 本批继续处理共享 `project-metadata.json` 的重复深拷贝：事务内部改为借用已校验的输入值，仅保留 Draft 建立和提交快照两次隔离；公开解析、`get`、`set`、`entries`、备份、CAS、敏感字段校验和原子写入合同不变。新增 5 组基础隔离/失败/损坏数据回归，存储、锁、Session、Runtime、Completion、Provider 恢复定向共 116 项通过。
