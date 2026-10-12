@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { ReactElement, ReactNode } from 'react';
 import type * as ReactModule from 'react';
 import type { ThreadItemsPageDto, ThreadSummaryPageDto } from '../../src/shared/chat-context-ipc';
+import type { ProductionTraceEventDto } from '../../src/shared/conversation-production-ipc';
 
 // A small hook runner lets us exercise the real JSX event handlers without a DOM.
 // State is allocated by React's hook ordering, never by component-specific indexes.
@@ -200,7 +201,7 @@ describe('chat composer event behavior', () => {
     const listThreadSummaries = vi.fn(async () => summaries);
     const getThreadItemsPage = vi.fn(async () => page);
     Object.assign(window.unicomp!.chatContexts!, {
-      listThreadSummaries, getThreadItemsPage, getThread: vi.fn()
+      listThreadSummaries, getThreadItemsPage, getThread: vi.fn(async () => ({ ok: true, value: summaries.value.items[0] }))
     });
     Object.assign(window.unicomp!.storage!, {
       listProjects: vi.fn(async () => ({ ok: true, value: [{
@@ -244,6 +245,101 @@ describe('chat composer event behavior', () => {
     expect(startWorkflow).not.toHaveBeenCalled();
     expect(answerWorkflow).not.toHaveBeenCalled();
     expect(startResponse).not.toHaveBeenCalled();
+  });
+
+  it('accepts only one Agent send when Enter and click fire before React renders', async () => {
+    const pending = deferred<{ ok: false; error: { code: 'response_start_cancelled'; message: string } }>();
+    const startAgentResponse = vi.fn((_request: { clientCommandId: string }) => pending.promise);
+    Object.assign(window.unicomp!.chatContexts!, { startAgentResponse });
+    await settle();
+    await type('只发送一次');
+    const click = element('发送消息').props.onClick as () => void;
+    const enter = element('对话输入').props.onKeyDown as (event: unknown) => void;
+    enter({ key: 'Enter', shiftKey: false, nativeEvent: { isComposing: false }, preventDefault: vi.fn() });
+    click();
+    expect(startAgentResponse).toHaveBeenCalledOnce();
+    pending.resolve({ ok: false, error: { code: 'response_start_cancelled', message: 'Stopped' } });
+    await settle();
+  });
+
+  it('shows the accepted user message and command progress before Agent start returns', async () => {
+    const pending = deferred<{ ok: false; error: { code: 'storage_error'; message: string } }>();
+    const startAgentResponse = vi.fn((_request: { clientCommandId: string }) => pending.promise);
+    const subscribeCommand = vi.fn((_id: string, _event: (event: ProductionTraceEventDto) => void) => vi.fn());
+    const getConversation = vi.fn(async () => ({ ok: true, value: conversation }));
+    Object.assign(window.unicomp!.chatContexts!, { startAgentResponse, getConversation });
+    Object.assign(window.unicomp!, { productionTrace: { subscribeCommand, subscribe: vi.fn(() => vi.fn()) } });
+    await settle();
+    await type('新请求已接受');
+    await send('button');
+    expect(subscribeCommand).toHaveBeenCalledOnce();
+    const commandId = startAgentResponse.mock.calls[0][0].clientCommandId;
+    subscribeCommand.mock.calls[0][1]({ schemaVersion: 1, projectId: session.projectId,
+      conversationId: conversation.conversationId, sourceMessageId: 'accepted-user', traceId: 'trace-start',
+      clientCommandId: commandId, sequence: 1, code: 'request_received', status: 'started',
+      occurredAt: conversation.updatedAt });
+    await settle(20);
+    const user = find(tree, item => item.type === 'li' && item.key === 'accepted-user');
+    expect(JSON.stringify(user?.props.children)).toContain('新请求已接受');
+    expect(getConversation).toHaveBeenCalledWith(conversation.conversationId, 'fast');
+    expect(element('停止生成')).toBeDefined();
+    expect(element('对话输入').props.value).toBe('新请求已接受');
+    pending.resolve({ ok: false, error: { code: 'storage_error', message: 'Test stop' } });
+    await settle();
+    expect(element('对话输入').props.value).toBe('新请求已接受');
+    expect(element('发送消息').props.disabled).toBe(false);
+  });
+
+  it.each(['waiting_user', 'needs_reconciliation'] as const)('restores %s controls from Runtime alongside Thread messages', async state => {
+    initialConversationId = conversation.conversationId;
+    const agentSession = { sessionId: 'restored-session', revision: 3, sourceMessageId: 'source-1', state,
+      deadlineAt: new Date(Date.now() + 600000).toISOString(), registeredWorkCount: 0,
+      ...(state === 'waiting_user' ? { waiting: { reason: 'input_required', allowedActions: ['reply'] }, resumeToken: 'resume-restored' } : {}) };
+    const summary = { ...conversation, threadId: conversation.conversationId, messageCount: 0, turnCount: 0,
+      hasActiveDocumentGeneration: false };
+    const startAgentResponse = vi.fn(async () => ({ ok: false, error: { code: 'invalid_request', message: 'Test' } }));
+    const getConversation = vi.fn();
+    Object.assign(window.unicomp!.chatContexts!, { startAgentResponse, getConversation,
+      listThreadSummaries: vi.fn(async () => ({ ok: true, value: { items: [summary], hasMore: false, readAtSequence: 0 } })),
+      getThreadItemsPage: vi.fn(async () => ({ ok: true, value: { ...summary, items: [], hasMore: false, readAtSequence: 0 } })),
+      getThread: vi.fn(async () => ({ ok: true, value: { ...summary, agentSessions: [agentSession], parentRuns: [] } })) });
+    await settle(28);
+    expect(getConversation).not.toHaveBeenCalled();
+    const card = find(tree, item => typeof item.type === 'function' && (item.type as { name?: string }).name === 'AgentSessionNotice');
+    expect(card?.props.session).toEqual(agentSession);
+    await type('补充需求');
+    await send('button');
+    if (state === 'waiting_user') expect(startAgentResponse).toHaveBeenCalledWith(expect.objectContaining({ continuation: {
+      sessionId: agentSession.sessionId, expectedRevision: 3, resumeToken: 'resume-restored', action: 'reply'
+    } }));
+    else expect(startAgentResponse).not.toHaveBeenCalled();
+  });
+
+  it('restores an active response subscription and stop control after a Thread page remount', async () => {
+    initialConversationId = conversation.conversationId;
+    const summary = { ...conversation, threadId: conversation.conversationId, messageCount: 0, turnCount: 1,
+      hasActiveDocumentGeneration: false };
+    const execution = { responseExecutionId: 'restored-execution', conversationId: conversation.conversationId,
+      userMessageId: 'source-1', assistantMessageId: 'assistant-1', productFeature: 'text_chat',
+      state: 'streaming', streamSequence: 2, reasoningContent: '', content: '',
+      createdAt: conversation.updatedAt, updatedAt: conversation.updatedAt };
+    const subscribeResponseEvents = vi.fn(() => vi.fn());
+    const cancelResponseExecution = vi.fn(async () => ({ ok: true, value: { ...execution, state: 'cancelled' } }));
+    Object.assign(window.unicomp!.chatContexts!, { subscribeResponseEvents, cancelResponseExecution,
+      listThreadSummaries: vi.fn(async () => ({ ok: true, value: { items: [summary], hasMore: false, readAtSequence: 0 } })),
+      getThreadItemsPage: vi.fn(async () => ({ ok: true, value: { ...summary, items: [], hasMore: false, readAtSequence: 0 } })),
+      getThread: vi.fn(async () => ({ ok: true, value: { ...summary, agentSessions: [], parentRuns: [{
+        responseExecutionId: execution.responseExecutionId, sourceMessageId: 'source-1', state: 'running',
+        runRevision: 1, registeredWorkCount: 0, acknowledged: false }] } })),
+      getResponseExecution: vi.fn(async () => ({ ok: true, value: execution })) });
+    await settle(32);
+    expect(subscribeResponseEvents).toHaveBeenCalledWith(execution.responseExecutionId, 2, expect.any(Function));
+    unmount();
+    await settle(32);
+    expect(subscribeResponseEvents).toHaveBeenCalledTimes(2);
+    (element('停止生成').props.onClick as () => void)();
+    await settle(20);
+    expect(cancelResponseExecution).toHaveBeenCalledWith(execution.responseExecutionId);
   });
 
   it('does not plan with a selected model that is no longer available', async () => {

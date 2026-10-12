@@ -1,7 +1,7 @@
 import { mkdtemp, rm } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { createItemV1, createTurnV1, toMessageItemId, toProjectId, toThreadId, toTurnId, toIsoTimestamp } from '../../src/domain';
 import { ThreadFileRepository } from '../../src/platform/repositories/thread-file-repository';
 import { ThreadFileReadAdapter } from '../../src/platform/ipc/thread-file-read-adapter';
@@ -14,6 +14,32 @@ const t1 = toIsoTimestamp('2026-10-08T00:00:01.000Z');
 const threadId = toThreadId('thread-file-adapter');
 
 describe('ThreadFileReadAdapter', () => {
+  it('hydrates Runtime controls only for the selected in-scope Thread and rejects a project switch during the read', async () => {
+    const root = await mkdtemp(path.join(os.tmpdir(), 'unicomp-thread-controls-'));
+    try {
+      const repository = new ThreadFileRepository(root);
+      await repository.createThread({ threadId, projectId: toProjectId('project-controls'), title: 'Controls', createdAt: t0 });
+      let currentProject = 'project-controls';
+      const parentRuns = [{ responseExecutionId: 'response-controls', sourceMessageId: 'source-controls',
+        state: 'needs_reconciliation' as const, runRevision: 3, registeredWorkCount: 0, acknowledged: false }];
+      const readExecutionState = vi.fn(async () => ({ parentRuns, agentSessions: [] }));
+      const adapter = new ThreadFileReadAdapter({ getRepository: () => repository,
+        projectId: () => currentProject, readExecutionState });
+      await adapter.listThreadSummaries({ includeArchived: true, includeDeleted: false, limit: 20 });
+      expect(readExecutionState).not.toHaveBeenCalled();
+      const detail = await adapter.getThread({ threadId });
+      expect(detail.ok && detail.value.parentRuns).toEqual(parentRuns);
+      expect(readExecutionState).toHaveBeenCalledWith(threadId);
+      readExecutionState.mockImplementationOnce(async () => {
+        currentProject = 'another-project';
+        return { parentRuns, agentSessions: [] };
+      });
+      await expect(adapter.getThread({ threadId })).resolves.toMatchObject({ ok: false, error: { code: 'project_scope_mismatch' } });
+      readExecutionState.mockClear();
+      await expect(adapter.getThread({ threadId })).resolves.toMatchObject({ ok: false, error: { code: 'project_scope_mismatch' } });
+      expect(readExecutionState).not.toHaveBeenCalled();
+    } finally { await rm(root, { recursive: true, force: true }); }
+  });
   it('reads summaries, pages and turns without a legacy Conversation source', async () => {
     const root = await mkdtemp(path.join(os.tmpdir(), 'unicomp-thread-read-adapter-'));
     try {

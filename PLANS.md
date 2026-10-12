@@ -1,5 +1,13 @@
 # UniComp 开发计划
 
+### 维护修复：Agent 启动反馈与切页执行控制恢复（2026-10-12）
+
+在 `feature/office-agent-thread-model-convergence@78718ed` 的干净工作区继续审查。今天现场取证已从项目内 Response Execution/Production Trace/Document Runtime 补齐：14:42 建立执行、14:46 因 `newapi.tool_loop_unknown_result` 失败，已调用生成工具和 Art Direction；Agent/Document 为 `needs_reconciliation`，Observation 为空且未新增正式 Work。`renderer-trace.log` 停在 10 月 10 日并不表示今天没有执行记录；HTTP 200 不是整条流完成。
+
+5 个 ChatPage 定向复现先失败后修复：普通 Agent 启动缺少 command 进度订阅、React 更新前 Enter+点击重复提交、Thread 页面返回丢失澄清/核对/执行订阅与停止控制。共用现有 Workflow/Agent command 订阅，进度到达后快速绑定会话/已接受消息，失败/停止前保留草稿；同步 ref 拦截重复发送；现有 `getThread` 接入 Agent Runtime/Completion Journal，后台恢复执行控制，正文继续来自 Thread Items，保留项目切换与过期异步返回边界。
+
+已验证 ChatPage/Thread Adapter 与取消/Runtime/Continuation 回归，UI 合同 27/27，typecheck、lint、build 通过；Thread/Legacy Electron 各 3 会话 × 120 消息切页返回/分页通过，Electron Mock Provider/Office 链路及 Thread Runtime controls 通过。本批没有收费请求、未知结果重试、真实数据改写或用户应用重启。整体审查及后续持久化瓶颈见 [会话稳定性审查](docs/current/chat-startup-stability-review-20261012.md)；不能宣称所有卡顿已消除。
+
 ### 维护修复：会话页切页返回后消息消失（2026-10-12）
 
 实际复现确认，Thread 读取模式下 ChatPage 卸载后 App 保留 selected conversation id；重新挂载时 Thread Item Page 读取可能先于会话 Summary 完成。Item 读取结果写入空 `conversations` 后，Summary 只提供无消息的 sidebar DTO，页面没有再次触发 Item 读取，导致返回会话页显示空内容。修复将 Item Page effect 绑定到已解析的 `selected?.conversationId`，在会话列表尚未恢复时等待，不再使用仅由父级保留的过早 selectedId 发起并丢弃读取。

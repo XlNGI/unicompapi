@@ -134,6 +134,13 @@ async function run() {
     await delay(100);
   }
   if (!normalRead?.ok || normalRead.value.state !== 'completed') throw new Error(`Normal execution not completed: ${JSON.stringify(normalRead)}`);
+  let threadRuntimeControls;
+  if (process.env.UNICOMP_THREAD_FIRST === '1') {
+    const detail = await js(`window.unicomp.chatContexts.getThread(${JSON.stringify(normal.value.execution.conversationId)})`);
+    threadRuntimeControls = Boolean(detail?.ok && detail.value.parentRuns?.some(run =>
+      run.responseExecutionId === normal.value.execution.responseExecutionId) && Array.isArray(detail.value.agentSessions));
+    if (!threadRuntimeControls) throw new Error('Thread detail lost Runtime execution/session controls');
+  }
 
   transportMode = 'cancel';
   await js(`window.__agentMockPending = window.unicomp.chatContexts.startAgentResponse(${JSON.stringify(request('mock-cancel', '取消测试'))})`);
@@ -222,7 +229,7 @@ async function run() {
   const report = { schemaVersion: 1, status: 'passed',
     boundary: 'real Electron BrowserWindow + production preload + production IPC + controlled in-process Provider transport',
     checks: ['normal Agent response', 'persistent execution identity', 'cancel start boundary', 'Provider tool call through the real Electron IPC path', 'Word physical file generation', 'Excel physical file generation'],
-    requestCount, abortCount, toolCalling,
+    requestCount, abortCount, toolCalling, threadRuntimeControls,
     office: { word: wordResult, excel: excelResult },
     externalProvider: 'blocked: no authorized external credentials used' };
   const output = path.resolve('outputs/conversation-phase6/agent-provider-mock-e2e.json');

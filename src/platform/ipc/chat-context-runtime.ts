@@ -152,7 +152,8 @@ import type { ProjectSubmissionAcceptanceV1 } from '../storage';
 import type {
   ChatContextIpcResult,
   ConversationCandidateDto,
-  ConversationDto
+  ConversationDto,
+  ThreadDto
 } from '../../shared/chat-context-ipc';
 import { chatContextRequestParsers } from '../../shared/chat-context-ipc';
 import { chatContextFailure, failure } from './chat-context-errors';
@@ -254,6 +255,7 @@ export function createChatContextRuntime(
     readonly projectId: string;
     readonly rootDirectory: string;
     readonly conversations: ConversationController;
+    readonly readThreadExecutionState: (conversationId: string) => Promise<Pick<ThreadDto, 'parentRuns' | 'agentSessions'>>;
     readonly conversationRepository: JsonProjectConversationRepository;
     readonly contextService: ProjectContextRegistryService;
   readonly workflowService: ConversationWorkflowService;
@@ -1293,9 +1295,25 @@ export function createChatContextRuntime(
         return responseLifecycle.readModel(executionId);
       };
     }
+    const readParentRuns = async (conversationId: string) => {
+      const summaries = [];
+      for (const run of await agentRuns.list(toConversationId(conversationId))) {
+        if (!run.responseExecutionId) continue;
+        const snapshot = await completion.inspect(run.responseExecutionId);
+        if (snapshot) summaries.push(projectConversationParentRun(snapshot));
+      }
+      return summaries;
+    };
     cached = {
       projectId: session.projectId,
       rootDirectory: session.rootDirectory,
+      readThreadExecutionState: async conversationId => {
+        await refreshRecovery({ conversationId });
+        const [parentRuns, agentSessions] = await Promise.all([
+          readParentRuns(conversationId), continuationRuntime.list(conversationId)
+        ]);
+        return { parentRuns, agentSessions };
+      },
       conversations: new ConversationController({
         service,
         getSession: dependencies.getSession,
@@ -1305,13 +1323,7 @@ export function createChatContextRuntime(
         },
         readParentRuns: async conversationId => {
           await refreshRecovery({ conversationId });
-          const summaries = [];
-          for (const run of await agentRuns.list(toConversationId(conversationId))) {
-            if (!run.responseExecutionId) continue;
-            const snapshot = await completion.inspect(run.responseExecutionId);
-            if (snapshot) summaries.push(projectConversationParentRun(snapshot));
-          }
-          return summaries;
+          return readParentRuns(conversationId);
         },
         canStartNewResponse: conversationId => completion.canStartNewResponse(toConversationId(conversationId)),
         canEditUserMessage: async (conversationId, messageId) =>
@@ -1499,6 +1511,11 @@ export function createChatContextRuntime(
   const threadReads: ThreadReadApi = dependencies.threadFileReadEnabled
     ? new ThreadFileReadAdapter({
       projectId: () => dependencies.getSession()?.projectId,
+      readExecutionState: async conversationId => {
+        const session = dependencies.getSession();
+        if (!session) throw new Error('project_not_open');
+        return getProjectRuntime(session).readThreadExecutionState(conversationId);
+      },
       getRepository: () => {
         const session = dependencies.getSession();
         if (!session) return undefined;

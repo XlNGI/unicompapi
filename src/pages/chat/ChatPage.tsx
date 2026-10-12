@@ -1524,6 +1524,33 @@ export function ChatPage({
   }, [chat, documentGeneration, selected?.conversationId, threadReadsEnabled]);
 
   useEffect(() => {
+    const conversationId = selected?.conversationId;
+    if (!threadReadsEnabled || typeof chat?.getThread !== 'function' || !conversationId) return;
+    let active = true;
+    const executionAtRead = responseExecutionSnapshotRef.current?.conversationId === conversationId
+      ? responseExecutionSnapshotRef.current.responseExecutionId : undefined;
+    // Transcript remains owned by Thread Items. Read execution controls from
+    // the existing Runtime without waiting for the Legacy terminal projection.
+    void chat.getThread(conversationId).then(async result => {
+      if (!active || !result?.ok) return;
+      const currentExecution = responseExecutionSnapshotRef.current;
+      if (startingClientCommandIdRef.current || (currentExecution?.conversationId === conversationId &&
+        executionAtRead !== currentExecution.responseExecutionId)) return;
+      setConversations(current => current.map(conversation => conversation.conversationId === conversationId
+        ? { ...conversation, parentRuns: result.value.parentRuns, agentSessions: result.value.agentSessions }
+        : conversation));
+      const parent = result.value.parentRuns?.find(run =>
+        ['running', 'executing_tool', 'needs_reconciliation'].includes(run.state));
+      if (!parent || !chat.getResponseExecution || startingClientCommandIdRef.current || responseExecutionSnapshotRef.current) return;
+      const execution = await chat.getResponseExecution(parent.responseExecutionId);
+      if (active && execution.ok && execution.value.conversationId === conversationId && !startingClientCommandIdRef.current) {
+        setResponseExecution(current => current ?? execution.value);
+      }
+    }).catch(() => undefined);
+    return () => { active = false; };
+  }, [chat, selected?.conversationId, threadReadsEnabled]);
+
+  useEffect(() => {
     if (!chat || !responseInProgress || !selected?.conversationId || !selected.messages.some(message => message.workflowReply?.workflowId.startsWith('native-'))) return;
     let active = true;
     let timer: ReturnType<typeof setTimeout>;
@@ -1557,7 +1584,7 @@ export function ChatPage({
       setContextName('');
       setContextLabels('');
       setEditingMessageId(undefined);
-      clearResponseDraftState();
+      if (!startingClientCommandIdRef.current) clearResponseDraftState();
     }
     followOutputRef.current = true;
     setShowScrollToBottom(false);
@@ -2097,6 +2124,7 @@ export function ChatPage({
       !inputValueRef.current.trim() ||
       cancelRequested ||
       responseInProgress ||
+      startingClientCommandIdRef.current ||
       busy
     ) {
       return;
@@ -2128,6 +2156,45 @@ export function ChatPage({
       return;
     }
     await startChatResponse(inputValueRef.current.trim(), selected);
+  }
+
+  function subscribeStartingCommand(clientCommandId: string, content: string, conversationId?: string) {
+    if (!chat || !session) return;
+    const inputScope = composerScopeRef.current;
+    const projectId = session.projectId;
+    setPendingProduction({ clientCommandId, content, ...(conversationId ? { conversationId } : {}) });
+    for (const unsubscribe of productionCommandSubscriptions.current.values()) unsubscribe();
+    productionCommandSubscriptions.current.clear();
+    if (!productionTrace) return;
+    let boundConversationId: string | undefined;
+    const unsubscribe = productionTrace.subscribeCommand(clientCommandId, event => {
+      if (inputScope !== composerScopeRef.current || event.projectId !== projectId) return;
+      enqueueProductionEvents([event]);
+      setPendingProduction(current => current?.clientCommandId === clientCommandId
+        ? { ...current, conversationId: event.conversationId, sourceMessageId: event.sourceMessageId }
+        : current);
+      setNotice('');
+      if (boundConversationId === event.conversationId) return;
+      boundConversationId = event.conversationId;
+      void chat.getConversation(event.conversationId, 'fast').then(current => {
+        if (inputScope !== composerScopeRef.current || !current.ok) return;
+        if (!conversationId) {
+          draftsRef.current.set(composerDraftKey(projectId, current.value.conversationId), {
+            text: inputValueRef.current, attachments: attachmentsRef.current.slice()
+          });
+          claimDraft(projectId, current.value.conversationId);
+        }
+        replaceConversation(current.value);
+        setSelectedId(current.value.conversationId);
+      }).catch(() => undefined);
+    }, issue => {
+      if (inputScope !== composerScopeRef.current || issue.projectId !== projectId) return;
+      setProductionIssues(current => [...new Set([...current, issue.conversationId])]);
+      setPendingProduction(current => current?.clientCommandId === clientCommandId
+        ? { ...current, conversationId: issue.conversationId, sourceMessageId: issue.sourceMessageId }
+        : current);
+    });
+    productionCommandSubscriptions.current.set(clientCommandId, unsubscribe);
   }
 
   async function submitWorkflowInput() {
@@ -2164,36 +2231,7 @@ export function ChatPage({
     setPlanningCancelRequested(false);
     const content = inputValueRef.current.trim();
     const inputScope = composerScopeRef.current;
-    setPendingProduction({ clientCommandId: planningCommand.clientCommandId, content,
-      ...(selected ? { conversationId: selected.conversationId } : {}) });
-    if (productionTrace) {
-      for (const unsubscribe of productionCommandSubscriptions.current.values()) unsubscribe();
-      productionCommandSubscriptions.current.clear();
-      let boundConversationId: string | undefined;
-      const unsubscribe = productionTrace.subscribeCommand(planningCommand.clientCommandId, (event) => {
-        if (inputScope !== composerScopeRef.current || event.projectId !== session.projectId) return;
-        enqueueProductionEvents([event]);
-        setPendingProduction((current) => current?.clientCommandId === planningCommand.clientCommandId
-          ? { ...current, conversationId: event.conversationId, sourceMessageId: event.sourceMessageId }
-          : current);
-        setNotice('');
-        if (boundConversationId !== event.conversationId) {
-          boundConversationId = event.conversationId;
-          void chat.getConversation(event.conversationId).then((current) => {
-            if (inputScope !== composerScopeRef.current || !current.ok) return;
-            replaceConversation(current.value);
-            setSelectedId(current.value.conversationId);
-          });
-        }
-      }, (issue) => {
-        if (inputScope !== composerScopeRef.current || issue.projectId !== session.projectId) return;
-        setProductionIssues((current) => [...new Set([...current, issue.conversationId])]);
-        setPendingProduction((current) => current?.clientCommandId === planningCommand.clientCommandId
-          ? { ...current, conversationId: issue.conversationId, sourceMessageId: issue.sourceMessageId }
-          : current);
-      });
-      productionCommandSubscriptions.current.set(planningCommand.clientCommandId, unsubscribe);
-    }
+    subscribeStartingCommand(planningCommand.clientCommandId, content, selected?.conversationId);
     const attachmentSelection = attachmentSelectionChangedRef.current
       ? { attachmentFileIds: attachments.map((attachment) => attachment.fileId) }
       : {};
@@ -2781,6 +2819,7 @@ export function ChatPage({
     continuationAction?: 'reply' | 'authorize' | 'continue'
   ) {
     if (!chat || !session || !selectedCandidateId || !selectedCandidate?.available) return;
+    if (startingClientCommandIdRef.current) return;
     if (continuationAction && agentContinuationInFlightRef.current) return;
     if (continuationAction) agentContinuationInFlightRef.current = true;
     const executionScope = composerScopeRef.current;
@@ -2797,6 +2836,7 @@ export function ChatPage({
     const clientCommandId = `chat-start-${crypto.randomUUID()}`;
     startingClientCommandIdRef.current = { projectId: session.projectId, clientCommandId };
     try {
+      subscribeStartingCommand(clientCommandId, commandContent, conversation?.conversationId);
       const request = {
         clientCommandId,
         conversation: conversation
@@ -2907,6 +2947,8 @@ export function ChatPage({
     } finally {
       if (continuationAction) agentContinuationInFlightRef.current = false;
       if (startingClientCommandIdRef.current?.clientCommandId === clientCommandId) startingClientCommandIdRef.current = undefined;
+      productionCommandSubscriptions.current.get(clientCommandId)?.();
+      productionCommandSubscriptions.current.delete(clientCommandId);
       setResponseStarting(false);
     }
   }

@@ -184,7 +184,12 @@ try {
     await waitForExpression(cdp, `!document.querySelector('.uc-chat-page')`);
     await cdp.evaluate(`document.getElementById('projects-navigation-trigger')?.click()`);
     await waitForExpression(cdp, `document.querySelectorAll('[data-virtual-item-id]').length > 0`);
-    await waitForExpression(cdp, `document.querySelector('.uc-chat-page__workspace-conversation-row[aria-current="true"]')?.textContent === ${JSON.stringify(selectedTitle)} && document.body.innerText.includes(${JSON.stringify(expectedLastMessage)})`);
+    try {
+      await waitForExpression(cdp, `document.querySelector('.uc-chat-page__workspace-conversation-row[aria-current="true"]')?.textContent === ${JSON.stringify(selectedTitle)} && document.body.innerText.includes(${JSON.stringify(expectedLastMessage)})`);
+    } catch (error) {
+      const state = await cdp.evaluate(`(()=>{const pane=document.querySelector('.uc-chat-page__messages');return {selected:document.querySelector('.uc-chat-page__workspace-conversation-row[aria-current="true"]')?.textContent,expected:${JSON.stringify(selectedTitle)},scrollTop:pane?.scrollTop,scrollHeight:pane?.scrollHeight,clientHeight:pane?.clientHeight,rows:[...document.querySelectorAll('[data-virtual-item-id]')].map(row=>({id:row.getAttribute('data-virtual-item-id'),text:row.textContent?.slice(0,100)}))};})()`);
+      throw new Error(`${error.message}; navigation=${destination}; state=${JSON.stringify(state)}`);
+    }
     pageNavigation.push({ destination, restoredSelectionAndLastMessage: true });
   }
   const uiInteraction = await cdp.evaluate(`(async()=>{const buttons=[...document.querySelectorAll('.uc-chat-page__workspace-conversation')];const switchCount=Math.min(buttons.length,3);for(let index=1;index<switchCount;index+=1){buttons[index]?.click();await new Promise(resolve=>setTimeout(resolve,250));}buttons[0]?.click();await new Promise(resolve=>setTimeout(resolve,300));const scroller=document.querySelector('.uc-chat-page__messages');const before={scrollTop:scroller?.scrollTop??0,scrollHeight:scroller?.scrollHeight??0,virtualRows:document.querySelectorAll('[data-virtual-item-id]').length};if(scroller){scroller.scrollTop=0;scroller.dispatchEvent(new Event('scroll',{bubbles:true}));}await new Promise(resolve=>setTimeout(resolve,700));const olderButton=document.querySelector('.uc-chat-page__history-more button');if(olderButton){olderButton.click();await new Promise(resolve=>setTimeout(resolve,900));}return {switchCount,before,after:{scrollTop:scroller?.scrollTop??0,scrollHeight:scroller?.scrollHeight??0,virtualRows:document.querySelectorAll('[data-virtual-item-id]').length},paginationTriggered:Boolean(olderButton)};})()`);
