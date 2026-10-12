@@ -32,6 +32,8 @@
 
 本批扩展 Electron Mock 验收要求 Thread Assistant 正式收据与 Artifact Work 一致，并且对应父任务为 `completed`。该断言发现本批新增收据补写的终态时间戳错误，已同步更新 `completedAt`/`failedAt`/`cancelledAt` 并通过。脚本的 Thread 模式判断与 main 默认保持一致，失败通过 `app.exit(1)` 返回非零，避免只有错误文本而退出码仍为 0。Thread 显式启用和 Legacy 显式回滚分别验收；不能用没有设置环境变量的默认 Thread 运行冒充 Legacy 验收。
 
+文档取消的实际缺口已通过 4 个离线用例复现：等待 progress 持久化期间子 signal 被取消，父预算仍 live，旧 observe 在返回后继续编译/检查/发布。现 action 前后等待边界和 sync→rename 边界均检查子 signal。4 个用例在父预算未取消下全部阻止后续副作用并清理临时文件；它约束迟到本地动作，不能消除外部 Provider 自身的耗时或证明今天 unknown 已获得最终结果。
+
 | 优先级 | 问题与实际触发 | 本批处理 |
 |---|---|---|
 | P1 | Agent start 等 IPC 返回后才绑定会话，启动阶段没有按 command 订阅进度；欢迎页和草稿长期不变 | 共用 Workflow/Agent command 进度订阅；首个持久事件后快读绑定会话和已接受 User Item，保留草稿直到接受/停止结果；不等待完整 Legacy 终态读取 |

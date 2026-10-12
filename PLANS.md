@@ -1,5 +1,11 @@
 # UniComp 开发计划
 
+### 维护修复：子工具取消后禁止继续本地编译/发布（2026-10-12）
+
+从 `0042a2f` 继续。4 项定向复现先失败：Stop/子工具截止发生在 awaited progress 持久化期间，父预算仍可用时，Runner 曾继续 document-file-write、structure check、atomic publish 或 Art Direction fallback 后的编译。现每个 observed action 在进度之前和等待之后都检查输入 signal，并在 sync 临时文件后、rename 之前再检查。已开始的原子写/登记仍等待真实结果，不把迟到成功视为可重发。
+
+新用例明确保持父预算 signal 未取消且剩余 90 秒，仅中断子工具 signal；4/4 阻断后续生成/发布、Work=0、临时文件清理且本地 Execution 为 cancelled。Document Runner、Tool Bridge、Art Direction 和 Trace 回归 149/149；typecheck、lint、生产构建和两种 Electron Mock 链路已通过。今天真实未知执行的结果仍保留 needs_reconciliation，未重试，也不以此离线修复宣称真实 Provider 已验收。
+
 ### 维护收敛：Thread 回复正文与正式文档收据优先提交（2026-10-12）
 
 从 `061e878` 继续。两项 composed Host 定向复现确认：Response 已保存增量时 Thread 曾读取旧 Legacy 正文；Legacy streaming 写入失败又阻断普通回复。Thread 写模式现从已提交 Response 构建当前正文/推理/终态，从 Thread snapshot 保留 Host 元数据；pending、start、delta、complete、fail、cancel 不再直接写 Legacy，统一走 Thread Commit/Outbox。正式 PPT 收据在本地 Work/File/Hash 重验后先附到 Thread Assistant；终态补投影也读取 Thread 正文。Legacy 回滚模式保留原路径，Legacy 故障只形成可重放投影欠账，不重发 Provider。

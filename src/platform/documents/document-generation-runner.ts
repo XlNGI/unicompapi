@@ -522,6 +522,8 @@ export class DocumentGenerationRunner {
          ? await this.readRevisedOutline(input, verifiedGenerated.temporaryPath) : undefined;
       await this.observe(input, 'document_publish', 'document-atomic-publish', async () => {
         await syncFile(verifiedGenerated.temporaryPath);
+        this.assertNotCancelled(input.signal);
+        input.executionBudget?.assertCanProceed('publish');
         await (this.options.publishFile ?? rename)(verifiedGenerated.temporaryPath, verifiedGenerated.finalPath);
       }, { tool: 'publish', bytes: verifiedGenerated.sizeBytes });
       temporaryPath = undefined;
@@ -682,9 +684,13 @@ export class DocumentGenerationRunner {
     const stage: ExecutionStage = code === 'document_render' ? 'render' : code === 'document_publish' ? 'publish'
       : code === 'document_register' ? 'register' : operationId.startsWith('document-repair-plan') ? 'repair'
         : code === 'plan_validation' ? 'design' : 'check';
+    this.assertNotCancelled(input.signal);
     input.executionBudget?.assertCanProceed(stage);
     await report('started');
     try {
+      // Progress can await durable Runtime/Trace writes. Stop or a child tool
+      // deadline may win during that await even while the parent budget is live.
+      this.assertNotCancelled(input.signal);
       input.executionBudget?.assertCanProceed(stage);
       // Local commits are awaited to observe their actual outcome, even if Stop wins
       // at the parent. Racing rename/registration would orphan a late successful write.
