@@ -1,5 +1,13 @@
 # UniComp 开发计划
 
+### 维护收敛：兼容 Tool/Artifact 投影与跨执行步骤身份（2026-10-12）
+
+从 `3173882` 继续。新增失败复现：同一 Thread 两次 Response 使用相同 `provider-tool-0-0` 时第二次 Tool Item 被旧幂等匹配吞掉。工具身份现在包含来源、Response/Agent 身份、toolId 和 stepRef；相同执行重放保持幂等，旧同执行投影继续可更新，不跨执行复用 Item。
+
+兼容 `responses.start` 未建立 Agent Runtime 时，从现有 Document Runtime 的已保存 Tool Call/Observation 构建 Thread Call/Result；严格核对 project/conversation/source/execution，公开内容只含工具/状态/安全诊断，不包含参数或 observation payload。Session close 完成后由既有结算回调补投影，避免初次 acceptance 返回早于工具完成造成永久 streaming；已完成并经读回和发布收据证明的 Work 再通过原本文件/Hash 门禁附到 Thread Artifact/Assistant，不新增执行系统。
+
+Electron Mock 增加显式兼容入口用例：生成/读回 Tool Call/Result 各 2 条 completed、Artifact 和 Assistant 正式收据一致；Agent-native 用例保留父任务 completed 验收。工具/读回/Thread/恢复定向 130 项、typecheck、lint 和 Electron 编译通过，合成 Provider 运行只在临时项目/profile，不外发，不重试未知结果。剩余授权/引用、恢复兼容写入及模型证据版本问题沿审计继续。
+
 ### 维护修复：子工具取消后禁止继续本地编译/发布（2026-10-12）
 
 从 `0042a2f` 继续。4 项定向复现先失败：Stop/子工具截止发生在 awaited progress 持久化期间，父预算仍可用时，Runner 曾继续 document-file-write、structure check、atomic publish 或 Art Direction fallback 后的编译。现每个 observed action 在进度之前和等待之后都检查输入 signal，并在 sync 临时文件后、rename 之前再检查。已开始的原子写/登记仍等待真实结果，不把迟到成功视为可重发。

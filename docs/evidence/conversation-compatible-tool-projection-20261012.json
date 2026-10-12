@@ -1,0 +1,32 @@
+{
+  "schemaVersion": 1,
+  "date": "2026-10-12",
+  "paidRequests": 0,
+  "entry": "responses.start",
+  "status": "passed",
+  "generatedWorkCount": 1,
+  "toolItems": [
+    {
+      "type": "tool_call_projection",
+      "status": "completed",
+      "eventSystem": "response_execution"
+    },
+    {
+      "type": "tool_result_projection",
+      "status": "completed",
+      "eventSystem": "response_execution"
+    },
+    {
+      "type": "tool_call_projection",
+      "status": "completed",
+      "eventSystem": "response_execution"
+    },
+    {
+      "type": "tool_result_projection",
+      "status": "completed",
+      "eventSystem": "response_execution"
+    }
+  ],
+  "documentReceipt": true,
+  "artifactRegistered": true
+}

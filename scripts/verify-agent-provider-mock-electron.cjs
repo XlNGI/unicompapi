@@ -169,7 +169,11 @@ async function run() {
   await js('window.__agentMockPending');
 
   transportMode = 'tool-call';
-  const toolStart = await js(`window.unicomp.chatContexts.startAgentResponse(${JSON.stringify(request('mock-tool-call', '生成一个测试 PPT'))})`);
+  const compatibilityToolEntry = process.env.UNICOMP_MOCK_COMPATIBILITY === '1';
+  const toolRequest = compatibilityToolEntry
+    ? { ...request('mock-tool-call-compatibility', '生成3页PPT，主题是产品研发进展，受众是管理层，简洁商务风格，现在直接生成。'), confirmed: true }
+    : request('mock-tool-call', '生成一个测试 PPT');
+  const toolStart = await js(`window.unicomp.chatContexts.${compatibilityToolEntry ? 'startResponse' : 'startAgentResponse'}(${JSON.stringify(toolRequest)})`);
   if (!toolStart?.ok || !toolStart.value?.execution?.responseExecutionId) throw new Error(`Tool-call Agent start failed: ${JSON.stringify(toolStart)}`);
   let toolExecution;
   for (let attempt = 0; attempt < 120; attempt += 1) {
@@ -183,9 +187,15 @@ async function run() {
   if (!toolExecution) throw new Error('Tool-call execution did not reach a terminal state');
   const toolConversation = await js(`window.unicomp.chatContexts.getConversation(${JSON.stringify(toolExecution.conversationId)})`);
   const artifactMessage = toolConversation?.ok && toolConversation.value.messages?.find(message => message.documentResult);
+  const generatedWorks = await new platform.JsonWorkRepository(new platform.NodeProjectStorage(rootDirectory), projectId).list(projectId);
+  if (toolExecution.state !== 'completed' || !artifactMessage?.documentResult || generatedWorks.length !== 1 ||
+      generatedWorks[0].id !== artifactMessage.documentResult.workId) {
+    throw new Error('Isolated tool case did not settle exactly one registered Work');
+  }
   let threadArtifact;
   let threadDocumentReceipt;
   let threadToolParentState;
+  let threadToolFacts;
   if (process.env.UNICOMP_THREAD_FIRST !== '0') {
     for (let attempt = 0; attempt < 40; attempt += 1) {
       const page = await js(`window.unicomp.chatContexts.getThreadItemsPage(${JSON.stringify({ threadId: toolExecution.conversationId, limit: 200, direction: 'older', cursor: null })})`);
@@ -195,15 +205,24 @@ async function run() {
       threadDocumentReceipt = page?.ok
         ? page.value.items.find(item => item.itemType === 'assistant_message' && item.message?.documentResult)?.message.documentResult
         : undefined;
+      threadToolFacts = page?.ok ? page.value.items.filter(item => ['tool_call_projection', 'tool_result_projection'].includes(item.itemType)) : [];
       const detail = await js(`window.unicomp.chatContexts.getThread(${JSON.stringify(toolExecution.conversationId)})`);
       threadToolParentState = detail?.value?.parentRuns?.find(run => run.responseExecutionId === toolExecution.responseExecutionId)?.state;
-      if (threadArtifact?.artifact?.workId && threadDocumentReceipt?.workId === threadArtifact.artifact.workId && threadToolParentState === 'completed') break;
+      if (threadArtifact?.artifact?.workId && threadDocumentReceipt?.workId === threadArtifact.artifact.workId &&
+        (compatibilityToolEntry || threadToolParentState === 'completed') &&
+        threadToolFacts.some(item => item.itemType === 'tool_call_projection') && threadToolFacts.some(item => item.itemType === 'tool_result_projection')) break;
       await delay(100);
     }
-    if (!threadDocumentReceipt?.workId || threadDocumentReceipt.workId !== threadArtifact?.artifact?.workId || threadToolParentState !== 'completed') {
+    if (!threadDocumentReceipt?.workId || threadDocumentReceipt.workId !== threadArtifact?.artifact?.workId ||
+        (!compatibilityToolEntry && threadToolParentState !== 'completed') ||
+        !threadToolFacts.some(item => item.itemType === 'tool_call_projection') || !threadToolFacts.some(item => item.itemType === 'tool_result_projection')) {
       const detail = await js(`window.unicomp.chatContexts.getThread(${JSON.stringify(toolExecution.conversationId)})`);
+      const tasks = await new platform.JsonDocumentTaskRuntimeRepository(new platform.NodeProjectStorage(rootDirectory), projectId).list();
       throw new Error('Thread Assistant lost the verified document receipt; ' + JSON.stringify({
-        state: toolExecution.state, parentRuns: detail?.value?.parentRuns, hostDiagnostics }));
+        state: toolExecution.state, parentRuns: detail?.value?.parentRuns, threadArtifact: Boolean(threadArtifact),
+        threadDocumentReceipt: Boolean(threadDocumentReceipt), threadToolFacts,
+        tasks: tasks.filter(task => task.executionId === toolExecution.responseExecutionId).map(task => ({ status: task.status,
+          tools: task.toolCalls.map(call => ({ toolId: call.toolId, status: call.status })), observations: task.observations.length })), hostDiagnostics }));
     }
   }
   const toolCalling = {
@@ -212,9 +231,13 @@ async function run() {
     toolCallId,
     observationReturned: toolExecution.content?.includes('工具观察结果') ?? false,
     artifactRegistered: Boolean(artifactMessage?.documentResult),
+    generatedWorkCount: generatedWorks.length,
     documentResult: artifactMessage?.documentResult ?? null,
     threadDocumentReceipt: threadDocumentReceipt ?? null,
     threadToolParentState,
+    entry: compatibilityToolEntry ? 'responses.start' : 'responses.startAgent',
+    threadToolFacts: threadToolFacts?.map(item => ({ itemType: item.itemType, status: item.status,
+      eventSystem: item.projectionSource?.eventSystem, responseExecutionId: item.projectionSource?.responseExecutionId })) ?? null,
     threadArtifact: threadArtifact ? {
       workId: threadArtifact.artifact?.workId ?? null,
       fileName: threadArtifact.artifact?.fileName ?? null,

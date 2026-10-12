@@ -28,6 +28,8 @@
 
 Thread 写模式已将 pending Assistant 与流式正文/推理/终态改为先提交 Thread snapshot，再由 Durable Outbox 投影 Legacy。`projectThreadStreamEvent` 从已提交 Response Execution 取正文和状态，Host 元数据从完整 Thread Reader 保留，停止读取滞后的 Legacy 正文；正式 PPT 交付收据在 Work/File/Hash 重验后也先提交 Thread。终态投影读取 Thread，Legacy 故障保持待投影事件，恢复重放不调用 Provider。Legacy 显式回滚模式保持原实现。授权、引用与 revision 的 Legacy 兼容读取、恢复/澄清/其他 Office 写入尚未在本批全部迁移。
 
+兼容 Tool 缺口已补接：没有 Agent Runtime 时读取 Document Runtime 持久 Call/Observation，仅投影受控状态；在 Session close 结算后补 Call/Result、已验证 Artifact/Assistant 收据，避免 acceptance 早返回留下旧 streaming。隔离 Electron `responses.start` + Mock Transport 通过生成/读回及两种工具 Items，外部 Provider 不因此自动记 PASS。另修复同 Thread 不同 Response 步骤编号复用造成的 Tool Item 串写；投影身份包含执行/来源/工具，旧同执行记录继续幂等更新。
+
 ## 真实 Provider 证据及限制
 
 负责人授权最近成功且仍有效文本模型，一个合成隔离 PPT 生成/读回用例：最多 5 次请求，外层每次最多 1024 输出 token，Art Direction 最多 4096，自动重试 0。实际选中 `kimi-k3`，2 次请求，Content Planning 与 Art Direction 均 HTTP 200，费用无可靠价格证据记 `unknown`。
@@ -36,7 +38,7 @@ Thread 写模式已将 pending Assistant 与流式正文/推理/终态改为先�
 
 报告 `outputs/office-convergence-provider-live/real-provider.json` SHA256：`7a4faee6cfa57f73c849058acfc86ed338461727b3c6afc9886ac356e2c8e2e5`。安全摘要登记在 `docs/evidence/office-agent-convergence-provider-20261012.json`。原调用使用旧清理逻辑，项目已经删除，只剩该报告和未完整删除的 profile；新保留逻辑修复发生在调用之后，不能倒称本次现场已保留。没有为重建现场再调用 Provider，没有消耗余下请求预算。
 
-本次验收走兼容 `responses.start`，报告仅有 1 Turn/1 Assistant，Tool Call/Result/Artifact Item 为 0；兼容路径的 Document Runtime Tool facts 到 Thread 投影仍需定向覆盖，不能把 Agent-native Tool 投影已存在推断为所有入口已完整投影。
+本次真实验收走兼容 `responses.start`，当时报告仅有 1 Turn/1 Assistant，Tool Call/Result/Artifact Item 为 0。后续兼容路径的 Document Runtime Tool facts/正式 Artifact 已补接并通过隔离 Mock 验收；原真实失败报告不追改为成功，也没有重试真实请求。
 
 ## 剩余实际调用方和下一批边界
 
@@ -51,7 +53,7 @@ Thread 写模式已将 pending Assistant 与流式正文/推理/终态改为先�
 | `RegistryFeatureCandidateSource` | 已统一候选入口及参数/Route 重验；能力证据仍主要经 profile/包合同表达，未完全统一具体模型的证据版本 | 明确 Profile/Evidence 绑定与 stale/unknown 合同，保持费用 unknown，不猜名称或静默换模型 |
 | `ProviderOperationRouter`、旧 image preflight/draft factory | 历史图像/视频执行仍消费 capabilityEvidenceId；新候选路径消费 Feature Contract | 先补两者等价性与未知证据测试，再收敛为同一能力快照 |
 
-后续优先级：先在本地复现兼容响应 Tool 投影缺口与 Legacy 先写失败边界；再迁移授权/引用 Reader；再收敛 Capability Evidence/Profile/Route 的统一版本与参数来源。外部 Provider 后续验收需另一个明确预算与新隔离项目，未知结果不自动重发。本轮不把这些待处理调用方标为完成，也不扩展成完整 Provider 矩阵通过。
+后续优先级：兼容响应 Tool 投影缺口与 Legacy 先写失败边界已完成本地复现和主路径修补；继续迁移授权/引用 Reader，收敛 Capability Evidence/Profile/Route 的统一版本与参数来源。外部 Provider 后续验收需另一个明确预算与新隔离项目，未知结果不自动重发。本轮不把所有待处理调用方标为完成，也不扩展成完整 Provider 矩阵通过。
 
 ## 验证
 

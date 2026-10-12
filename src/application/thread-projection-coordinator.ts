@@ -91,6 +91,7 @@ export interface ProjectToolProjectionInput {
   readonly sourceMessageId: string;
   readonly toolCallId: string;
   readonly toolId: string;
+  readonly eventSystem?: 'agent_runtime' | 'response_execution';
   readonly status: ItemStatus;
   readonly responseExecutionId?: ConversationResponseExecutionId | string;
   readonly agentRunId?: ConversationAgentRunId | string;
@@ -263,25 +264,30 @@ export class ThreadProjectionCoordinator {
     if (!turn) throw new Error('turn_not_found_for_tool_projection');
     const existing = latestItem((await this.repository.readItems(threadId)).filter(item =>
       item.type === input.kind && item.projectionSource?.toolCallId !== undefined &&
-      String(item.projectionSource.toolCallId) === input.toolCallId
+      String(item.projectionSource.toolCallId) === input.toolCallId &&
+      item.projectionSource.responseExecutionId === input.responseExecutionId &&
+      item.projectionSource.agentRunId === input.agentRunId &&
+      item.projectionSource.eventSystem === (input.eventSystem ?? 'agent_runtime') &&
+      item.projectionSource.sourceIdentity === `${input.toolId}:${input.toolCallId}`
     ));
     if (existing) {
       if (existing.status === input.status && existing.content === input.content && existing.updatedAt === input.updatedAt) return { thread, item: existing, alreadyCommitted: true };
       return this.updateItem({ threadId, itemId: existing.itemId, status: input.status, content: input.content, updatedAt: input.updatedAt });
     }
     const projected = createToolProjectionItem({ ...input, threadId, turnId: turn.turnId, sequence: thread.lastItemSequence + 1 });
+    const idempotencyKey = `thread-tool:${threadId}:${input.kind}:${toolProjectionIdentity(input)}`;
     const result = await this.repository.append({
       threadId,
-      idempotencyKey: `thread-tool:${threadId}:${input.kind}:${input.toolCallId}`,
+      idempotencyKey,
       occurredAt: input.updatedAt,
       expectedGeneration: thread.generation,
       items: [projected],
-      projectionOutbox: [projectionEvent(projected, `thread-tool:${threadId}:${input.kind}:${input.toolCallId}`, input.updatedAt)]
+      projectionOutbox: [projectionEvent(projected, idempotencyKey, input.updatedAt)]
     });
     if (!result.alreadyCommitted) return { thread: result.thread, item: projected, alreadyCommitted: false };
     const committed = (await this.repository.readItems(threadId)).find(candidate =>
       candidate.type === input.kind && candidate.projectionSource?.toolCallId !== undefined &&
-      String(candidate.projectionSource.toolCallId) === input.toolCallId
+      candidate.itemId.value === projected.itemId.value
     );
     if (!committed) throw new Error('thread_tool_idempotency_record_missing');
     return { thread: result.thread, item: committed, alreadyCommitted: true };
@@ -353,7 +359,7 @@ function projectionEvent(item: ItemV1, idempotencyKey: string, occurredAt: IsoTi
 
 function createToolProjectionItem(input: ProjectToolProjectionInput & { readonly threadId: ThreadId; readonly turnId: TurnId; readonly sequence: number }): ItemV1 {
   return createItemV1({
-    itemId: toProjectionItemId(`item-projection-v1:${sha256Hex(JSON.stringify([input.threadId, input.kind, input.toolId, input.toolCallId]))}`),
+    itemId: toProjectionItemId(`item-projection-v1:${toolProjectionIdentity(input)}`),
     threadId: input.threadId,
     turnId: input.turnId,
     sequence: input.sequence,
@@ -363,11 +369,16 @@ function createToolProjectionItem(input: ProjectToolProjectionInput & { readonly
     updatedAt: input.updatedAt,
     ...(input.content !== undefined ? { content: input.content } : {}),
     projectionSource: {
-      eventSystem: 'agent_runtime',
+      eventSystem: input.eventSystem ?? 'agent_runtime',
       sourceIdentity: `${input.toolId}:${input.toolCallId}`,
       ...(input.responseExecutionId ? { responseExecutionId: toConversationResponseExecutionId(String(input.responseExecutionId)) } : {}),
       ...(input.agentRunId ? { agentRunId: toConversationAgentRunId(String(input.agentRunId)) } : {}),
       toolCallId: toToolCallId(input.toolCallId)
     }
   });
+}
+
+function toolProjectionIdentity(input: ProjectToolProjectionInput): string {
+  return sha256Hex(JSON.stringify([input.threadId, input.kind, input.eventSystem ?? 'agent_runtime',
+    input.responseExecutionId ?? null, input.agentRunId ?? null, input.toolId, input.toolCallId]));
 }

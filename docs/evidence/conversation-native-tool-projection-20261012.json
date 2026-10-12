@@ -1,0 +1,33 @@
+{
+  "schemaVersion": 1,
+  "date": "2026-10-12",
+  "paidRequests": 0,
+  "entry": "responses.startAgent",
+  "status": "passed",
+  "generatedWorkCount": 1,
+  "parentState": "completed",
+  "toolItems": [
+    {
+      "type": "tool_call_projection",
+      "status": "completed",
+      "eventSystem": "agent_runtime"
+    },
+    {
+      "type": "tool_result_projection",
+      "status": "completed",
+      "eventSystem": "agent_runtime"
+    },
+    {
+      "type": "tool_call_projection",
+      "status": "completed",
+      "eventSystem": "agent_runtime"
+    },
+    {
+      "type": "tool_result_projection",
+      "status": "completed",
+      "eventSystem": "agent_runtime"
+    }
+  ],
+  "documentReceipt": true,
+  "artifactRegistered": true
+}

@@ -523,7 +523,36 @@ export function createChatContextRuntime(
     const projectThreadExecutionFacts = async (responseExecutionId: ConversationResponseExecutionId): Promise<void> => {
       if (!turnCoordinator) return;
       const canonical = await agentRuntime.findByResponse(responseExecutionId);
-      if (!canonical) return;
+      if (!canonical) {
+        // Compatibility responses can own a Document Runtime without a parent
+        // Agent Run. Project only its persisted facts; never infer a tool call
+        // from response prose or dispatch a tool while rebuilding the transcript.
+        const execution = await responseExecutions.get(responseExecutionId);
+        if (!execution) throw new Error('thread_tool_response_unavailable');
+        const facts = await documentTools.collectResponseFacts(responseExecutionId);
+        for (const { runtime } of facts.documentTasks) {
+          if (runtime.projectId !== execution.projectId || runtime.conversationId !== execution.snapshot.conversationId ||
+              runtime.sourceMessageId !== execution.snapshot.userMessageId || runtime.executionId !== execution.id) {
+            throw new Error('thread_tool_runtime_scope_mismatch');
+          }
+          for (const tool of runtime.toolCalls) {
+            const observation = runtime.observations.find(item => item.step === tool.step && item.toolId === tool.toolId);
+            const status: ItemStatus = tool.status === 'completed' ? 'completed' : tool.status === 'failed' ? 'failed'
+              : tool.status === 'unknown' ? 'unknown' : 'streaming';
+            const common = { threadId: runtime.conversationId, sourceMessageId: runtime.sourceMessageId,
+              toolCallId: `document-tool-${createHash('sha256').update(JSON.stringify([runtime.id, tool.id])).digest('hex')}`,
+              toolId: tool.toolId, responseExecutionId, eventSystem: 'response_execution' as const,
+              status, content: tool.toolId, createdAt: runtime.createdAt, updatedAt: runtime.updatedAt };
+            await turnCoordinator.projectTool({ ...common, kind: 'tool_call_projection' });
+            if (observation || tool.status !== 'started') {
+              const diagnostic = observation?.diagnostic;
+              await turnCoordinator.projectTool({ ...common, kind: 'tool_result_projection',
+                content: diagnostic && /^[A-Za-z0-9][A-Za-z0-9_.-]{0,127}$/.test(diagnostic) ? diagnostic : tool.status });
+            }
+          }
+        }
+        return;
+      }
       const runtimeFacts = canonical.runtime;
       const mapStatus = (status: typeof runtimeFacts.toolCalls[number]['status']): ItemStatus =>
         status === 'observed' ? 'completed' : status === 'failed' ? 'failed' : status === 'unknown' ? 'unknown' : 'streaming';
@@ -652,6 +681,16 @@ export function createChatContextRuntime(
         }
       }
     };
+    const projectCompatibilityDocumentFacts = async (id: ConversationResponseExecutionId): Promise<void> => {
+      if (!turnCoordinator || await agentRuns.findByResponseExecutionId(id)) return;
+      await projectThreadExecutionFacts(id);
+      const response = await responseExecutions.get(id);
+      const facts = await documentTools.collectResponseFacts(id);
+      const workIds = facts.documentTasks.filter(task => task.runtime.status === 'completed' && task.readBackConfirmed &&
+        task.registeredWork && task.runtime.observations.some(item => item.ok && item.data?.registeredWorkId === task.registeredWork!.id))
+        .map(task => task.registeredWork!.id);
+      if (response && workIds.length) await projectVerifiedDocumentArtifact(response, workIds);
+    };
     let completionAcceptances: ProjectSubmissionAcceptanceStore | undefined;
     const completionJournal = new JsonConversationCompletionJournal(storage, session.projectId, executionTimestamp);
     const completion = new ConversationCompletionCoordinator({ agentRuns, responseExecutions,
@@ -710,6 +749,7 @@ export function createChatContextRuntime(
       if (settled && ['completed', 'failed', 'cancelled'].includes(settled.run.status)) await agentRuntime.settle(id);
       const canonical = await agentRuntime.findByResponse(id);
       const run = settled?.run ?? await agentRuns.findByResponseExecutionId(id);
+      if (!run) await projectCompatibilityDocumentFacts(id).catch(error => dependencies.onError?.(error));
       const root = run ? await sessions.findByRunId(run.id) : undefined;
       if (root && run) {
         const works = settled?.intent?.decision.registeredWorkIds ?? canonical?.runtime.registeredWorkIds ?? [];
@@ -1213,6 +1253,7 @@ export function createChatContextRuntime(
         try {
           const execution = await responseLifecycle.readModel(responseExecutionId);
           await projectThreadExecutionFacts(responseExecutionId);
+          await projectCompatibilityDocumentFacts(responseExecutionId);
           const conversation = await modelHistory!.readConversation({ threadId: toThreadId(execution.conversationId) });
           const assistant = conversation?.messages.find(message => message.id === execution.assistantMessageId);
           if (!conversation || !assistant || !['completed', 'failed', 'cancelled'].includes(assistant.state)) return;

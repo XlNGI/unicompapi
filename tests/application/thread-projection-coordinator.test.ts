@@ -28,6 +28,20 @@ function repository() {
 }
 
 describe('ThreadProjectionCoordinator', () => {
+  it('keeps reused Provider step references isolated by response execution', async () => {
+    const repo = repository();
+    const coordinator = new ThreadProjectionCoordinator(repo);
+    const common = { threadId: 'thread-projection', sourceMessageId: 'message-projection', toolCallId: 'provider-tool-0-0',
+      toolId: 'generate_pptx', status: 'completed' as const, content: 'generate_pptx',
+      createdAt: toIsoTimestamp('2026-10-10T00:00:01.000Z'), updatedAt: toIsoTimestamp('2026-10-10T00:00:02.000Z') };
+    const first = await coordinator.projectTool({ ...common, responseExecutionId: 'response-one', agentRunId: 'run-one', kind: 'tool_call_projection' });
+    const second = await coordinator.projectTool({ ...common, responseExecutionId: 'response-two', agentRunId: 'run-two', kind: 'tool_call_projection' });
+    expect(second.alreadyCommitted).toBe(false);
+    expect(second.item.itemId).not.toEqual(first.item.itemId);
+    expect(second.item.projectionSource).toMatchObject({ responseExecutionId: 'response-two', agentRunId: 'run-two' });
+    const replay = await coordinator.projectTool({ ...common, responseExecutionId: 'response-two', agentRunId: 'run-two', kind: 'tool_call_projection' });
+    expect(replay.alreadyCommitted).toBe(true);
+  });
   it('retains snapshot metadata updates on an existing Assistant Item revision', async () => {
     const repo = repository();
     const coordinator = new ThreadProjectionCoordinator(repo);
