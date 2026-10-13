@@ -14,6 +14,8 @@ import {
   toConnectionId,
   toIsoTimestamp,
   toModelId,
+  toProjectId,
+  toDraftId,
   toProtocolBindingId,
   toProviderId,
   toRoutingPreferenceId,
@@ -27,6 +29,8 @@ import {
   ProviderModelCatalogService,
   ProviderPackageRegistry,
   ProviderRegistryController,
+  ProviderFeatureContractRegistry,
+  RegistryFeatureCandidateSource,
   SecureCredentialVault,
   UNICOMPAPI_DEFAULT_TEXT_TO_IMAGE_PARAMETER_SCHEMA_ID,
   UNICOMPAPI_SEEDREAM_5_TEXT_TO_IMAGE_PARAMETER_SCHEMA_ID,
@@ -948,6 +952,34 @@ describe('provider management framework', () => {
     expect((afterAttach.modelProfiles ?? []).filter(
       (candidate) => candidate.modelId === model.id
     )).toHaveLength(0);
+    const bound = await framework.bindModelApiContract({ modelId: model.id, expectedRevision: enabled!.revision,
+      binding: { schemaVersion: 1, contractId: 'official.moonshot.kimi-k3.chat', contractRevision: 1, rules: [] }, confirmed: true });
+    expect(bound).toMatchObject({ ok: true, value: { state: 'bound' } });
+    const afterBinding = await registry.load();
+    const profile = afterBinding.modelProfiles?.find(item => item.profileId === afterBinding.models.find(item => item.id === model.id)?.activeProfileId);
+    expect(profile).toMatchObject({ status: 'declared', apiContract: { contractId: 'official.moonshot.kimi-k3.chat' } });
+    expect(await framework.bindModelApiContract({ modelId: model.id, expectedRevision: enabled!.revision,
+      binding: { schemaVersion: 1, contractId: 'official.moonshot.kimi-k3.chat', contractRevision: 1, rules: [] }, confirmed: true }))
+      .toMatchObject({ ok: false, error: { code: 'provider_registry_conflict' } });
+    const source = new RegistryFeatureCandidateSource(registry, packages, new ProviderFeatureContractRegistry([]), {
+      async checkAccess() { return { allowed: true, operation: 'submit', reason: 'allowed', policyId: 'bound-fixture-policy', policyRevision: 1 }; }
+    });
+    const boundSubject = { projectId: toProjectId('project-bound-contract'),
+      subject: { kind: 'draft' as const, draftId: toDraftId('draft-bound-contract'), draftRevision: 1 },
+      productFeature: 'text_chat' as const, surface: 'conversation' as const, imageCount: 0, videoCount: 0,
+      contextCount: 0, parameterValues: {}, outboundTextSnapshot: 'synthetic contract request', materialReferences: [], contextContentHashes: [] };
+    const boundCandidate = (await source.list(boundSubject)).find(item => item.routeTemplate.modelId === model.id)!;
+    expect(boundCandidate.eligibility).toMatchObject({ profileStatus: 'declared', contractBindingDeclared: true, bindingAvailable: true, featureSupported: true });
+    expect(boundCandidate.routeTemplate.parameterContract?.contractFingerprint).toMatch(/^[a-f0-9]{64}$/);
+    await registry.mutate(snapshot => ({ snapshot: { ...snapshot, connections: snapshot.connections.map(connection =>
+      connection.id === added.value.connectionId ? { ...connection, credentialVersionId: 'bound-rotated-credential' } : connection) }, result: undefined }));
+    expect((await source.list(boundSubject)).find(item => item.routeTemplate.modelId === model.id)?.eligibility.bindingAvailable).toBe(false);
+    const originalConnection = afterBinding.connections.find(item => item.id === added.value.connectionId)!;
+    await registry.mutate(snapshot => ({ snapshot: { ...snapshot, connections: snapshot.connections.map(connection =>
+      connection.id === originalConnection.id ? originalConnection : connection), capabilities: [...snapshot.capabilities,
+        createModelCapabilityEvidence({ id: toCapabilityEvidenceId('bound-negative-evidence'), modelId: model.id,
+          capability: 'text_chat', revision: 1, state: 'unsupported', source: 'system_observed', recordedAt: t2 })] }, result: undefined }));
+    expect((await source.list(boundSubject)).find(item => item.routeTemplate.modelId === model.id)?.eligibility.featureSupported).toBe(false);
 
     await expect(framework.registerExactModel({
       connectionId: added.value.connectionId,
@@ -1011,7 +1043,8 @@ describe('provider management framework', () => {
     const summary = await new ProviderRegistryController(registry).getRegistry();
     if (!summary.ok) throw new Error('registry summary unavailable');
     const summaryModel = summary.value.models.find((candidate) => candidate.modelId === model.id);
-    expect(summaryModel?.productFeatures?.slice().sort() ?? []).toEqual([]);
+    expect(summaryModel?.productFeatures?.slice().sort() ?? []).toEqual(['text_chat', 'text_reasoning']);
+    expect(summaryModel?.apiContract).toMatchObject({ authority: 'model_vendor', state: 'declared' });
   });
 });
 

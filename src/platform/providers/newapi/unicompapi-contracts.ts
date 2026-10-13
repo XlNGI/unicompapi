@@ -16,6 +16,13 @@ export const UNICOMPAPI_OFFICIAL_TEMPLATE_ID = 'unicompapi-official';
 export const UNICOMPAPI_CREDENTIAL_SCHEMA_ID = 'credential.unicompapi.api-key';
 export const UNICOMPAPI_ENDPOINT_POLICY_ID = 'endpoint.unicompapi.official';
 export const UNICOMPAPI_OFFICIAL_BASE_URL = 'https://unicompapi.com/v1';
+// Preserve the legacy fixed-endpoint identifiers above for existing connections.
+// They do not identify this relay as a model vendor or its schemas as vendor contracts.
+export const UNICOMPAPI_WWW_TEMPLATE_ID = 'unicompapi-www-relay';
+export const UNICOMPAPI_WWW_PROVIDER_PACKAGE_ID = 'provider-package-unicompapi-www';
+export const UNICOMPAPI_WWW_CREDENTIAL_SCHEMA_ID = 'credential.unicompapi.www.api-key';
+export const UNICOMPAPI_WWW_ENDPOINT_POLICY_ID = 'endpoint.unicompapi.www-relay';
+export const UNICOMPAPI_WWW_BASE_URL = 'https://www.unicompapi.com/v1';
 
 export const unicompapiProviderPackageDescriptor: ProviderPackageDescriptor = {
   packageId: UNICOMPAPI_PROVIDER_PACKAGE_ID,
@@ -80,7 +87,8 @@ export const unicompapiProviderPackageDescriptor: ProviderPackageDescriptor = {
     {
       templateId: UNICOMPAPI_OFFICIAL_TEMPLATE_ID,
       kind: 'official',
-      displayName: 'UniCompAPI Official',
+      serviceRole: 'relay',
+      displayName: 'unicompapi.com',
       baseUrlMode: 'fixed',
       credentialSchemaId: UNICOMPAPI_CREDENTIAL_SCHEMA_ID,
       credentialSchemaVersion: 1,
@@ -99,4 +107,21 @@ export const unicompapiProviderPackageDescriptor: ProviderPackageDescriptor = {
       modelDiscoveryKind: 'catalog'
     }
   ]
+};
+
+/** www has a distinct quote/submit media lifecycle; only verified shared chat protocol is published here. */
+export const unicompapiWwwProviderPackageDescriptor: ProviderPackageDescriptor = {
+  packageId: UNICOMPAPI_WWW_PROVIDER_PACKAGE_ID, packageVersion: UNICOMPAPI_PROVIDER_PACKAGE_VERSION,
+  displayName: 'UniCompAPI WWW',
+  credentialSchemas: [{ schemaId: UNICOMPAPI_WWW_CREDENTIAL_SCHEMA_ID, version: 1,
+    fields: [{ key: 'api_key', label: 'API key', secret: true, required: true, kind: 'token' }] }],
+  endpointPolicies: [{ policyId: UNICOMPAPI_WWW_ENDPOINT_POLICY_ID, revision: 1, allowedSchemes: ['https'],
+    allowedHosts: ['www.unicompapi.com'], allowedPorts: [443], allowedPathPrefixes: ['/v1'], redirectPolicy: 'deny', proxyPolicy: 'system',
+    allowLoopback: false, allowPrivateNetwork: false, allowLoopbackHttp: false, dnsRebindingProtection: 'required', fixedBaseUrl: UNICOMPAPI_WWW_BASE_URL }],
+  adapters: unicompapiProviderPackageDescriptor.adapters.filter(adapter => adapter.adapterId === NEWAPI_CHAT_ADAPTER_ID),
+  templates: [{ templateId: UNICOMPAPI_WWW_TEMPLATE_ID, kind: 'official', serviceRole: 'relay', displayName: 'www.unicompapi.com', baseUrlMode: 'fixed',
+    credentialSchemaId: UNICOMPAPI_WWW_CREDENTIAL_SCHEMA_ID, credentialSchemaVersion: 1,
+    connectionPolicyId: 'connection.unicompapi.www-relay', connectionPolicyRevision: 1, discoveryPolicyId: 'discovery.unicompapi.www-models', discoveryPolicyRevision: 1,
+    endpointPolicyId: UNICOMPAPI_WWW_ENDPOINT_POLICY_ID, endpointPolicyRevision: 1,
+    adapterBindings: [{ adapterId: NEWAPI_CHAT_ADAPTER_ID, adapterVersion: NEWAPI_ADAPTER_VERSION }], freeConnectionValidation: true, modelDiscoveryKind: 'catalog' }]
 };

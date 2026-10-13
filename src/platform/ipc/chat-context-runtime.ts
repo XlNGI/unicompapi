@@ -143,6 +143,7 @@ import {
   type ProviderCandidateRuntimeAuthorizationPort,
   type RuntimeAuthorizationOrchestrationPort,
   unicompapiProviderPackageDescriptor,
+  unicompapiWwwProviderPackageDescriptor,
   viduProviderPackageDescriptor,
   volcengineProviderPackageDescriptor,
   type JsonProviderRegistryStore
@@ -252,6 +253,7 @@ export function createChatContextRuntime(
     kimiProviderPackageDescriptor,
     newApiProviderPackageDescriptor,
     unicompapiProviderPackageDescriptor,
+    unicompapiWwwProviderPackageDescriptor,
     viduProviderPackageDescriptor
   ]);
   const contracts = new ProviderFeatureContractRegistry([

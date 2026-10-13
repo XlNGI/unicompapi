@@ -31,6 +31,8 @@ export * from './entities/project';
 export * from './entities/project-context';
 export * from './entities/project-context-selection';
 export * from './entities/product-feature';
+export * from './entities/parameter-compatibility';
+export * from './entities/json-value-schema';
 export * from './entities/prompt';
 export * from './entities/prompt-enhancement';
 export * from './entities/provider';

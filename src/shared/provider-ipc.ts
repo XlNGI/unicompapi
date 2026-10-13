@@ -1,3 +1,5 @@
+import type { ModelApiContractBindingV1 } from '../domain/entities/parameter-compatibility';
+
 export const providerIpcChannels = {
   getRegistry: 'providers:get-registry',
   listTemplates: 'providers:list-templates',
@@ -11,6 +13,8 @@ export const providerIpcChannels = {
   setConnectionEnabled: 'providers:set-managed-connection-enabled',
   setModelEnabled: 'providers:set-managed-model-enabled',
   setNativeSearch: 'providers:set-native-search',
+  listModelApiContracts: 'providers:list-model-api-contracts',
+  bindModelApiContract: 'providers:bind-model-api-contract',
   attachOpenAiCompatibleImageProfile: 'providers:attach-openai-compatible-image-profile',
   deleteModel: 'providers:delete-managed-model',
   deleteConnection: 'providers:delete-managed-connection'
@@ -85,6 +89,7 @@ export type ProviderFrameworkResult<T> =
     };
 
 export interface ProviderTemplateSummaryDto {
+  readonly serviceRole?: 'model_vendor' | 'relay';
   readonly packageId: string;
   readonly packageVersion: string;
   readonly providerName: string;
@@ -200,6 +205,7 @@ export interface ProviderConnectionSummaryDto {
 }
 
 export interface ProviderModelSummaryDto {
+  readonly apiContract?: { readonly contractId: string; readonly revision: number; readonly authority: 'model_vendor'; readonly state: 'declared'; readonly rules?: ModelApiContractBindingV1['rules'] };
   readonly modelId: string;
   readonly providerId: string;
   readonly connectionId: string;
@@ -313,6 +319,8 @@ export interface ProviderRegistryDto {
 }
 
 export interface ProviderApi {
+  listModelApiContracts?(): Promise<ProviderFrameworkResult<readonly ModelApiContractSummaryDto[]>>;
+  bindModelApiContract?(request: { readonly modelId: string; readonly expectedRevision: number; readonly binding: ModelApiContractBindingV1; readonly confirmed: true }): Promise<ProviderFrameworkResult<{ readonly modelId: string; readonly state: 'bound' }>>;
   getRegistry(): Promise<ProviderIpcResult<ProviderRegistryDto>>;
   listTemplates(): Promise<ProviderFrameworkResult<readonly ProviderTemplateSummaryDto[]>>;
   createConnection(input: {
@@ -411,4 +419,13 @@ export interface ProviderApi {
     readonly state: 'deleted';
     readonly retainedCredentialVersions: readonly string[];
   }>>;
+}
+
+export interface ModelApiContractSummaryDto {
+  readonly contractId: string;
+  readonly revision: number;
+  readonly authority: 'model_vendor';
+  readonly vendor: string;
+  readonly modelNames: readonly string[];
+  readonly sourceUrls: readonly string[];
 }

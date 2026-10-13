@@ -27,6 +27,7 @@ import {
   newApiProviderPackageDescriptor,
   normalizeTrustedExternalUrl,
   unicompapiProviderPackageDescriptor,
+  unicompapiWwwProviderPackageDescriptor,
   ProviderManagementAdapterRegistry,
   ProviderManagementFramework,
   ProviderPackageRegistry,
@@ -156,6 +157,7 @@ const providerPackages = new ProviderPackageRegistry([
   kimiProviderPackageDescriptor,
   newApiProviderPackageDescriptor,
   unicompapiProviderPackageDescriptor,
+  unicompapiWwwProviderPackageDescriptor,
   viduProviderPackageDescriptor
 ]);
 const providerUsageSchemas = new ProviderUsageSchemaRegistry([

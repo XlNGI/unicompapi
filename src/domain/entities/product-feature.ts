@@ -1,4 +1,5 @@
 import type { ProviderOperationPurpose } from './provider';
+import { matchesJsonValueSchema, validateJsonValueSchema, type JsonValueSchema } from './json-value-schema';
 
 export const productFeatures = [
   'text_chat',
@@ -55,6 +56,7 @@ export const parameterSchemaValueTypes = [
   'string_array',
   'number_array',
   'object',
+  'json',
   'media_slot'
 ] as const;
 export type ParameterSchemaValueType = (typeof parameterSchemaValueTypes)[number];
@@ -75,6 +77,7 @@ export interface ProductFeatureDefinition {
 }
 
 export interface ParameterFieldSchemaV2 {
+  readonly validationSchema?: JsonValueSchema;
   readonly fieldId: string;
   readonly labelId: string;
   readonly groupId?: string;
@@ -351,7 +354,7 @@ function validateParameterField(field: ParameterFieldSchemaV2): ParameterFieldSc
     [field.maximum, 'maximum'],
     [field.step, 'step']
   ] as const) {
-    if (value !== undefined && (!Number.isFinite(value) || value < 0 || (label === 'step' && value === 0))) {
+    if (value !== undefined && (!Number.isFinite(value) || (label === 'step' && value <= 0))) {
       throw new ProductFeatureContractError('invalid_schema', `Parameter ${label} is invalid`);
     }
   }
@@ -359,13 +362,15 @@ function validateParameterField(field: ParameterFieldSchemaV2): ParameterFieldSc
     throw new ProductFeatureContractError('invalid_schema', 'Parameter range is inverted');
   }
   if (field.unitId !== undefined) requireStableId(field.unitId, 'parameter unit ID');
-  return { ...field };
+  return { ...field, ...(field.validationSchema ? { validationSchema: validateJsonValueSchema(field.validationSchema) } : {}) };
 }
 
 function validateParameterValue(field: ParameterFieldSchemaV2, value: unknown): void {
   if (value === undefined) {
     throw new ProductFeatureContractError('invalid_parameter', `Parameter ${field.fieldId} is undefined`);
   }
+  if (field.validationSchema && !matchesJsonValueSchema(value, field.validationSchema)) invalidParameter(field);
+  if (field.valueType === 'json' && (value === null || !['string', 'number', 'boolean', 'object'].includes(typeof value))) invalidParameter(field);
   if (field.valueType === 'string' || field.valueType === 'media_slot') {
     if (typeof value !== 'string') invalidParameter(field);
   } else if (field.valueType === 'number') {

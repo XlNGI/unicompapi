@@ -27,7 +27,7 @@ import { DEEPSEEK_PROVIDER_PACKAGE_ID } from './deepseek/deepseek-contracts';
 import {
   NEWAPI_PROVIDER_PACKAGE_ID
 } from './newapi/newapi-contracts';
-import { UNICOMPAPI_PROVIDER_PACKAGE_ID } from './newapi/unicompapi-contracts';
+import { UNICOMPAPI_PROVIDER_PACKAGE_ID, UNICOMPAPI_WWW_PROVIDER_PACKAGE_ID } from './newapi/unicompapi-contracts';
 import type { SubmissionArtifactFactoryPort } from './provider-submission-orchestrator';
 import type { ItemStatus } from '../../domain';
 import type { ConversationAttachmentContextService } from '../documents/conversation-attachment-context';
@@ -319,7 +319,7 @@ function runtimeSourceForPackage(
 ): 'official_direct' | 'newapi_gateway' {
   if (
     packageId === NEWAPI_PROVIDER_PACKAGE_ID ||
-    packageId === UNICOMPAPI_PROVIDER_PACKAGE_ID
+    packageId === UNICOMPAPI_PROVIDER_PACKAGE_ID || packageId === UNICOMPAPI_WWW_PROVIDER_PACKAGE_ID
   ) {
     return 'newapi_gateway';
   }

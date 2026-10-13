@@ -57,6 +57,7 @@ export interface FeatureSubjectResolverPort {
 }
 
 export interface FeatureCandidateEligibilityV1 {
+  readonly contractBindingDeclared?: boolean;
   readonly modelEnabled: boolean;
   readonly catalogState: 'present' | 'missing' | 'retired';
   readonly connectionState: ConnectionState;
@@ -447,7 +448,7 @@ function candidateReasons(
   if (!candidate.eligibility.modelEnabled) reasons.push('model_disabled');
   if (candidate.eligibility.catalogState !== 'present') reasons.push('model_not_present');
   if (candidate.eligibility.connectionState !== 'available') reasons.push('connection_unavailable');
-  if (candidate.eligibility.profileStatus !== 'verified') reasons.push('profile_unavailable');
+  if (candidate.eligibility.profileStatus !== 'verified' && !(candidate.eligibility.profileStatus === 'declared' && candidate.eligibility.contractBindingDeclared)) reasons.push('profile_unavailable');
   if (!candidate.eligibility.featureSupported ||
       candidate.routeTemplate.productFeature !== subject.productFeature ||
       candidate.parameterSchema.productFeature !== subject.productFeature) {

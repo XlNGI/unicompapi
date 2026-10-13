@@ -1,4 +1,6 @@
 import { supportsConversationImageInput } from './conversation-image-input';
+import { buildBoundTextParameterSchema } from './contracts/bound-text-contract';
+import { NEWAPI_CHAT_ADAPTER_ID, NEWAPI_CHAT_RESULT_SCHEMA_ID, NEWAPI_TEXT_CONSTRAINT_SET_ID, newApiChatUsageSchema } from './newapi/newapi-contracts';
 import { latestCapabilityEvidenceByCapability, pinCapabilityEvidence } from './model-capability-selection';
 import { createHash } from 'node:crypto';
 import {
@@ -106,7 +108,8 @@ export class RegistryFeatureCandidateSource implements FeatureCandidateSourcePor
         model.catalogState === 'retired'
       ) continue;
       const profiles = (snapshot.modelProfiles ?? []).filter(
-        (item) => item.modelId === model.id
+        (item) => item.modelId === model.id &&
+          (!(snapshot.modelProfiles ?? []).some(profile => profile.profileId === model.activeProfileId && profile.apiContract) || item.profileId === model.activeProfileId)
       );
 
       for (const profile of profiles) {
@@ -119,12 +122,17 @@ export class RegistryFeatureCandidateSource implements FeatureCandidateSourcePor
         for (const feature of profile.features.filter((item) =>
           item.productFeature === subject.productFeature
         )) {
-          if (!currentUniCompFeatureSupported(
+          if (!profile.apiContract && !currentUniCompFeatureSupported(
             profile.packageId,
             model.providerModelKey,
             feature.productFeature
           )) continue;
-          const contract = this.contracts.resolve(feature);
+          const contract: ProviderFeatureContractV1 | undefined = profile.apiContract ? {
+            parameterSchema: buildBoundTextParameterSchema(profile.apiContract, feature.productFeature),
+            resultSchemaId: NEWAPI_CHAT_RESULT_SCHEMA_ID, resultSchemaRevision: 1, usageSchema: newApiChatUsageSchema,
+            constraintSetId: NEWAPI_TEXT_CONSTRAINT_SET_ID, constraintSetRevision: 1, featureMappingVersion: 1
+          } : this.contracts.resolve(feature);
+          if (profile.apiContract && profile.adapterKey !== NEWAPI_CHAT_ADAPTER_ID) continue;
           if (!contract) continue;
           if (!packagePublishesAdapter(this.packages, profile.packageId, profile.adapterKey)) {
             // Drop stale profiles after a package stops publishing the adapter
@@ -192,6 +200,7 @@ export class RegistryFeatureCandidateSource implements FeatureCandidateSourcePor
               catalogState: model.catalogState ?? 'present',
               connectionState: connection.state,
               profileStatus: profile.status,
+              ...(profile.apiContract ? { contractBindingDeclared: true } : {}),
               featureSupported: [...latestEvidence.values()].every(evidence => ['verified_supported', 'user_confirmed', 'declared_supported'].includes(evidence.state)) && supportsRequestedImageCount(
                 subject,
                 feature.productFeature,
@@ -200,13 +209,17 @@ export class RegistryFeatureCandidateSource implements FeatureCandidateSourcePor
                 contract.constraintSetId,
                 profile.packageId
               ) &&
+                (!profile.apiContract || subject.imageCount === 0 || [...latestCapabilityEvidenceByCapability(imageEvidence).values()]
+                  .some(evidence => ['verified_supported', 'user_confirmed', 'declared_supported'].includes(evidence.state))) &&
                 (subject.surface !== 'conversation' || !['text_chat', 'text_reasoning'].includes(subject.productFeature) || subject.imageCount === 0 ||
                   supportsConversationImageInput(profile.adapterKey, imageEvidence)),
-              bindingAvailable,
+              bindingAvailable: bindingAvailable && (!profile.apiContract || profile.apiContractConnectionPin?.connectionConfigVersionId === connection.connectionConfigVersionId &&
+                profile.apiContractConnectionPin?.credentialVersionId === connection.credentialVersionId),
               runtimeAllowed: runtime.allowed,
               schemasInterpretable: true
             },
             routeTemplate: {
+              ...(profile.apiContract ? { parameterContract: profile.apiContract } : {}),
               ...(routeEvidence ? { capabilityEvidencePin: pinCapabilityEvidence(routeEvidence) } : {}),
               packageId: profile.packageId,
               packageVersion: connection.packageVersion ?? provider.packageVersion ?? 'unavailable',

@@ -60,6 +60,7 @@ export class ProviderPackageRegistry {
           providerName: providerPackage.displayName,
           templateId: template.templateId,
           kind: template.kind,
+          ...(template.serviceRole ? { serviceRole: template.serviceRole } : {}),
           displayName: template.displayName,
           iconAssetId: template.iconAssetId,
           baseUrlMode: template.baseUrlMode,
@@ -270,6 +271,9 @@ function parsePackage(value: ProviderPackageDescriptor): ProviderPackageDescript
 
 function parseTemplate(value: ProviderTemplateDescriptor): ProviderTemplateDescriptor {
   if (!isRecord(value)) throw invalidContract('Provider template is invalid');
+  if (value.serviceRole !== undefined && !['model_vendor', 'relay'].includes(value.serviceRole)) {
+    throw invalidContract('Provider service role is invalid');
+  }
   if (value.kind !== 'official' && value.kind !== 'compatible_custom') {
     throw invalidContract('Provider template kind is invalid');
   }
@@ -300,6 +304,7 @@ function parseTemplate(value: ProviderTemplateDescriptor): ProviderTemplateDescr
   return {
     templateId: requireStableId(value.templateId, 'templateId'),
     kind: value.kind,
+    ...(value.serviceRole ? { serviceRole: value.serviceRole } : {}),
     displayName: requireDisplayName(value.displayName, 'template displayName'),
     iconAssetId:
       value.iconAssetId === undefined

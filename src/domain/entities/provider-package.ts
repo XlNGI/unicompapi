@@ -71,6 +71,8 @@ export interface ProviderTemplateAdapterBinding {
 }
 
 export interface ProviderTemplateDescriptor {
+  /** Service authority is independent of the legacy fixed/custom endpoint kind. */
+  readonly serviceRole?: 'model_vendor' | 'relay';
   readonly templateId: string;
   readonly kind: ProviderTemplateKind;
   readonly displayName: string;
@@ -113,6 +115,7 @@ export interface StructuredCredentialRecord {
 }
 
 export interface SafeProviderTemplateDto {
+  readonly serviceRole?: 'model_vendor' | 'relay';
   readonly packageId: string;
   readonly packageVersion: string;
   readonly providerName: string;

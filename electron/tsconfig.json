@@ -9,6 +9,7 @@
     "esModuleInterop": true,
     "skipLibCheck": true,
     "moduleResolution": "Node",
+    "resolveJsonModule": true,
     "types": ["node", "electron"]
   },
   "include": [

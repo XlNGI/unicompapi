@@ -114,8 +114,8 @@ const parameterDescriptions: Readonly<Record<string, string>> = {
   imageSize: '输出图像尺寸档位；按模型支持的选项选择。',
   include_usage: '是否在响应中附带用量信息，便于核对计费。',
   input_fidelity: '参考图保真度；越高越贴近原图，主要用于编辑类模型。',
-  max_tokens: '限制模型最多可生成的文本长度；建议 256–8192，上限 128000；未填时使用服务商默认值。',
-  max_completion_tokens: '推理模型的最大输出长度；建议 256–8192，上限 128000；未填时使用服务商默认值。',
+  max_tokens: '限制模型最多可生成的文本长度；范围按当前模型合同显示，未填时使用服务商默认值。',
+  max_completion_tokens: '限制完成 Token 总量，可能包含推理 Token；范围按当前模型合同显示，未填时使用服务商默认值。',
   negative_prompt: '希望画面避免出现的内容描述。',
   n: '一次请求生成几张图；不填时远端通常默认为 1。请按服务商限额选择。',
   output_compression: '输出压缩程度；数值含义以当前模型文档为准。',
@@ -233,6 +233,7 @@ function controlKindForValueType(valueType: string): ParameterInputControlKind {
     case 'number_array':
       return 'array';
     case 'object':
+    case 'json':
       return 'json';
     case 'boolean':
       return 'boolean';
@@ -490,6 +491,7 @@ export function toDynamicParameterFields(
     readonly minimum?: number;
     readonly maximum?: number;
     readonly step?: number;
+    readonly validationSchema?: Readonly<Record<string, unknown>>;
   }[]
 ): readonly DynamicParameterField[] {
   return fields.map((field, index) => {
@@ -502,7 +504,8 @@ export function toDynamicParameterFields(
       ...(field.options ? { options: field.options } : {}),
       ...(field.minimum === undefined ? {} : { minimum: field.minimum }),
       ...(field.maximum === undefined ? {} : { maximum: field.maximum }),
-      ...(field.step === undefined ? {} : { step: field.step })
+      ...(field.step === undefined ? {} : { step: field.step }),
+      ...(field.validationSchema ? { validationSchema: field.validationSchema } : {})
     };
   });
 }
@@ -583,6 +586,7 @@ function parameterConstraint(field: DynamicParameterField): string | undefined {
       : '输入多项内容时使用逗号分隔';
   }
   if (field.valueType === 'object') return '使用 JSON 对象格式';
+  if (field.valueType === 'json') return '使用 JSON 格式填写字符串、列表或对象';
   return undefined;
 }
 
@@ -729,7 +733,7 @@ function ParameterField({
       text={text}
     />;
   }
-  if (field.valueType === 'object') {
+  if (field.valueType === 'object' || field.valueType === 'json') {
     return <ObjectParameterField
       disabled={disabled}
       error={error}

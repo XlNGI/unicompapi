@@ -464,7 +464,7 @@ export function ProvidersPage() {
               <div className="uc-provider-page__form-template">
                 <span>接入模板</span>
                 <strong>{createTemplate.providerName} · {createTemplate.displayName}</strong>
-                <small>{createTemplate.kind === 'official' ? '官方模板' : '兼容协议模板'}</small>
+                <small>{createTemplate.serviceRole === 'relay' ? '中转站连接' : createTemplate.kind === 'official' ? '官方模板' : '兼容协议模板'}</small>
               </div>
               <label>
                 连接名称

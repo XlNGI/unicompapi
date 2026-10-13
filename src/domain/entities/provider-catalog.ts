@@ -1,5 +1,6 @@
 import type { NativeSearchCapability } from './native-search';
 import type { ProductFeature } from './product-feature';
+import type { ModelApiContractBindingV1 } from './parameter-compatibility';
 
 export const catalogStates = ['present', 'missing', 'retired'] as const;
 export type CatalogState = (typeof catalogStates)[number];
@@ -39,6 +40,8 @@ export interface ProviderModelDefinition {
 }
 
 export interface ModelFeatureProfile {
+  readonly apiContract?: ModelApiContractBindingV1;
+  readonly apiContractConnectionPin?: { readonly connectionConfigVersionId: string; readonly credentialVersionId: string };
   readonly nativeSearch?: NativeSearchCapability;
   readonly schemaVersion: 1;
   readonly profileId: string;

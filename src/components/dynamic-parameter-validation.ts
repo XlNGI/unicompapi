@@ -1,3 +1,5 @@
+import { matchesJsonValueSchema, type JsonValueSchema } from '../domain/entities/json-value-schema';
+
 export type DynamicParameterValue =
   | string
   | number
@@ -7,6 +9,7 @@ export type DynamicParameterValue =
   | Readonly<Record<string, unknown>>;
 
 export interface DynamicParameterField {
+  readonly validationSchema?: JsonValueSchema;
   readonly fieldId: string;
   readonly labelId: string;
   readonly valueType: string;
@@ -54,6 +57,8 @@ export function validateDynamicParameterValue(
   if (isMissingParameterValue(value)) {
     return field.required ? `${label}为必填项。` : undefined;
   }
+  if (field.validationSchema && !matchesJsonValueSchema(value, field.validationSchema)) return `${label}不符合参数约束。`;
+  if (field.valueType === 'json') return value !== null ? undefined : `${label}必须是有效 JSON。`;
   if (field.valueType === 'string' || field.valueType === 'media_slot') {
     return typeof value === 'string' ? undefined : `${label}格式不正确。`;
   }

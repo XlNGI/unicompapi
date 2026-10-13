@@ -86,6 +86,8 @@ export function serializeParameterFieldValue(
       return Array.isArray(value) ? value.join(', ') : '';
     case 'object':
       return typeof value === 'object' && value !== null ? JSON.stringify(value) : '';
+    case 'json':
+      return JSON.stringify(value);
     default:
       return typeof value === 'string' ? value : '';
   }
@@ -203,6 +205,15 @@ function parseParameterFieldText(
       return parseNumberArrayText(field, text);
     case 'object':
       return parseObjectText(field, text);
+    case 'json': {
+      try {
+        const value: unknown = JSON.parse(text);
+        if (value === null) return { pending: undefined, error: '参数必须是有效 JSON。', blocked: true };
+        return settleParameterText(field, value as DynamicParameterValue);
+      } catch {
+        return { pending: undefined, error: '参数必须是有效 JSON。', blocked: true };
+      }
+    }
     case 'string_array': {
       const items = text.split(',').map((item) => item.trim()).filter(Boolean);
       return settleParameterText(field, items.length === 0 ? undefined : items);

@@ -1,4 +1,5 @@
 import type { Readable } from 'node:stream';
+import { buildBoundTextParameterSchema } from '../../src/platform/providers/contracts/bound-text-contract';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { readDocumentToolContext, readDocumentToolContract } from '../fixtures/document-tool-context';
 import { providerExecutionLifecycleFixture } from '../fixtures/provider-execution-lifecycle';
@@ -767,6 +768,31 @@ describe('NewAPI management and runtime safety', () => {
 });
 
 describe('NewAPI chat adapter', () => {
+  it('uses a bound vendor contract for a gateway alias and keeps returned reasoning in tool continuation', async () => {
+    const binding = { schemaVersion: 1 as const, contractId: 'official.moonshot.kimi-k3.chat', contractRevision: 1, rules: [
+      { fieldId: 'max_completion_tokens', targetPath: ['max_tokens'], maximum: 2048 }
+    ] };
+    const schema = buildBoundTextParameterSchema(binding, 'text_chat');
+    const baseRoute = routeFor('text_chat');
+    const alias = baseRoute.providerModelKey!;
+    let round = 0;
+    const fixture = runtimeFixture(async () => streamResponse(round++ === 0 ? chatStreamEvent({ reasoning_content: 'Synthetic preserved reasoning',
+      tool_calls: [{ index: 0, id: 'bound-call', type: 'function', function: { name: 'read_document_structure', arguments: JSON.stringify({ scope: 'document' }) } }] }, 'tool_calls') + 'data: [DONE]\n\n'
+      : chatStreamEvent({ content: 'Verified synthetic response' }, 'stop') + 'data: [DONE]\n\n'));
+    const adapter = new NewApiChatAdapter(fixture.runtime, credentialResolver(), connectionResolver(), { get: async () => undefined }, lifecycleFixture().port, usageSink().port);
+    const tools = providerToolsFromContracts([createCanonicalToolRegistry().get('read_document_structure')!]);
+    const execute = vi.fn(async () => ({ schemaVersion: 1, status: 'success', observation: { result: 'synthetic' } }));
+    const handle = await adapter.submit({ routeSnapshot: { ...baseRoute, parameterSchemaId: schema.schemaId, parameterSchemaRevision: schema.revision,
+      parameterContract: binding }, request: { responseExecutionId: 'response-bound', invocationAttemptId: 'attempt-bound',
+      messages: [{ role: 'user', content: 'Synthetic request' }], parameterValues: { max_completion_tokens: 1024, reasoning_effort: 'high' }, tools },
+      toolBridge: { execute } });
+    await expect(handle.completion).resolves.toMatchObject({ state: 'completed' });
+    expect(fixture.requests).toHaveLength(2);
+    expect(requestJson(fixture.requests[0])).toMatchObject({ model: alias, max_tokens: 1024, reasoning_effort: 'high' });
+    expect(requestJson(fixture.requests[0])).not.toHaveProperty('max_completion_tokens');
+    expect(requestJson(fixture.requests[1]).messages).toEqual(expect.arrayContaining([expect.objectContaining({ role: 'assistant', reasoning_content: 'Synthetic preserved reasoning' })]));
+    expect(execute).toHaveBeenCalledTimes(1);
+  });
   it('keeps a stale generation hash, admits one readback and rejects final tool proposals without another model request', async () => {
     const diagnostic = vi.spyOn(productionTrace, 'emitProductionDiagnostic');
     const args = { title: 'Verified title', content: 'Verified body' };

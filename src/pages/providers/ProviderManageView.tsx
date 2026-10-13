@@ -20,6 +20,7 @@ import type {
   ProviderTemplateSummaryDto
 } from '../../shared/provider-ipc';
 import { ProviderBrandIcon } from './ProviderBrandIcon';
+import { ModelContractBinding } from './ModelContractBinding';
 import {
   connectionLabels,
   credentialLabels,
@@ -235,7 +236,7 @@ export function ProviderManageView({
           <>
             <div className="uc-provider-page__detail-heading">
               <div>
-                <span className="uc-provider-page__eyebrow">{selectedTemplate?.kind === 'compatible_custom' ? '兼容连接' : '官方连接'}</span>
+                <span className="uc-provider-page__eyebrow">{selectedTemplate?.serviceRole === 'relay' ? '中转站连接' : selectedTemplate?.kind === 'compatible_custom' ? '兼容连接' : '官方连接'}</span>
                 <h2>{selectedConnection.name}</h2>
                 <p>{selectedProvider?.name ?? selectedTemplate?.providerName ?? '未知服务商'}</p>
               </div>
@@ -349,6 +350,9 @@ export function ProviderManageView({
                       )}
                     </div>
                   </div>
+                  {selectedModel && providersApi?.bindModelApiContract && (
+                    <ModelContractBinding key={selectedModel.modelId} model={selectedModel} api={providersApi} busy={busy} runAction={runAction} />
+                  )}
                   {selectedModel && canConfigureNativeSearch && providersApi?.setNativeSearch && (
                     <details className="uc-provider-page__native-search" key={selectedModel.modelId}>
                       <summary>当前模型的联网搜索设置</summary>

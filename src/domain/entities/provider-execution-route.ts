@@ -17,8 +17,10 @@ import {
 } from '../ids';
 import { toIsoTimestamp, type IsoTimestamp } from '../timestamps';
 import { parseProductFeature, type ProductFeature } from './product-feature';
+import { parseModelApiContractBinding, type ModelApiContractBindingV1 } from './parameter-compatibility';
 
 export interface ProviderExecutionRouteSnapshotV1 {
+  readonly parameterContract?: ModelApiContractBindingV1;
   readonly capabilityEvidencePin?: { readonly id: string; readonly revision: number; readonly fingerprint: string };
   readonly schemaVersion: 1;
   readonly id: ProviderExecutionRouteSnapshotId;
@@ -114,7 +116,8 @@ export function parseProviderExecutionRouteSnapshot(
       'connectionDisplayName',
       'providerModelKey',
       'modelDisplayName',
-      'capabilityEvidencePin'
+      'capabilityEvidencePin',
+      'parameterContract'
     ],
     'provider execution route snapshot'
   );
@@ -126,6 +129,7 @@ export function parseProviderExecutionRouteSnapshot(
     : safeKey(item.internalPurpose, 'route.internalPurpose');
   return {
     schemaVersion: 1,
+    ...(item.parameterContract === undefined ? {} : { parameterContract: parseModelApiContractBinding(item.parameterContract) }),
     id: toProviderExecutionRouteSnapshotId(nonBlank(item.id, 'route.id')),
     projectId: toProjectId(nonBlank(item.projectId, 'route.projectId')),
     packageId: opaqueId(item.packageId, 'route.packageId'),

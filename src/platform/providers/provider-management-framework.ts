@@ -33,8 +33,15 @@ import {
 import {
   createOpenAiCompatibleDefaultTextDefinition,
   NEWAPI_CHAT_ADAPTER_ID,
-  NEWAPI_CHAT_PROTOCOL_ID
+  NEWAPI_CHAT_PROTOCOL_ID,
+  NEWAPI_CHAT_RESULT_SCHEMA_ID,
+  NEWAPI_CHAT_USAGE_SCHEMA_ID,
+  NEWAPI_TEXT_CONSTRAINT_SET_ID
 } from './newapi/newapi-contracts';
+import { parseModelApiContractBinding } from '../../domain/entities/parameter-compatibility';
+import { buildBoundTextParameterSchema } from './contracts/bound-text-contract';
+import { getOfficialApiContract, officialApiContractFingerprint, listOfficialApiContracts } from './contracts/official-api-contracts';
+import { UNICOMPAPI_WWW_PROVIDER_PACKAGE_ID } from './newapi/unicompapi-contracts';
 import {
   routeOpenAiCompatibleImageEditProfile,
   routeOpenAiCompatibleImageProfile,
@@ -79,6 +86,7 @@ export const providerManagementActions = [
   'connection_validated',
   'catalog_synced',
   'model_registered_exact',
+  'model_contract_bound',
   'connection_enabled',
   'connection_disabled',
   'model_enabled',
@@ -489,6 +497,58 @@ export class ProviderManagementFramework {
                 : 'requires_live_api_approval'
       };
     });
+  }
+
+  listModelApiContracts() {
+    return listOfficialApiContracts().filter(contract => contract.id.endsWith('.chat')).map(contract => ({
+      contractId: contract.id, revision: contract.revision, authority: contract.authority, vendor: contract.vendor,
+      modelNames: contract.modelKeys, sourceUrls: contract.sources.map(source => source.url)
+    }));
+  }
+
+  async bindModelApiContract(input: unknown): Promise<ProviderManagementFrameworkResult<{ readonly modelId: string; readonly state: 'bound' }>> {
+    try {
+      if (!isRecord(input) || Object.keys(input).some(key => !['modelId', 'expectedRevision', 'binding', 'confirmed'].includes(key)) ||
+          input.confirmed !== true || !Number.isSafeInteger(input.expectedRevision)) throw new TypeError('Invalid model contract binding');
+      const modelId = requireId(input.modelId);
+      const parsedBinding = parseModelApiContractBinding(input.binding);
+      const binding = { ...parsedBinding, contractFingerprint: officialApiContractFingerprint(getOfficialApiContract(parsedBinding.contractId, parsedBinding.contractRevision)) };
+      const schemas = (['text_chat', 'text_reasoning'] as const).map(feature => buildBoundTextParameterSchema(binding, feature));
+      const now = this.now();
+      const selected = await this.registry.mutate(snapshot => {
+        const model = snapshot.models.find(item => item.id === modelId);
+        if (!model) throw new ProviderManagementFrameworkError('model_not_found', 'Model not found');
+        if (model.revision !== input.expectedRevision) throw new ProviderManagementFrameworkError('provider_registry_conflict', 'Model changed; reload before binding');
+        const resolved = resolveOwnedConnection(snapshot, this.packages, model.connectionId);
+        requireAvailableConnection(resolved.connection);
+        const protocol = snapshot.protocolBindings.find(item => item.id === model.protocolBindingId);
+        if (!isOpenAiCompatiblePackageId(resolved.connection.packageId!) || protocol?.adapterKind !== NEWAPI_CHAT_ADAPTER_ID ||
+            protocol.protocolId !== NEWAPI_CHAT_PROTOCOL_ID || model.catalogState !== 'present') {
+          throw new ProviderManagementFrameworkError('operation_unavailable', 'This model cannot consume a text API contract');
+        }
+        const key = randomUUID();
+        const features = schemas.map(schema => ({ productFeature: schema.productFeature, internalPurpose: 'text_execution',
+          parameterSchemaId: schema.schemaId, resultSchemaId: NEWAPI_CHAT_RESULT_SCHEMA_ID,
+          usageSchemaId: NEWAPI_CHAT_USAGE_SCHEMA_ID, constraintSetId: NEWAPI_TEXT_CONSTRAINT_SET_ID }));
+        const templateId = `profile-template.bound.${key}`;
+        const definition: ProviderModelDefinition = { schemaVersion: 1, definitionId: `definition.bound.${key}`,
+          packageId: resolved.connection.packageId!, packageVersion: resolved.connection.packageVersion!, providerModelKey: model.providerModelKey,
+          profileTemplates: [{ templateId, adapterKey: NEWAPI_CHAT_ADAPTER_ID, protocolDefinitionId: NEWAPI_CHAT_PROTOCOL_ID,
+            sourceDocumentRevision: `${binding.contractId}@${binding.contractRevision}`, features }] };
+        const profile: ModelFeatureProfile = { schemaVersion: 1, profileId: `profile-${key}`, revision: 1,
+          packageId: resolved.connection.packageId!, sourceTemplateId: templateId, adapterKey: NEWAPI_CHAT_ADAPTER_ID,
+          modelId: model.id, modelRevision: model.revision + 1, protocolBindingId: protocol.id,
+          // Declaration authorizes this exact binding, without asserting a live Provider verification.
+          status: 'declared', features, evidenceIds: [], apiContract: binding, recordedAt: now,
+          apiContractConnectionPin: { connectionConfigVersionId: resolved.connection.connectionConfigVersionId!, credentialVersionId: resolved.connection.credentialVersionId! } };
+        return { snapshot: { ...snapshot,
+          models: snapshot.models.map(item => item.id === model.id ? { ...item, revision: item.revision + 1, activeProfileId: profile.profileId, updatedAt: now } : item),
+          modelDefinitions: [...(snapshot.modelDefinitions ?? []), definition], modelProfiles: [...(snapshot.modelProfiles ?? []), profile]
+        }, result: model };
+      });
+      await this.record({ action: 'model_contract_bound', outcome: 'succeeded', modelId, providerId: selected.providerId, connectionId: selected.connectionId }, now);
+      return { ok: true, value: { modelId, state: 'bound' } };
+    } catch (error) { return frameworkFailure(error instanceof Error && !(error instanceof ProviderManagementFrameworkError) ? new TypeError('Invalid model contract binding') : error); }
   }
 
   async createConnection(input: unknown): Promise<ProviderManagementFrameworkResult<{
@@ -2067,7 +2127,7 @@ function assertModelRoutableForEnable(
       candidate.modelId === model.id &&
       candidate.modelRevision <= model.revision
     );
-    if (!profile || profile.status !== 'verified') {
+    if (!profile || profile.status !== 'verified' && !(profile.status === 'declared' && profile.apiContract)) {
       throw new ProviderManagementFrameworkError(
         'model_not_routable',
         'Only a present model with an exact verified profile can be enabled'
@@ -2087,6 +2147,8 @@ function tryAttachDefaultTextChatProfile(
   if (model.activeProfileId) return { snapshot, model };
   const provider = snapshot.providers.find((candidate) => candidate.id === model.providerId);
   const connection = snapshot.connections.find((candidate) => candidate.id === model.connectionId);
+  // This relay's media quote lifecycle is distinct. No model is presumed text-capable merely because it is listed.
+  if (connection?.packageId === UNICOMPAPI_WWW_PROVIDER_PACKAGE_ID) return { snapshot, model };
   const binding = snapshot.protocolBindings.find((candidate) =>
     candidate.id === model.protocolBindingId &&
     candidate.connectionId === model.connectionId

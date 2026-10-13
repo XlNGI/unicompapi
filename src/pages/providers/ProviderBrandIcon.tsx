@@ -19,6 +19,7 @@ const providerBrands = {
     name: 'unicomp',
     image: unicompApiLogo
   },
+  'provider-package-unicompapi-www': { name: 'unicomp', image: unicompApiLogo },
   'provider-package-vidu-v1': { name: 'vidu', image: viduLogo }
 } as const;
 

@@ -1,4 +1,6 @@
 import { randomUUID } from 'node:crypto';
+import { createHash } from 'node:crypto';
+import { UNICOMPAPI_WWW_PROVIDER_PACKAGE_ID } from './newapi/unicompapi-contracts';
 import {
   parseProviderExecutionRouteSnapshot,
   validateParameterValues,
@@ -60,6 +62,8 @@ import {
   kimiK3TextReasoningParameterSchema
 } from './kimi/kimi-contracts';
 import type { JsonProviderRegistryStore } from './provider-registry';
+import { buildBoundTextParameterSchema, mapBoundTextParameters } from './contracts/bound-text-contract';
+import { isOpenAiCompatiblePackageId, isOpenAiCompatiblePackageVersion, isOpenAiCompatibleEndpointPolicyId } from './newapi/openai-compatible-identity';
 
 export interface PromptOnceTextAdapterRuntimes {
   readonly deepSeekRuntime: DeepSeekSharedRuntime;
@@ -131,6 +135,16 @@ export async function submitPromptOnce(input: {
 
 export function validatePromptOnceRoute(value: unknown): ProviderExecutionRouteSnapshotV1 {
   const route = parseProviderExecutionRouteSnapshot(value);
+  if (route.parameterContract) {
+    const schema = buildBoundTextParameterSchema(route.parameterContract, route.productFeature);
+    if (!isOpenAiCompatiblePackageId(route.packageId) || !isOpenAiCompatiblePackageVersion(route.packageId, route.packageVersion) ||
+        !isOpenAiCompatibleEndpointPolicyId(route.endpointPolicyId) || route.adapterKey !== NEWAPI_CHAT_ADAPTER_ID ||
+        route.productFeature !== 'text_reasoning' || route.internalPurpose !== 'text_execution' ||
+        route.parameterSchemaId !== schema.schemaId || route.parameterSchemaRevision !== schema.revision || !route.providerModelKey) {
+      throw new PromptOnceTextAdapterError('prompt_once.route_mismatch', 'Bound text route mismatch');
+    }
+    return route;
+  }
   const openAiIdentityMatches =
     (route.packageId === NEWAPI_PROVIDER_PACKAGE_ID &&
       route.packageVersion === NEWAPI_PROVIDER_PACKAGE_VERSION &&
@@ -260,7 +274,8 @@ export function serializePromptOnceRequest(
   }
   assertPromptOnceParameterKeys(parameterValues);
   const schema = parameterSchema(route);
-  const parameters = validateParameterValues(schema, 'full', parameterValues);
+  const parameters = route.parameterContract ? mapBoundTextParameters(route.parameterContract, route.productFeature, parameterValues)
+    : validateParameterValues(schema, 'full', parameterValues);
   const body: Record<string, unknown> = {
     model: route.providerModelKey,
     messages: [{ role: 'user', content: normalizedPrompt }],
@@ -313,6 +328,7 @@ async function dispatchPromptOnce(input: {
     connection: input.connection,
     credentials: input.credential,
     body: input.body,
+    ...(input.route.packageId === UNICOMPAPI_WWW_PROVIDER_PACKAGE_ID ? { idempotencyKey: `uc-${createHash('sha256').update(input.route.id).digest('hex')}` } : {}),
     signal: input.signal,
     beforeRequestStarted: input.beforeRequestStarted
   });
@@ -372,6 +388,7 @@ export function parsePromptOnceCompletion(
 }
 
 function parameterSchema(route: ProviderExecutionRouteSnapshotV1): ParameterSchemaV2 {
+  if (route.parameterContract) return buildBoundTextParameterSchema(route.parameterContract, route.productFeature);
   const schema = route.packageId === DEEPSEEK_PROVIDER_PACKAGE_ID
     ? deepSeekReasoningParameterSchema
     : route.packageId === UNICOMPAPI_PROVIDER_PACKAGE_ID

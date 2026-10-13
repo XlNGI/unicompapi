@@ -18,8 +18,9 @@ interface ProviderGalleryViewProps {
   readonly onRequestAdapter: () => void;
 }
 
-function kindLabel(kind: ProviderTemplateSummaryDto['kind']): string {
-  return kind === 'official' ? '官方模板' : '兼容模板';
+function kindLabel(template: ProviderTemplateSummaryDto): string {
+  if (template.serviceRole === 'relay') return '中转站';
+  return template.kind === 'official' ? '官方模板' : '兼容模板';
 }
 
 function discoveryLabel(template: ProviderTemplateSummaryDto): string {
@@ -85,7 +86,7 @@ export function ProviderGalleryView({
               </StatusPill>
             </div>
             <div className="uc-provider-gallery__tags" aria-label="能力标签">
-              <span>{kindLabel(template.kind)}</span>
+              <span>{kindLabel(template)}</span>
               <span>{discoveryLabel(template)}</span>
               <span>{validationLabel(template)}</span>
             </div>

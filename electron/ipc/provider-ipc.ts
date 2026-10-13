@@ -18,6 +18,8 @@ export function registerProviderIpcHandlers(options: {
 
   ipcMain.handle(providerIpcChannels.getRegistry, () => registry.getRegistry());
   ipcMain.handle(providerIpcChannels.listTemplates, () => listTemplates(options.management));
+  ipcMain.handle(providerIpcChannels.listModelApiContracts, () => ({ ok: true, value: options.management.listModelApiContracts() }));
+  ipcMain.handle(providerIpcChannels.bindModelApiContract, (_event, input) => options.management.bindModelApiContract(input));
   ipcMain.handle(providerIpcChannels.createConnection, (_event, input) =>
     options.management.createConnection(input)
   );

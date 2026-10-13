@@ -212,6 +212,7 @@ export class NewApiSharedRuntime {
     readonly signal?: AbortSignal;
     readonly beforeRequestStarted?: () => Promise<void>;
     readonly onResponseRequestId?: NewApiResponseRequestIdObserver;
+    readonly idempotencyKey?: string;
   }): Promise<NewApiEventStreamSession> {
     const response = await this.request({
       connection: input.connection,
@@ -225,6 +226,7 @@ export class NewApiSharedRuntime {
       signal: input.signal,
       beforeRequestStarted: input.beforeRequestStarted,
       onResponseRequestId: input.onResponseRequestId,
+      idempotencyKey: input.idempotencyKey,
       accept: 'text/event-stream',
       contentType: 'application/json',
       maximumRequestBytes: 14 * 1024 * 1024,
@@ -252,6 +254,7 @@ export class NewApiSharedRuntime {
     readonly signal?: AbortSignal;
     readonly beforeRequestStarted?: () => Promise<void>;
     readonly onResponseRequestId?: NewApiResponseRequestIdObserver;
+    readonly idempotencyKey?: string;
   }): Promise<Uint8Array> {
     return requireBody(await this.request({
       connection: input.connection,
@@ -265,6 +268,7 @@ export class NewApiSharedRuntime {
       signal: input.signal,
       beforeRequestStarted: input.beforeRequestStarted,
       onResponseRequestId: input.onResponseRequestId,
+      idempotencyKey: input.idempotencyKey,
       accept: 'application/json',
       contentType: 'application/json',
       maximumRequestBytes: 2 * 1024 * 1024,
@@ -495,6 +499,7 @@ export class NewApiSharedRuntime {
     readonly requireReadyConnection: boolean;
     readonly expectedResponse: 'json' | 'stream' | 'binary';
     readonly notFoundKind: 'model' | 'operation';
+    readonly idempotencyKey?: string;
   }): Promise<NewApiHttpTransportResponse & {
     readonly requestId?: string;
     readonly cancel?: () => void;
@@ -514,6 +519,7 @@ export class NewApiSharedRuntime {
       ? resolveOriginPath(baseUrl, input.pathSegments)
       : resolvePath(baseUrl, input.pathSegments);
     validateBounds(input.body, input.maximumRequestBytes, input.maximumResponseBytes);
+    if (input.idempotencyKey !== undefined && !/^[A-Za-z0-9_-]{8,128}$/.test(input.idempotencyKey)) throw new NewApiRuntimeError('invalid_request', 'not_retryable');
     const requestTimeoutMs = this.options.defaultTimeoutMs ?? 120_000;
     const streamTimeoutPolicy = input.expectedResponse === 'stream'
       ? resolveTextStreamTimeoutPolicy(this.options)
@@ -584,7 +590,8 @@ export class NewApiSharedRuntime {
         headers: {
           accept: input.accept,
           authorization: `Bearer ${credential}`,
-          ...(input.contentType ? { 'content-type': input.contentType } : {})
+          ...(input.contentType ? { 'content-type': input.contentType } : {}),
+          ...(input.idempotencyKey ? { 'Idempotency-Key': input.idempotencyKey } : {})
         },
         ...(input.body ? { body: Uint8Array.from(input.body) } : {}),
         signal: controller.signal,
@@ -985,6 +992,7 @@ function safeUpstreamErrorFields(body: Uint8Array | undefined): SafeUpstreamErro
 function safeRequestId(headers: Readonly<Record<string, string>>): string | undefined {
   for (const name of [
     'x-request-id',
+    'x-unicomp-request-id',
     'request-id',
     'trace-id',
     'x-trace-id',

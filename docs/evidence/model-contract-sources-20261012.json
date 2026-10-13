@@ -1,0 +1,2212 @@
+{
+  "schemaVersion": 1,
+  "authorization": "explicit_user_2026-10-12",
+  "scope": "public_vendor_and_relay_documentation_only",
+  "credentialReads": 0,
+  "generationRequests": 0,
+  "automaticRetries": 0,
+  "sources": [
+    {
+      "id": "openai-chat",
+      "sourceUrl": "https://platform.openai.com/docs/api-reference/chat/create",
+      "capturedAt": "2026-10-13T00:37:23.656Z",
+      "state": "unavailable",
+      "requests": 1,
+      "outboundScope": "public_document_url_only",
+      "cost": 0,
+      "httpStatus": 403,
+      "resolvedUrl": "https://platform.openai.com/docs/api-reference/chat/create",
+      "contentType": "text/html; charset=UTF-8",
+      "safeCode": "http_403"
+    },
+    {
+      "id": "openai-models",
+      "sourceUrl": "https://developers.openai.com/api/docs/models",
+      "capturedAt": "2026-10-13T00:37:23.626Z",
+      "state": "unavailable",
+      "requests": 1,
+      "outboundScope": "public_document_url_only",
+      "cost": 0,
+      "httpStatus": 403,
+      "resolvedUrl": "https://developers.openai.com/api/docs/models",
+      "contentType": "text/plain; charset=utf-8",
+      "safeCode": "http_403"
+    },
+    {
+      "id": "deepseek-chat",
+      "sourceUrl": "https://api-docs.deepseek.com/api/create-chat-completion",
+      "capturedAt": "2026-10-13T00:37:23.657Z",
+      "state": "retrieved",
+      "requests": 2,
+      "outboundScope": "public_document_url_only",
+      "cost": 0,
+      "httpStatus": 200,
+      "resolvedUrl": "https://api-docs.deepseek.com/api/create-chat-completion/",
+      "contentType": "text/html",
+      "byteLength": 142966,
+      "sha256": "e7133a7c2a7c2662567cca2e2392b503f97c2fb583009ff85f878744e0a36ba7",
+      "textLength": 32048
+    },
+    {
+      "id": "kimi-chat",
+      "sourceUrl": "https://platform.kimi.com/docs/api/chat-completion.md",
+      "capturedAt": "2026-10-13T00:37:23.657Z",
+      "state": "retrieved",
+      "requests": 2,
+      "outboundScope": "public_document_url_only",
+      "cost": 0,
+      "httpStatus": 200,
+      "resolvedUrl": "https://platform.kimi.com/docs/get-api-key.md",
+      "contentType": "text/markdown; charset=utf-8",
+      "byteLength": 11293,
+      "sha256": "271f3d33b750d5cbaa37e62f08a460321eb81f7af1881f1acbe50f65d95329ba",
+      "textLength": 8081
+    },
+    {
+      "id": "kimi-search",
+      "sourceUrl": "https://platform.kimi.com/docs/guide/use-web-search.md",
+      "capturedAt": "2026-10-13T00:37:25.310Z",
+      "state": "retrieved",
+      "requests": 1,
+      "outboundScope": "public_document_url_only",
+      "cost": 0,
+      "httpStatus": 200,
+      "resolvedUrl": "https://platform.kimi.com/docs/guide/use-web-search.md",
+      "contentType": "text/markdown; charset=utf-8",
+      "byteLength": 19893,
+      "sha256": "61a8e317fb46258d7ab841ddaf4712d2cf7484e3a2b4d8a7680c614171209aaa",
+      "textLength": 14173
+    },
+    {
+      "id": "qwen-chat",
+      "sourceUrl": "https://help.aliyun.com/zh/model-studio/qwen-api-reference/",
+      "capturedAt": "2026-10-13T00:37:25.311Z",
+      "state": "retrieved",
+      "requests": 1,
+      "outboundScope": "public_document_url_only",
+      "cost": 0,
+      "httpStatus": 200,
+      "resolvedUrl": "https://help.aliyun.com/zh/model-studio/qwen-api-reference/",
+      "contentType": "text/html;charset=UTF-8",
+      "byteLength": 41428,
+      "sha256": "39b722e2f22da413b4e534a827877c0c9d59ac69933f0a1652e2c7f99f3fce17",
+      "textLength": 1182
+    },
+    {
+      "id": "glm-chat",
+      "sourceUrl": "https://docs.bigmodel.cn/api-reference/模型-api/对话补全.md",
+      "capturedAt": "2026-10-13T00:37:25.310Z",
+      "state": "retrieved",
+      "requests": 1,
+      "outboundScope": "public_document_url_only",
+      "cost": 0,
+      "httpStatus": 200,
+      "resolvedUrl": "https://docs.bigmodel.cn/api-reference/%E6%A8%A1%E5%9E%8B-api/%E5%AF%B9%E8%AF%9D%E8%A1%A5%E5%85%A8.md",
+      "contentType": "text/markdown; charset=utf-8",
+      "byteLength": 69613,
+      "sha256": "9844803948f2c1fd80562d9c617b7cb9bc0ddbac66e97db7a3d65279c9753a8a",
+      "textLength": 55055
+    },
+    {
+      "id": "qwen-image",
+      "sourceUrl": "https://help.aliyun.com/zh/model-studio/qwen-image-api",
+      "capturedAt": "2026-10-13T00:37:25.312Z",
+      "state": "retrieved",
+      "requests": 1,
+      "outboundScope": "public_document_url_only",
+      "cost": 0,
+      "httpStatus": 200,
+      "resolvedUrl": "https://help.aliyun.com/zh/model-studio/qwen-image-api",
+      "contentType": "text/html;charset=UTF-8",
+      "byteLength": 229871,
+      "sha256": "ce466431ce6711be5edf9c4b1fa154149c3bef97026878812fdb72e47cd02c7a",
+      "textLength": 40363
+    },
+    {
+      "id": "kling-text-video",
+      "sourceUrl": "https://app.klingai.com/cn/dev/document-api/apiReference/model/textToVideo",
+      "capturedAt": "2026-10-13T00:37:25.891Z",
+      "state": "unavailable",
+      "requests": 1,
+      "outboundScope": "public_document_url_only",
+      "cost": 0,
+      "httpStatus": 301,
+      "safeCode": "source_redirect_not_allowed"
+    },
+    {
+      "id": "vidu-reference-video",
+      "sourceUrl": "https://platform.vidu.cn/docs/reference-to-video",
+      "capturedAt": "2026-10-13T00:37:25.891Z",
+      "state": "retrieved",
+      "requests": 1,
+      "outboundScope": "public_document_url_only",
+      "cost": 0,
+      "httpStatus": 200,
+      "resolvedUrl": "https://platform.vidu.cn/docs/reference-to-video",
+      "contentType": "text/html; charset=utf-8",
+      "byteLength": 418375,
+      "sha256": "4a7a1bb12bbb37c7628e737c179296bb13503d1e91e210306dee2abdda3dfcd0",
+      "textLength": 1010
+    },
+    {
+      "id": "vidu-text-video",
+      "sourceUrl": "https://platform.vidu.cn/docs/text-to-video",
+      "capturedAt": "2026-10-13T00:37:25.890Z",
+      "state": "retrieved",
+      "requests": 1,
+      "outboundScope": "public_document_url_only",
+      "cost": 0,
+      "httpStatus": 200,
+      "resolvedUrl": "https://platform.vidu.cn/docs/text-to-video",
+      "contentType": "text/html; charset=utf-8",
+      "byteLength": 418350,
+      "sha256": "38e9dafd8cdcb70932a04c876f9bbdc8a4f0ff66825fc48bba74604e88d7fa91",
+      "textLength": 1010
+    },
+    {
+      "id": "vidu-reference-image",
+      "sourceUrl": "https://platform.vidu.cn/docs/reference-to-image",
+      "capturedAt": "2026-10-13T00:37:25.891Z",
+      "state": "retrieved",
+      "requests": 1,
+      "outboundScope": "public_document_url_only",
+      "cost": 0,
+      "httpStatus": 200,
+      "resolvedUrl": "https://platform.vidu.cn/docs/reference-to-image",
+      "contentType": "text/html; charset=utf-8",
+      "byteLength": 418168,
+      "sha256": "069048cfc266860758d2b419b46db514fe62e6bd8c96ef7b7a797a5029b9e126",
+      "textLength": 1010
+    },
+    {
+      "id": "minimax-video",
+      "sourceUrl": "https://platform.minimaxi.com/docs/api-reference/video-generation",
+      "capturedAt": "2026-10-13T00:37:26.547Z",
+      "state": "unavailable",
+      "requests": 1,
+      "outboundScope": "public_document_url_only",
+      "cost": 0,
+      "httpStatus": 302,
+      "safeCode": "source_redirect_not_allowed"
+    },
+    {
+      "id": "unicompapi-home",
+      "sourceUrl": "https://unicompapi.com/",
+      "capturedAt": "2026-10-13T00:37:26.548Z",
+      "state": "retrieved",
+      "requests": 1,
+      "outboundScope": "public_document_url_only",
+      "cost": 0,
+      "httpStatus": 200,
+      "resolvedUrl": "https://unicompapi.com/",
+      "contentType": "text/html; charset=utf-8",
+      "byteLength": 1020,
+      "sha256": "874ab5bfb6e0e9d444a4d44a4cc976de7292fbbb3a0ed523a1a56f70eaed7a85",
+      "textLength": 76
+    },
+    {
+      "id": "volcengine-video",
+      "sourceUrl": "https://www.volcengine.com/docs/82379/1520757",
+      "capturedAt": "2026-10-13T00:37:26.548Z",
+      "state": "unavailable",
+      "requests": 1,
+      "outboundScope": "public_document_url_only",
+      "cost": 0,
+      "httpStatus": 301,
+      "safeCode": "source_redirect_not_allowed"
+    },
+    {
+      "id": "kimi-models",
+      "sourceUrl": "https://platform.kimi.com/docs/api/models-overview.md",
+      "capturedAt": "2026-10-13T00:39:48.792Z",
+      "state": "retrieved",
+      "requests": 1,
+      "outboundScope": "public_document_url_only",
+      "cost": 0,
+      "httpStatus": 200,
+      "resolvedUrl": "https://platform.kimi.com/docs/api/models-overview.md",
+      "contentType": "text/markdown; charset=utf-8",
+      "byteLength": 7527,
+      "sha256": "5b4939aa34387efc4878ad75effcb35571f9d5bf1640c16de492036af6da3679",
+      "textLength": 5657
+    },
+    {
+      "id": "kimi-k3",
+      "sourceUrl": "https://platform.kimi.com/docs/guide/kimi-k3-quickstart.md",
+      "capturedAt": "2026-10-13T00:39:48.793Z",
+      "state": "retrieved",
+      "requests": 1,
+      "outboundScope": "public_document_url_only",
+      "cost": 0,
+      "httpStatus": 200,
+      "resolvedUrl": "https://platform.kimi.com/docs/guide/kimi-k3-quickstart.md",
+      "contentType": "text/markdown; charset=utf-8",
+      "byteLength": 17649,
+      "sha256": "58cefbeb0d2707c8297c762aa64e3f36879d4074de2dba32006920dcb3fa944d",
+      "textLength": 13211
+    },
+    {
+      "id": "kimi-api-chat",
+      "sourceUrl": "https://platform.kimi.com/docs/api/chat.md",
+      "capturedAt": "2026-10-13T00:39:48.769Z",
+      "state": "retrieved",
+      "requests": 1,
+      "outboundScope": "public_document_url_only",
+      "cost": 0,
+      "httpStatus": 200,
+      "resolvedUrl": "https://platform.kimi.com/docs/api/chat.md",
+      "contentType": "text/markdown; charset=utf-8",
+      "byteLength": 58522,
+      "sha256": "940a8da96d1a21aaed6834ddffecbd66a3182d6643ee3569fcff68cd05943169",
+      "textLength": 47017
+    },
+    {
+      "id": "glm-openapi",
+      "sourceUrl": "https://docs.bigmodel.cn/openapi/openapi.json",
+      "capturedAt": "2026-10-13T00:39:48.793Z",
+      "state": "retrieved",
+      "requests": 1,
+      "outboundScope": "public_document_url_only",
+      "cost": 0,
+      "httpStatus": 200,
+      "resolvedUrl": "https://docs.bigmodel.cn/openapi/openapi.json",
+      "contentType": "application/json",
+      "byteLength": 782761,
+      "sha256": "19323a78f0052c6e28b053e24a19c582595430a5658a01adb22bbc704d461f9d",
+      "textLength": 703499
+    },
+    {
+      "id": "minimax-video-current",
+      "sourceUrl": "https://platform.minimax.cn/docs/api-reference/video-generation",
+      "capturedAt": "2026-10-13T00:39:49.839Z",
+      "state": "unavailable",
+      "requests": 1,
+      "outboundScope": "public_document_url_only",
+      "cost": 0,
+      "httpStatus": 404,
+      "resolvedUrl": "https://platform.minimax.cn/docs/api-reference/video-generation",
+      "contentType": "text/markdown; charset=utf-8",
+      "safeCode": "http_404"
+    },
+    {
+      "id": "qwen-openai-chat",
+      "sourceUrl": "https://help.aliyun.com/zh/model-studio/qwen-api-via-openai-chat-completions",
+      "capturedAt": "2026-10-13T00:39:49.838Z",
+      "state": "retrieved",
+      "requests": 1,
+      "outboundScope": "public_document_url_only",
+      "cost": 0,
+      "httpStatus": 200,
+      "resolvedUrl": "https://help.aliyun.com/zh/model-studio/qwen-api-via-openai-chat-completions",
+      "contentType": "text/html;charset=UTF-8",
+      "byteLength": 345272,
+      "sha256": "242b46c1511c5634d08f3f11db3dbee8d655cf21bf2d76e6b6035f1285662f41",
+      "textLength": 65935
+    },
+    {
+      "id": "vidu-image-generation",
+      "sourceUrl": "https://platform.vidu.cn/docs/api-reference/image-generation",
+      "capturedAt": "2026-10-13T00:39:49.839Z",
+      "state": "retrieved",
+      "requests": 1,
+      "outboundScope": "public_document_url_only",
+      "cost": 0,
+      "httpStatus": 200,
+      "resolvedUrl": "https://platform.vidu.cn/docs/api-reference/image-generation",
+      "contentType": "text/html; charset=utf-8",
+      "byteLength": 685360,
+      "sha256": "b37691e654bfc182dd236556c2f076e561c7b4d6ffcb1dc8da4d5e9fe18007aa",
+      "textLength": 4770
+    },
+    {
+      "id": "vidu-q3-text",
+      "sourceUrl": "https://platform.vidu.cn/docs/api-reference/video-models/vidu-q3/text-to-video",
+      "capturedAt": "2026-10-13T00:39:49.838Z",
+      "state": "retrieved",
+      "requests": 1,
+      "outboundScope": "public_document_url_only",
+      "cost": 0,
+      "httpStatus": 200,
+      "resolvedUrl": "https://platform.vidu.cn/docs/api-reference/video-models/vidu-q3/text-to-video",
+      "contentType": "text/html; charset=utf-8",
+      "byteLength": 1050387,
+      "sha256": "d2c656fd229117ff16c191d8acf7049cc52c53432b59537fed750cdeb9862848",
+      "textLength": 10711
+    },
+    {
+      "id": "kling-video-current",
+      "sourceUrl": "https://klingai.com/document-api/apiReference/model/textToVideo",
+      "capturedAt": "2026-10-13T00:39:51.317Z",
+      "state": "retrieved",
+      "requests": 1,
+      "outboundScope": "public_document_url_only",
+      "cost": 0,
+      "httpStatus": 200,
+      "resolvedUrl": "https://klingai.com/document-api/apiReference/model/textToVideo",
+      "contentType": "text/html; charset=UTF-8",
+      "byteLength": 75905,
+      "sha256": "74008ecf15be300ea103891702eadbe005497a6f7a1d1fd91111ac047982bf1f",
+      "textLength": 192
+    },
+    {
+      "id": "volcengine-video-current",
+      "sourceUrl": "https://docs.volcengine.com/docs/82379/1520757",
+      "capturedAt": "2026-10-13T00:39:51.316Z",
+      "state": "retrieved",
+      "requests": 2,
+      "outboundScope": "public_document_url_only",
+      "cost": 0,
+      "httpStatus": 200,
+      "resolvedUrl": "https://docs.volcengine.com/docs/ark/create-video-generation-task-api?lang=zh",
+      "contentType": "text/html; charset=UTF-8",
+      "byteLength": 1397273,
+      "sha256": "7871968d6bd3b90d9cda743027cce32a52833455f5b7a3da14dcc117fc13acca",
+      "textLength": 46922
+    },
+    {
+      "id": "deepseek-models",
+      "sourceUrl": "https://api-docs.deepseek.com/quick_start/pricing",
+      "capturedAt": "2026-10-13T00:42:58.787Z",
+      "state": "retrieved",
+      "requests": 2,
+      "outboundScope": "public_document_url_only",
+      "cost": 0,
+      "httpStatus": 200,
+      "resolvedUrl": "https://api-docs.deepseek.com/quick_start/pricing/",
+      "contentType": "text/html",
+      "byteLength": 23982,
+      "sha256": "210f102275ccf1a6542f08a3bc9e4b4c7c83278cb74b35217bffa112df6363b2",
+      "textLength": 2813
+    },
+    {
+      "id": "deepseek-tools",
+      "sourceUrl": "https://api-docs.deepseek.com/guides/tool_calls",
+      "capturedAt": "2026-10-13T00:42:58.810Z",
+      "state": "retrieved",
+      "requests": 2,
+      "outboundScope": "public_document_url_only",
+      "cost": 0,
+      "httpStatus": 200,
+      "resolvedUrl": "https://api-docs.deepseek.com/guides/tool_calls/",
+      "contentType": "text/html",
+      "byteLength": 71224,
+      "sha256": "d77a694143b27cfff7d8d9a18be3e7426b4f340947cdabedb315dd2ef9271c09",
+      "textLength": 10044
+    },
+    {
+      "id": "vidu-q3-image",
+      "sourceUrl": "https://platform.vidu.cn/docs/api-reference/video-models/vidu-q3/image-to-video",
+      "capturedAt": "2026-10-13T00:42:58.811Z",
+      "state": "retrieved",
+      "requests": 1,
+      "outboundScope": "public_document_url_only",
+      "cost": 0,
+      "httpStatus": 200,
+      "resolvedUrl": "https://platform.vidu.cn/docs/api-reference/video-models/vidu-q3/image-to-video",
+      "contentType": "text/html; charset=utf-8",
+      "byteLength": 1373639,
+      "sha256": "ae00c828e290d6853a988c5e257b0a5ade4daaf0df1843c309d18a8c26afba12",
+      "textLength": 15440
+    },
+    {
+      "id": "vidu-q3-reference",
+      "sourceUrl": "https://platform.vidu.cn/docs/api-reference/video-models/vidu-q3/reference-to-video",
+      "capturedAt": "2026-10-13T00:42:58.811Z",
+      "state": "retrieved",
+      "requests": 1,
+      "outboundScope": "public_document_url_only",
+      "cost": 0,
+      "httpStatus": 200,
+      "resolvedUrl": "https://platform.vidu.cn/docs/api-reference/video-models/vidu-q3/reference-to-video",
+      "contentType": "text/html; charset=utf-8",
+      "byteLength": 2040560,
+      "sha256": "590646918601cc50370096e8308dfba133d31b1b96d9d5614e6206ee590db549",
+      "textLength": 29363
+    },
+    {
+      "id": "kling-public-doc-client",
+      "sourceUrl": "https://p4-kling.klingai.com/kcdn/cdn-kcdn112452/api-doc/assets/index-B4YRheOs.js",
+      "capturedAt": "2026-10-13T00:43:01.035Z",
+      "state": "retrieved",
+      "requests": 1,
+      "outboundScope": "public_document_url_only",
+      "cost": 0,
+      "httpStatus": 200,
+      "resolvedUrl": "https://p4-kling.klingai.com/kcdn/cdn-kcdn112452/api-doc/assets/index-B4YRheOs.js",
+      "contentType": "application/javascript",
+      "byteLength": 111778,
+      "sha256": "e60b52b4125b8de7ebd3629c0ed03a7cd4c593d74edff248d6acaa20deab4290",
+      "textLength": 111778
+    },
+    {
+      "id": "unicompapi-public-doc-links",
+      "sourceUrl": "https://unicompapi.com/static/js/index.382ed15bdb.js",
+      "capturedAt": "2026-10-13T00:43:01.035Z",
+      "state": "retrieved",
+      "requests": 1,
+      "outboundScope": "public_document_url_only",
+      "cost": 0,
+      "httpStatus": 200,
+      "resolvedUrl": "https://unicompapi.com/static/js/index.382ed15bdb.js",
+      "contentType": "text/javascript; charset=utf-8",
+      "byteLength": 2724127,
+      "sha256": "96d88185bc5836333592dc080d0204c1f404f73eafa6e6d00ff42e94a16b7941",
+      "textLength": 2367198
+    },
+    {
+      "id": "qwen-image-edit",
+      "sourceUrl": "https://help.aliyun.com/zh/model-studio/qwen-image-edit-api",
+      "capturedAt": "2026-10-13T00:43:01.036Z",
+      "state": "retrieved",
+      "requests": 1,
+      "outboundScope": "public_document_url_only",
+      "cost": 0,
+      "httpStatus": 200,
+      "resolvedUrl": "https://help.aliyun.com/zh/model-studio/qwen-image-edit-api",
+      "contentType": "text/html;charset=UTF-8",
+      "byteLength": 147153,
+      "sha256": "3dbee263b911e98b67bc8ad46ecac2f78cbc9c7f982e927f244c1af057f9abdb",
+      "textLength": 24976
+    },
+    {
+      "id": "minimax-doc-index",
+      "sourceUrl": "https://platform.minimax.cn/docs",
+      "capturedAt": "2026-10-13T00:43:01.034Z",
+      "state": "retrieved",
+      "requests": 2,
+      "outboundScope": "public_document_url_only",
+      "cost": 0,
+      "httpStatus": 200,
+      "resolvedUrl": "https://platform.minimax.cn/docs/guides/models-intro.md",
+      "contentType": "text/markdown; charset=utf-8",
+      "byteLength": 7040,
+      "sha256": "8c7dd5559f403cd0bf67915a4b1866885c8524dce67e48280f9643b729c9f073",
+      "textLength": 4526
+    },
+    {
+      "id": "kling-api-doc-navigation",
+      "sourceUrl": "https://p4-kling.klingai.com/kcdn/cdn-kcdn112452/api-doc/assets/DocumentNavigation-D40AtI73.js",
+      "capturedAt": "2026-10-13T00:45:35.199Z",
+      "state": "retrieved",
+      "requests": 1,
+      "outboundScope": "public_document_url_only",
+      "cost": 0,
+      "httpStatus": 200,
+      "resolvedUrl": "https://p4-kling.klingai.com/kcdn/cdn-kcdn112452/api-doc/assets/DocumentNavigation-D40AtI73.js",
+      "contentType": "application/javascript",
+      "byteLength": 120639,
+      "sha256": "12ae26b3ae84e3b6ae29832c33bfe8a93dadcfac271f64a7cc334ebe16acd8ac",
+      "textLength": 120639
+    },
+    {
+      "id": "kling-api-doc-loader",
+      "sourceUrl": "https://p4-kling.klingai.com/kcdn/cdn-kcdn112452/api-doc/assets/api-module-loader-fE9OcdWp.js",
+      "capturedAt": "2026-10-13T00:45:35.198Z",
+      "state": "retrieved",
+      "requests": 1,
+      "outboundScope": "public_document_url_only",
+      "cost": 0,
+      "httpStatus": 200,
+      "resolvedUrl": "https://p4-kling.klingai.com/kcdn/cdn-kcdn112452/api-doc/assets/api-module-loader-fE9OcdWp.js",
+      "contentType": "application/javascript",
+      "byteLength": 17417,
+      "sha256": "a5ad69b14b0d5fb1e9bfa45f168acc89c91f7af96d243f015b79d3ecd4aa6b26",
+      "textLength": 17417
+    },
+    {
+      "id": "minimax-h3-create",
+      "sourceUrl": "https://platform.minimax.cn/docs/api-reference/video-generation-v2-create.md",
+      "capturedAt": "2026-10-13T00:45:35.175Z",
+      "state": "retrieved",
+      "requests": 1,
+      "outboundScope": "public_document_url_only",
+      "cost": 0,
+      "httpStatus": 200,
+      "resolvedUrl": "https://platform.minimax.cn/docs/api-reference/video-generation-v2-create.md",
+      "contentType": "text/markdown; charset=utf-8",
+      "byteLength": 20724,
+      "sha256": "4dbb502b654cc136930a55285108aa18fec0702db40397431f7058deccb793a5",
+      "textLength": 17124
+    },
+    {
+      "id": "kling-text-video-description",
+      "sourceUrl": "https://p4-kling.klingai.com/kcdn/cdn-kcdn112452/api-doc/assets/zh-C5a5ACo3.js",
+      "capturedAt": "2026-10-13T00:48:04.175Z",
+      "state": "retrieved",
+      "requests": 1,
+      "outboundScope": "public_document_url_only",
+      "cost": 0,
+      "httpStatus": 200,
+      "resolvedUrl": "https://p4-kling.klingai.com/kcdn/cdn-kcdn112452/api-doc/assets/zh-C5a5ACo3.js",
+      "contentType": "application/javascript",
+      "byteLength": 798,
+      "sha256": "78397f7b0a45eaaf767c7f75fbe18faee8d087d2ae24433935bda93a7f9d7c60",
+      "textLength": 798
+    },
+    {
+      "id": "kling-text-video-schema",
+      "sourceUrl": "https://p4-kling.klingai.com/kcdn/cdn-kcdn112452/api-doc/assets/api-BqIZ9h2I.js",
+      "capturedAt": "2026-10-13T00:48:04.151Z",
+      "state": "retrieved",
+      "requests": 1,
+      "outboundScope": "public_document_url_only",
+      "cost": 0,
+      "httpStatus": 200,
+      "resolvedUrl": "https://p4-kling.klingai.com/kcdn/cdn-kcdn112452/api-doc/assets/api-BqIZ9h2I.js",
+      "contentType": "application/javascript",
+      "byteLength": 32952,
+      "sha256": "198ffc8da214570b3a935f9f9c9bee3c0eaf49716212106c8082afb4c12501aa",
+      "textLength": 32952
+    },
+    {
+      "id": "unicompapi-www-home",
+      "sourceUrl": "https://www.unicompapi.com/",
+      "capturedAt": "2026-10-13T01:44:44.719Z",
+      "state": "retrieved",
+      "requests": 1,
+      "outboundScope": "public_document_url_only",
+      "cost": 0,
+      "httpStatus": 200,
+      "resolvedUrl": "https://www.unicompapi.com/",
+      "contentType": "text/html; charset=utf-8",
+      "byteLength": 87013,
+      "sha256": "c485a8d01232f62b1e9338638c9978c4fd3e600bcb3e7435f26e434a2c1ee3a8",
+      "textLength": 1651
+    },
+    {
+      "id": "qwen-model-overview",
+      "sourceUrl": "https://help.aliyun.com/zh/model-studio/getting-started/models",
+      "capturedAt": "2026-10-13T01:44:44.694Z",
+      "state": "retrieved",
+      "requests": 2,
+      "outboundScope": "public_document_url_only",
+      "cost": 0,
+      "httpStatus": 200,
+      "resolvedUrl": "https://help.aliyun.com/zh/model-studio/models",
+      "contentType": "text/html;charset=UTF-8",
+      "byteLength": 97159,
+      "sha256": "9466d1b8222b0dddd31f8f69a82fd38a192e66a68ce3936a9837dd355b471f88",
+      "textLength": 2498
+    },
+    {
+      "id": "volcengine-images",
+      "sourceUrl": "https://docs.volcengine.com/docs/ark/image-generation-api?lang=zh",
+      "capturedAt": "2026-10-13T01:44:44.718Z",
+      "state": "retrieved",
+      "requests": 1,
+      "outboundScope": "public_document_url_only",
+      "cost": 0,
+      "httpStatus": 200,
+      "resolvedUrl": "https://docs.volcengine.com/docs/ark/image-generation-api?lang=zh",
+      "contentType": "text/html; charset=UTF-8",
+      "byteLength": 1517603,
+      "sha256": "01868fdd93bb76f4e1645389955a8212f91fa45310de83cd34d6bbfdd060c459",
+      "textLength": 42851
+    },
+    {
+      "id": "unicompapi-www-docs",
+      "sourceUrl": "https://www.unicompapi.com/docs/api",
+      "capturedAt": "2026-10-13T01:50:44.418Z",
+      "state": "retrieved",
+      "requests": 1,
+      "outboundScope": "public_document_url_only",
+      "cost": 0,
+      "httpStatus": 200,
+      "resolvedUrl": "https://www.unicompapi.com/docs/api",
+      "contentType": "text/html; charset=utf-8",
+      "byteLength": 423476,
+      "sha256": "1e2bec187b8cd91f1b51a03516c38113987fc60dd1caafb55bd86a242682492f",
+      "textLength": 8944
+    },
+    {
+      "id": "unicompapi-www-gpt-luna",
+      "sourceUrl": "https://www.unicompapi.com/docs/models/gpt-5.6-luna",
+      "capturedAt": "2026-10-13T02:21:21.267Z",
+      "state": "retrieved",
+      "requests": 1,
+      "outboundScope": "public_document_url_only",
+      "cost": 0,
+      "httpStatus": 200,
+      "resolvedUrl": "https://www.unicompapi.com/docs/models/gpt-5.6-luna",
+      "contentType": "text/html; charset=utf-8",
+      "byteLength": 23082,
+      "sha256": "3c9dce8173b11ac19f156f980e6929f0e1445abccbb252152dabc1b5b674480d",
+      "textLength": 309
+    },
+    {
+      "id": "unicompapi-www-glm-5.2",
+      "sourceUrl": "https://www.unicompapi.com/docs/models/glm-5.2",
+      "capturedAt": "2026-10-13T02:21:21.266Z",
+      "state": "retrieved",
+      "requests": 1,
+      "outboundScope": "public_document_url_only",
+      "cost": 0,
+      "httpStatus": 200,
+      "resolvedUrl": "https://www.unicompapi.com/docs/models/glm-5.2",
+      "contentType": "text/html; charset=utf-8",
+      "byteLength": 60969,
+      "sha256": "8ad2ae3a6b40bce0de64a9b90ae11857094f1dffb9fc857d744adf83f8181877",
+      "textLength": 4365
+    },
+    {
+      "id": "unicompapi-www-happyhorse",
+      "sourceUrl": "https://www.unicompapi.com/docs/models/happyhorse-1.1-t2v",
+      "capturedAt": "2026-10-13T02:21:21.266Z",
+      "state": "retrieved",
+      "requests": 1,
+      "outboundScope": "public_document_url_only",
+      "cost": 0,
+      "httpStatus": 200,
+      "resolvedUrl": "https://www.unicompapi.com/docs/models/happyhorse-1.1-t2v",
+      "contentType": "text/html; charset=utf-8",
+      "byteLength": 62948,
+      "sha256": "e56cfca8d673fc6d4bbcccf464d9bbd4298da550a1038c63ae3d2d23ed7474bc",
+      "textLength": 4910
+    },
+    {
+      "id": "unicompapi-www-kimi-k3",
+      "sourceUrl": "https://www.unicompapi.com/docs/models/kimi-k3",
+      "capturedAt": "2026-10-13T02:21:21.242Z",
+      "state": "retrieved",
+      "requests": 1,
+      "outboundScope": "public_document_url_only",
+      "cost": 0,
+      "httpStatus": 200,
+      "resolvedUrl": "https://www.unicompapi.com/docs/models/kimi-k3",
+      "contentType": "text/html; charset=utf-8",
+      "byteLength": 138890,
+      "sha256": "5f3e9cb826dd71549e9145f42dcc25c54a411e1e1ccf087b867e464d32e0e865",
+      "textLength": 14986
+    },
+    {
+      "id": "unicompapi-www-h3",
+      "sourceUrl": "https://www.unicompapi.com/docs/models/MiniMax-H3",
+      "capturedAt": "2026-10-13T02:21:25.535Z",
+      "state": "retrieved",
+      "requests": 1,
+      "outboundScope": "public_document_url_only",
+      "cost": 0,
+      "httpStatus": 200,
+      "resolvedUrl": "https://www.unicompapi.com/docs/models/MiniMax-H3",
+      "contentType": "text/html; charset=utf-8",
+      "byteLength": 44358,
+      "sha256": "9b448e93d6e539452682c11b4d7c3b871c318a7b21c68d9e2a099389d6f59eec",
+      "textLength": 2877
+    },
+    {
+      "id": "openai-chat-markdown",
+      "sourceUrl": "https://developers.openai.com/api/reference/resources/chat/subresources/completions/methods/create.md",
+      "capturedAt": "2026-10-13T04:21:06.307Z",
+      "state": "unavailable",
+      "requests": 1,
+      "outboundScope": "public_document_url_only",
+      "cost": 0,
+      "httpStatus": 403,
+      "resolvedUrl": "https://developers.openai.com/api/reference/resources/chat/subresources/completions/methods/create.md",
+      "contentType": "text/plain; charset=utf-8",
+      "safeCode": "http_403"
+    },
+    {
+      "id": "openai-models-markdown",
+      "sourceUrl": "https://developers.openai.com/api/docs/models.md",
+      "capturedAt": "2026-10-13T04:21:06.332Z",
+      "state": "unavailable",
+      "requests": 1,
+      "outboundScope": "public_document_url_only",
+      "cost": 0,
+      "httpStatus": 403,
+      "resolvedUrl": "https://developers.openai.com/api/docs/models.md",
+      "contentType": "text/plain; charset=utf-8",
+      "safeCode": "http_403"
+    },
+    {
+      "id": "qwen-model-detail",
+      "sourceUrl": "https://help.aliyun.com/zh/model-studio/models",
+      "capturedAt": "2026-10-13T04:21:06.333Z",
+      "state": "retrieved",
+      "requests": 1,
+      "outboundScope": "public_document_url_only",
+      "cost": 0,
+      "httpStatus": 200,
+      "resolvedUrl": "https://help.aliyun.com/zh/model-studio/models",
+      "contentType": "text/html;charset=UTF-8",
+      "byteLength": 97159,
+      "sha256": "436a990f4b6ea1bd1f362c148c1ab3c10aa305c40bb2a9c1529c7d7602a17fee",
+      "textLength": 2498
+    },
+    {
+      "id": "unicompapi-www-doc-model-index",
+      "sourceUrl": "https://www.unicompapi.com/docs",
+      "capturedAt": "2026-10-13T04:21:06.333Z",
+      "state": "retrieved",
+      "requests": 1,
+      "outboundScope": "public_document_url_only",
+      "cost": 0,
+      "httpStatus": 200,
+      "resolvedUrl": "https://www.unicompapi.com/docs",
+      "contentType": "text/html; charset=utf-8",
+      "byteLength": 62567,
+      "sha256": "473af03fca5b6c485f102c0642a5e1b212b4c5839a321a2b75467aa68766dd4b",
+      "textLength": 3129
+    },
+    {
+      "id": "openai-openapi-official",
+      "sourceUrl": "https://raw.githubusercontent.com/openai/openai-openapi/master/openapi.yaml",
+      "capturedAt": "2026-10-13T04:16:21.553Z",
+      "state": "unavailable",
+      "requests": 1,
+      "outboundScope": "public_document_url_only",
+      "cost": 0,
+      "safeCode": "source_fetch_failed"
+    },
+    {
+      "id": "qwen-image-legacy",
+      "sourceUrl": "https://help.aliyun.com/zh/model-studio/legacy-qwen-image-models/",
+      "capturedAt": "2026-10-13T04:48:32.104Z",
+      "state": "retrieved",
+      "requests": 1,
+      "outboundScope": "public_document_url_only",
+      "cost": 0,
+      "httpStatus": 200,
+      "resolvedUrl": "https://help.aliyun.com/zh/model-studio/legacy-qwen-image-models/",
+      "contentType": "text/html;charset=UTF-8",
+      "byteLength": 41265,
+      "sha256": "88d122f6d27ec593a3e687e72d49a3ad9172014a022e442eb747819c562d27f8",
+      "textLength": 973
+    },
+    {
+      "id": "vidu-q2-text",
+      "sourceUrl": "https://platform.vidu.cn/docs/api-reference/video-models/vidu-q2/text-to-video",
+      "capturedAt": "2026-10-13T04:48:32.105Z",
+      "state": "retrieved",
+      "requests": 1,
+      "outboundScope": "public_document_url_only",
+      "cost": 0,
+      "httpStatus": 200,
+      "resolvedUrl": "https://platform.vidu.cn/docs/api-reference/video-models/vidu-q2/text-to-video",
+      "contentType": "text/html; charset=utf-8",
+      "byteLength": 715151,
+      "sha256": "ba1dc0536708f8e92001ba547f7f6076e46fa15c5be6df5b702b0d081271edd1",
+      "textLength": 5879
+    },
+    {
+      "id": "vidu-q1-reference",
+      "sourceUrl": "https://platform.vidu.cn/docs/api-reference/video-models/vidu-q1/reference-to-video",
+      "capturedAt": "2026-10-13T04:48:33.937Z",
+      "state": "retrieved",
+      "requests": 1,
+      "outboundScope": "public_document_url_only",
+      "cost": 0,
+      "httpStatus": 200,
+      "resolvedUrl": "https://platform.vidu.cn/docs/api-reference/video-models/vidu-q1/reference-to-video",
+      "contentType": "text/html; charset=utf-8",
+      "byteLength": 822871,
+      "sha256": "96bc3212ab70968a18338098f493a8970ae82bfc1d470a71b97a98405f342c30",
+      "textLength": 10108
+    },
+    {
+      "id": "vidu-q2-image",
+      "sourceUrl": "https://platform.vidu.cn/docs/api-reference/video-models/vidu-q2/image-to-video",
+      "capturedAt": "2026-10-13T04:48:32.105Z",
+      "state": "retrieved",
+      "requests": 1,
+      "outboundScope": "public_document_url_only",
+      "cost": 0,
+      "httpStatus": 200,
+      "resolvedUrl": "https://platform.vidu.cn/docs/api-reference/video-models/vidu-q2/image-to-video",
+      "contentType": "text/html; charset=utf-8",
+      "byteLength": 994645,
+      "sha256": "c36a5e9f9a000cb7a59ecad648272bd96a9ba525e9d7ab1332954204c2590ead",
+      "textLength": 10961
+    },
+    {
+      "id": "qwen-happyhorse-api",
+      "sourceUrl": "https://help.aliyun.com/zh/model-studio/happyhorse-video-generation-api",
+      "capturedAt": "2026-10-13T04:48:33.939Z",
+      "state": "unavailable",
+      "requests": 1,
+      "outboundScope": "public_document_url_only",
+      "cost": 0,
+      "httpStatus": 200,
+      "resolvedUrl": "https://help.aliyun.com/zh/model-studio/happyhorse-video-generation-api",
+      "contentType": null,
+      "byteLength": 24899,
+      "sha256": "1bde2e66271c34c298920d8d197471fb6c72b29b18186df6443780dfef97c1c3",
+      "textLength": 23948,
+      "safeCode": "document_not_found"
+    },
+    {
+      "id": "volcengine-model-list",
+      "sourceUrl": "https://docs.volcengine.com/docs/ark/model-list?lang=zh",
+      "capturedAt": "2026-10-13T04:48:33.938Z",
+      "state": "retrieved",
+      "requests": 1,
+      "outboundScope": "public_document_url_only",
+      "cost": 0,
+      "httpStatus": 200,
+      "resolvedUrl": "https://docs.volcengine.com/docs/ark/model-list?lang=zh",
+      "contentType": "text/html; charset=UTF-8",
+      "byteLength": 1888718,
+      "sha256": "f494ec7862e588788c6cd134b78835437c32d6c9627252839c7bd10c59186d06",
+      "textLength": 20149
+    },
+    {
+      "id": "qwen-image-old-api",
+      "sourceUrl": "https://help.aliyun.com/zh/model-studio/qwen-image-api-reference/",
+      "capturedAt": "2026-10-13T04:48:32.078Z",
+      "state": "retrieved",
+      "requests": 1,
+      "outboundScope": "public_document_url_only",
+      "cost": 0,
+      "httpStatus": 200,
+      "resolvedUrl": "https://help.aliyun.com/zh/model-studio/qwen-image-api-reference/",
+      "contentType": "text/html;charset=UTF-8",
+      "byteLength": 40621,
+      "sha256": "d538d1fac5f817e716fb156f50f152058519b149bb216f6b212c50351840316c",
+      "textLength": 949
+    },
+    {
+      "id": "qwen-happyhorse-public-model",
+      "sourceUrl": "https://bailian.console.aliyun.com/cn-beijing/model/market/detail/happyhorse-1.1-t2v",
+      "capturedAt": "2026-10-13T04:48:33.939Z",
+      "state": "retrieved",
+      "requests": 1,
+      "outboundScope": "public_document_url_only",
+      "cost": 0,
+      "httpStatus": 200,
+      "resolvedUrl": "https://bailian.console.aliyun.com/cn-beijing/model/market/detail/happyhorse-1.1-t2v",
+      "contentType": "text/html;charset=UTF-8",
+      "byteLength": 26751,
+      "sha256": "94601fd0fbc732f6212694b9b918c66f4d88adbd6c32ee3dd1f9400be150793c",
+      "textLength": 171
+    }
+  ],
+  "contracts": [
+    {
+      "id": "official.zhipu.glm-4.6.chat",
+      "modelKeys": [
+        "glm-4.6"
+      ],
+      "sources": [
+        {
+          "url": "https://docs.bigmodel.cn/openapi/openapi.json",
+          "retrievedAt": "2026-10-13T00:39:48.793Z",
+          "sha256": "19323a78f0052c6e28b053e24a19c582595430a5658a01adb22bbc704d461f9d"
+        },
+        {
+          "url": "https://docs.bigmodel.cn/api-reference/%E6%A8%A1%E5%9E%8B-api/%E5%AF%B9%E8%AF%9D%E8%A1%A5%E5%85%A8.md",
+          "retrievedAt": "2026-10-13T00:37:25.310Z",
+          "sha256": "9844803948f2c1fd80562d9c617b7cb9bc0ddbac66e97db7a3d65279c9753a8a"
+        }
+      ],
+      "status": "source_compiled_review_required"
+    },
+    {
+      "id": "official.zhipu.glm-4.7.chat",
+      "modelKeys": [
+        "glm-4.7"
+      ],
+      "sources": [
+        {
+          "url": "https://docs.bigmodel.cn/openapi/openapi.json",
+          "retrievedAt": "2026-10-13T00:39:48.793Z",
+          "sha256": "19323a78f0052c6e28b053e24a19c582595430a5658a01adb22bbc704d461f9d"
+        },
+        {
+          "url": "https://docs.bigmodel.cn/api-reference/%E6%A8%A1%E5%9E%8B-api/%E5%AF%B9%E8%AF%9D%E8%A1%A5%E5%85%A8.md",
+          "retrievedAt": "2026-10-13T00:37:25.310Z",
+          "sha256": "9844803948f2c1fd80562d9c617b7cb9bc0ddbac66e97db7a3d65279c9753a8a"
+        }
+      ],
+      "status": "source_compiled_review_required"
+    },
+    {
+      "id": "official.zhipu.glm-5.chat",
+      "modelKeys": [
+        "glm-5"
+      ],
+      "sources": [
+        {
+          "url": "https://docs.bigmodel.cn/openapi/openapi.json",
+          "retrievedAt": "2026-10-13T00:39:48.793Z",
+          "sha256": "19323a78f0052c6e28b053e24a19c582595430a5658a01adb22bbc704d461f9d"
+        },
+        {
+          "url": "https://docs.bigmodel.cn/api-reference/%E6%A8%A1%E5%9E%8B-api/%E5%AF%B9%E8%AF%9D%E8%A1%A5%E5%85%A8.md",
+          "retrievedAt": "2026-10-13T00:37:25.310Z",
+          "sha256": "9844803948f2c1fd80562d9c617b7cb9bc0ddbac66e97db7a3d65279c9753a8a"
+        }
+      ],
+      "status": "source_compiled_review_required"
+    },
+    {
+      "id": "official.zhipu.glm-5.1.chat",
+      "modelKeys": [
+        "glm-5.1"
+      ],
+      "sources": [
+        {
+          "url": "https://docs.bigmodel.cn/openapi/openapi.json",
+          "retrievedAt": "2026-10-13T00:39:48.793Z",
+          "sha256": "19323a78f0052c6e28b053e24a19c582595430a5658a01adb22bbc704d461f9d"
+        },
+        {
+          "url": "https://docs.bigmodel.cn/api-reference/%E6%A8%A1%E5%9E%8B-api/%E5%AF%B9%E8%AF%9D%E8%A1%A5%E5%85%A8.md",
+          "retrievedAt": "2026-10-13T00:37:25.310Z",
+          "sha256": "9844803948f2c1fd80562d9c617b7cb9bc0ddbac66e97db7a3d65279c9753a8a"
+        }
+      ],
+      "status": "source_compiled_review_required"
+    },
+    {
+      "id": "official.zhipu.glm-5.2.chat",
+      "modelKeys": [
+        "glm-5.2"
+      ],
+      "sources": [
+        {
+          "url": "https://docs.bigmodel.cn/openapi/openapi.json",
+          "retrievedAt": "2026-10-13T00:39:48.793Z",
+          "sha256": "19323a78f0052c6e28b053e24a19c582595430a5658a01adb22bbc704d461f9d"
+        },
+        {
+          "url": "https://docs.bigmodel.cn/api-reference/%E6%A8%A1%E5%9E%8B-api/%E5%AF%B9%E8%AF%9D%E8%A1%A5%E5%85%A8.md",
+          "retrievedAt": "2026-10-13T00:37:25.310Z",
+          "sha256": "9844803948f2c1fd80562d9c617b7cb9bc0ddbac66e97db7a3d65279c9753a8a"
+        }
+      ],
+      "status": "source_compiled_review_required"
+    },
+    {
+      "id": "official.moonshot.kimi-k3.chat",
+      "modelKeys": [
+        "kimi-k3"
+      ],
+      "sources": [
+        {
+          "url": "https://platform.kimi.com/docs/api/chat.md",
+          "retrievedAt": "2026-10-13T00:39:48.769Z",
+          "sha256": "940a8da96d1a21aaed6834ddffecbd66a3182d6643ee3569fcff68cd05943169"
+        },
+        {
+          "url": "https://platform.kimi.com/docs/api/models-overview.md",
+          "retrievedAt": "2026-10-13T00:39:48.792Z",
+          "sha256": "5b4939aa34387efc4878ad75effcb35571f9d5bf1640c16de492036af6da3679"
+        }
+      ],
+      "status": "source_compiled_review_required"
+    },
+    {
+      "id": "official.moonshot.kimi-k2.6.chat",
+      "modelKeys": [
+        "kimi-k2.6"
+      ],
+      "sources": [
+        {
+          "url": "https://platform.kimi.com/docs/api/chat.md",
+          "retrievedAt": "2026-10-13T00:39:48.769Z",
+          "sha256": "940a8da96d1a21aaed6834ddffecbd66a3182d6643ee3569fcff68cd05943169"
+        },
+        {
+          "url": "https://platform.kimi.com/docs/api/models-overview.md",
+          "retrievedAt": "2026-10-13T00:39:48.792Z",
+          "sha256": "5b4939aa34387efc4878ad75effcb35571f9d5bf1640c16de492036af6da3679"
+        }
+      ],
+      "status": "source_compiled_review_required"
+    },
+    {
+      "id": "official.minimax.MiniMax-H3.video",
+      "modelKeys": [
+        "MiniMax-H3"
+      ],
+      "sources": [
+        {
+          "url": "https://platform.minimax.cn/docs/api-reference/video-generation-v2-create.md",
+          "retrievedAt": "2026-10-13T00:45:35.175Z",
+          "sha256": "4dbb502b654cc136930a55285108aa18fec0702db40397431f7058deccb793a5"
+        }
+      ],
+      "status": "source_compiled_review_required"
+    },
+    {
+      "id": "official.minimax.MiniMax-H3-Max.video",
+      "modelKeys": [
+        "MiniMax-H3-Max"
+      ],
+      "sources": [
+        {
+          "url": "https://platform.minimax.cn/docs/api-reference/video-generation-v2-create.md",
+          "retrievedAt": "2026-10-13T00:45:35.175Z",
+          "sha256": "4dbb502b654cc136930a55285108aa18fec0702db40397431f7058deccb793a5"
+        }
+      ],
+      "status": "source_compiled_review_required"
+    },
+    {
+      "id": "official.deepseek.v4.chat",
+      "modelKeys": [
+        "deepseek-flash",
+        "deepseek-v4-flash",
+        "deepseek-v4-pro"
+      ],
+      "sources": [
+        {
+          "url": "https://api-docs.deepseek.com/api/create-chat-completion/",
+          "retrievedAt": "2026-10-13T00:37:23.657Z",
+          "sha256": "e7133a7c2a7c2662567cca2e2392b503f97c2fb583009ff85f878744e0a36ba7"
+        },
+        {
+          "url": "https://api-docs.deepseek.com/quick_start/pricing/",
+          "retrievedAt": "2026-10-13T00:42:58.787Z",
+          "sha256": "210f102275ccf1a6542f08a3bc9e4b4c7c83278cb74b35217bffa112df6363b2"
+        },
+        {
+          "url": "https://api-docs.deepseek.com/guides/tool_calls/",
+          "retrievedAt": "2026-10-13T00:42:58.810Z",
+          "sha256": "d77a694143b27cfff7d8d9a18be3e7426b4f340947cdabedb315dd2ef9271c09"
+        }
+      ],
+      "status": "source_compiled_review_required"
+    },
+    {
+      "id": "official.kling.text-to-video",
+      "modelKeys": [
+        "kling-v2-5-turbo",
+        "kling-v2-6",
+        "kling-v3"
+      ],
+      "sources": [
+        {
+          "url": "https://p4-kling.klingai.com/kcdn/cdn-kcdn112452/api-doc/assets/api-BqIZ9h2I.js",
+          "retrievedAt": "2026-10-13T00:48:04.151Z",
+          "sha256": "198ffc8da214570b3a935f9f9c9bee3c0eaf49716212106c8082afb4c12501aa"
+        }
+      ],
+      "status": "source_compiled_review_required"
+    },
+    {
+      "id": "official.vidu.viduq3-pro.text-video",
+      "modelKeys": [
+        "viduq3-pro"
+      ],
+      "sources": [
+        {
+          "url": "https://platform.vidu.cn/docs/api-reference/video-models/vidu-q3/text-to-video",
+          "retrievedAt": "2026-10-13T00:39:49.838Z",
+          "sha256": "d2c656fd229117ff16c191d8acf7049cc52c53432b59537fed750cdeb9862848"
+        }
+      ],
+      "status": "source_compiled_review_required"
+    },
+    {
+      "id": "official.vidu.viduq3-turbo.text-video",
+      "modelKeys": [
+        "viduq3-turbo"
+      ],
+      "sources": [
+        {
+          "url": "https://platform.vidu.cn/docs/api-reference/video-models/vidu-q3/text-to-video",
+          "retrievedAt": "2026-10-13T00:39:49.838Z",
+          "sha256": "d2c656fd229117ff16c191d8acf7049cc52c53432b59537fed750cdeb9862848"
+        }
+      ],
+      "status": "source_compiled_review_required"
+    },
+    {
+      "id": "official.vidu.viduq3-pro.image-video",
+      "modelKeys": [
+        "viduq3-pro"
+      ],
+      "sources": [
+        {
+          "url": "https://platform.vidu.cn/docs/api-reference/video-models/vidu-q3/image-to-video",
+          "retrievedAt": "2026-10-13T00:42:58.811Z",
+          "sha256": "ae00c828e290d6853a988c5e257b0a5ade4daaf0df1843c309d18a8c26afba12"
+        }
+      ],
+      "status": "source_compiled_review_required"
+    },
+    {
+      "id": "official.vidu.viduq3-turbo.image-video",
+      "modelKeys": [
+        "viduq3-turbo"
+      ],
+      "sources": [
+        {
+          "url": "https://platform.vidu.cn/docs/api-reference/video-models/vidu-q3/image-to-video",
+          "retrievedAt": "2026-10-13T00:42:58.811Z",
+          "sha256": "ae00c828e290d6853a988c5e257b0a5ade4daaf0df1843c309d18a8c26afba12"
+        }
+      ],
+      "status": "source_compiled_review_required"
+    },
+    {
+      "id": "official.vidu.viduq3.reference-video",
+      "modelKeys": [
+        "viduq3"
+      ],
+      "sources": [
+        {
+          "url": "https://platform.vidu.cn/docs/api-reference/video-models/vidu-q3/reference-to-video",
+          "retrievedAt": "2026-10-13T00:42:58.811Z",
+          "sha256": "590646918601cc50370096e8308dfba133d31b1b96d9d5614e6206ee590db549"
+        }
+      ],
+      "status": "source_compiled_review_required"
+    },
+    {
+      "id": "official.vidu.viduq3-turbo.reference-video",
+      "modelKeys": [
+        "viduq3-turbo"
+      ],
+      "sources": [
+        {
+          "url": "https://platform.vidu.cn/docs/api-reference/video-models/vidu-q3/reference-to-video",
+          "retrievedAt": "2026-10-13T00:42:58.811Z",
+          "sha256": "590646918601cc50370096e8308dfba133d31b1b96d9d5614e6206ee590db549"
+        }
+      ],
+      "status": "source_compiled_review_required"
+    },
+    {
+      "id": "official.vidu.viduq3-drama.reference-video",
+      "modelKeys": [
+        "viduq3-drama"
+      ],
+      "sources": [
+        {
+          "url": "https://platform.vidu.cn/docs/api-reference/video-models/vidu-q3/reference-to-video",
+          "retrievedAt": "2026-10-13T00:42:58.811Z",
+          "sha256": "590646918601cc50370096e8308dfba133d31b1b96d9d5614e6206ee590db549"
+        }
+      ],
+      "status": "source_compiled_review_required"
+    },
+    {
+      "id": "official.vidu.viduq3-mix.reference-video",
+      "modelKeys": [
+        "viduq3-mix"
+      ],
+      "sources": [
+        {
+          "url": "https://platform.vidu.cn/docs/api-reference/video-models/vidu-q3/reference-to-video",
+          "retrievedAt": "2026-10-13T00:42:58.811Z",
+          "sha256": "590646918601cc50370096e8308dfba133d31b1b96d9d5614e6206ee590db549"
+        }
+      ],
+      "status": "source_compiled_review_required"
+    },
+    {
+      "id": "official.vidu.viduq3-ad.reference-video",
+      "modelKeys": [
+        "viduq3-ad"
+      ],
+      "sources": [
+        {
+          "url": "https://platform.vidu.cn/docs/api-reference/video-models/vidu-q3/reference-to-video",
+          "retrievedAt": "2026-10-13T00:42:58.811Z",
+          "sha256": "590646918601cc50370096e8308dfba133d31b1b96d9d5614e6206ee590db549"
+        }
+      ],
+      "status": "source_compiled_review_required"
+    },
+    {
+      "id": "official.vidu.viduq1.reference-image",
+      "modelKeys": [
+        "viduq1"
+      ],
+      "sources": [
+        {
+          "url": "https://platform.vidu.cn/docs/api-reference/image-generation",
+          "retrievedAt": "2026-10-13T00:39:49.839Z",
+          "sha256": "b37691e654bfc182dd236556c2f076e561c7b4d6ffcb1dc8da4d5e9fe18007aa"
+        }
+      ],
+      "status": "source_compiled_review_required"
+    },
+    {
+      "id": "official.vidu.viduq2.reference-image",
+      "modelKeys": [
+        "viduq2"
+      ],
+      "sources": [
+        {
+          "url": "https://platform.vidu.cn/docs/api-reference/image-generation",
+          "retrievedAt": "2026-10-13T00:39:49.839Z",
+          "sha256": "b37691e654bfc182dd236556c2f076e561c7b4d6ffcb1dc8da4d5e9fe18007aa"
+        }
+      ],
+      "status": "source_compiled_review_required"
+    },
+    {
+      "id": "official.alibaba.qwen3.chat",
+      "modelKeys": [],
+      "sources": [
+        {
+          "url": "https://help.aliyun.com/zh/model-studio/qwen-api-via-openai-chat-completions",
+          "retrievedAt": "2026-10-13T00:39:49.838Z",
+          "sha256": "242b46c1511c5634d08f3f11db3dbee8d655cf21bf2d76e6b6035f1285662f41"
+        }
+      ],
+      "status": "source_compiled_review_required"
+    },
+    {
+      "id": "official.volcengine.seedream-5-lite.image",
+      "modelKeys": [
+        "doubao-seedream-5-0-260128",
+        "doubao-seedream-5-0-lite-260128"
+      ],
+      "sources": [
+        {
+          "url": "https://docs.volcengine.com/docs/ark/image-generation-api?lang=zh",
+          "retrievedAt": "2026-10-13T01:44:44.718Z",
+          "sha256": "01868fdd93bb76f4e1645389955a8212f91fa45310de83cd34d6bbfdd060c459"
+        },
+        {
+          "url": "https://docs.volcengine.com/docs/ark/model-list?lang=zh",
+          "retrievedAt": "2026-10-13T04:48:33.938Z",
+          "sha256": "f494ec7862e588788c6cd134b78835437c32d6c9627252839c7bd10c59186d06"
+        }
+      ],
+      "status": "source_compiled_review_required"
+    },
+    {
+      "id": "official.volcengine.seedance-2.0.video",
+      "modelKeys": [
+        "doubao-seedance-2-0-260128"
+      ],
+      "sources": [
+        {
+          "url": "https://docs.volcengine.com/docs/ark/create-video-generation-task-api?lang=zh",
+          "retrievedAt": "2026-10-13T00:39:51.316Z",
+          "sha256": "7871968d6bd3b90d9cda743027cce32a52833455f5b7a3da14dcc117fc13acca"
+        },
+        {
+          "url": "https://docs.volcengine.com/docs/ark/model-list?lang=zh",
+          "retrievedAt": "2026-10-13T04:48:33.938Z",
+          "sha256": "f494ec7862e588788c6cd134b78835437c32d6c9627252839c7bd10c59186d06"
+        }
+      ],
+      "status": "source_compiled_review_required"
+    },
+    {
+      "id": "official.volcengine.seedance-2.0-fast.video",
+      "modelKeys": [
+        "doubao-seedance-2-0-fast-260128"
+      ],
+      "sources": [
+        {
+          "url": "https://docs.volcengine.com/docs/ark/create-video-generation-task-api?lang=zh",
+          "retrievedAt": "2026-10-13T00:39:51.316Z",
+          "sha256": "7871968d6bd3b90d9cda743027cce32a52833455f5b7a3da14dcc117fc13acca"
+        },
+        {
+          "url": "https://docs.volcengine.com/docs/ark/model-list?lang=zh",
+          "retrievedAt": "2026-10-13T04:48:33.938Z",
+          "sha256": "f494ec7862e588788c6cd134b78835437c32d6c9627252839c7bd10c59186d06"
+        }
+      ],
+      "status": "source_compiled_review_required"
+    }
+  ],
+  "relays": [
+    {
+      "id": "provider-package-unicompapi",
+      "site": "https://unicompapi.com",
+      "role": "relay",
+      "endpoint": "https://unicompapi.com/v1",
+      "cardStatus": "separate_card",
+      "contractAuthority": "relay_docs_do_not_become_model_vendor_contracts"
+    },
+    {
+      "id": "provider-package-unicompapi-www",
+      "site": "https://www.unicompapi.com",
+      "role": "relay",
+      "endpoint": "https://www.unicompapi.com/v1",
+      "cardStatus": "separate_card",
+      "supportedAdapter": "chat_completions_only",
+      "mediaProtocolStatus": "relay_quote_and_submit_protocol_not_reused_as_vendor_contract"
+    }
+  ],
+  "deferredByUser": {
+    "decisionDate": "2026-10-13",
+    "state": "skipped_pending_official_mapping",
+    "models": [
+      "gpt-5.6-luna",
+      "gpt-5.6-sol",
+      "gpt-5.6-terra",
+      "happyhorse-1.0-i2v",
+      "happyhorse-1.0-r2v",
+      "happyhorse-1.0-t2v",
+      "happyhorse-1.0-video-edit",
+      "happyhorse-1.1-i2v",
+      "happyhorse-1.1-r2v",
+      "happyhorse-1.1-t2v",
+      "deepseek-r1-0528",
+      "deepseek-v3",
+      "deepseek-v3.2",
+      "deepseek-v3.2-exp",
+      "viduimage-2",
+      "q2-fast",
+      "q2-pro",
+      "q3-fast",
+      "q3-lite",
+      "kling-v3-turbo",
+      "qwen-image",
+      "qwen-image-edit-2509",
+      "qwen3-235b-a22b",
+      "qwen3-32b"
+    ],
+    "reason": "Owner explicitly requested skipping these unresolved legacy, relay-alias, and dynamic model contracts while retaining the evidence and gaps.",
+    "includedInOfficialAlignmentPass": false
+  },
+  "unverifiedLocalMappings": [
+    "UniComp relay model aliases without an exact official-vendor mapping",
+    "OpenAI official documentation and OpenAPI sources unavailable in this environment",
+    "Legacy Qwen model aliases still require exact per-model vendor mapping; the generic endpoint schema is not proof of this mapping",
+    "www.unicompapi.com quote/submit media protocol is documented but not wired to the media adapters",
+    "Vidu image/video contracts still require per-route parameter snapshot integration",
+    "Qwen and Volcengine media contracts require product adapter compilation",
+    "Dynamic model discovery records and remaining static model records are not fully bound"
+  ],
+  "publishedSourceInventory": {
+    "sourceSchemaCount": 48,
+    "exactModelEntryCount": 53,
+    "officialContractCount": 26,
+    "exactOfficialModelKeyCount": 27,
+    "allModelsOfficiallyAligned": false,
+    "coverage": [
+      {
+        "provider": "deepseek",
+        "providerModelKey": "deepseek-v4-flash",
+        "features": [
+          {
+            "productFeature": "text_chat",
+            "parameterSchemaId": "parameters.deepseek.chat"
+          },
+          {
+            "productFeature": "text_reasoning",
+            "parameterSchemaId": "parameters.deepseek.reasoning"
+          }
+        ],
+        "officialContractIds": [
+          "official.deepseek.v4.chat"
+        ],
+        "state": "source_contract_candidate_requires_explicit_binding",
+        "liveVerified": false
+      },
+      {
+        "provider": "deepseek",
+        "providerModelKey": "deepseek-v4-pro",
+        "features": [
+          {
+            "productFeature": "text_chat",
+            "parameterSchemaId": "parameters.deepseek.chat"
+          },
+          {
+            "productFeature": "text_reasoning",
+            "parameterSchemaId": "parameters.deepseek.reasoning"
+          }
+        ],
+        "officialContractIds": [
+          "official.deepseek.v4.chat"
+        ],
+        "state": "source_contract_candidate_requires_explicit_binding",
+        "liveVerified": false
+      },
+      {
+        "provider": "vidu",
+        "providerModelKey": "viduq3-drama",
+        "features": [
+          {
+            "productFeature": "image_to_video",
+            "parameterSchemaId": "parameters.vidu.reference-video-v2.image-to-video.viduq3-drama"
+          }
+        ],
+        "officialContractIds": [
+          "official.vidu.viduq3-drama.reference-video"
+        ],
+        "state": "source_contract_candidate_requires_explicit_binding",
+        "liveVerified": false
+      },
+      {
+        "provider": "vidu",
+        "providerModelKey": "viduq3-ad",
+        "features": [
+          {
+            "productFeature": "image_to_video",
+            "parameterSchemaId": "parameters.vidu.reference-video-v2.image-to-video.viduq3-ad"
+          }
+        ],
+        "officialContractIds": [
+          "official.vidu.viduq3-ad.reference-video"
+        ],
+        "state": "source_contract_candidate_requires_explicit_binding",
+        "liveVerified": false
+      },
+      {
+        "provider": "vidu",
+        "providerModelKey": "viduq3-mix",
+        "features": [
+          {
+            "productFeature": "image_to_video",
+            "parameterSchemaId": "parameters.vidu.reference-video-v2.image-to-video.viduq3-mix"
+          }
+        ],
+        "officialContractIds": [
+          "official.vidu.viduq3-mix.reference-video"
+        ],
+        "state": "source_contract_candidate_requires_explicit_binding",
+        "liveVerified": false
+      },
+      {
+        "provider": "vidu",
+        "providerModelKey": "viduq3-turbo",
+        "features": [
+          {
+            "productFeature": "image_to_video",
+            "parameterSchemaId": "parameters.vidu.reference-video-v2.image-to-video.viduq3-turbo"
+          },
+          {
+            "productFeature": "text_to_video",
+            "parameterSchemaId": "parameters.vidu.text-video-v2.text-to-video.viduq3-turbo"
+          }
+        ],
+        "officialContractIds": [
+          "official.vidu.viduq3-turbo.text-video",
+          "official.vidu.viduq3-turbo.image-video",
+          "official.vidu.viduq3-turbo.reference-video"
+        ],
+        "state": "source_contract_candidate_requires_explicit_binding",
+        "liveVerified": false
+      },
+      {
+        "provider": "vidu",
+        "providerModelKey": "viduq3",
+        "features": [
+          {
+            "productFeature": "image_to_video",
+            "parameterSchemaId": "parameters.vidu.reference-video-v2.image-to-video.viduq3"
+          }
+        ],
+        "officialContractIds": [
+          "official.vidu.viduq3.reference-video"
+        ],
+        "state": "source_contract_candidate_requires_explicit_binding",
+        "liveVerified": false
+      },
+      {
+        "provider": "vidu",
+        "providerModelKey": "viduq3-pro",
+        "features": [
+          {
+            "productFeature": "text_to_video",
+            "parameterSchemaId": "parameters.vidu.text-video-v2.text-to-video.viduq3-pro"
+          }
+        ],
+        "officialContractIds": [
+          "official.vidu.viduq3-pro.text-video",
+          "official.vidu.viduq3-pro.image-video"
+        ],
+        "state": "source_contract_candidate_requires_explicit_binding",
+        "liveVerified": false
+      },
+      {
+        "provider": "vidu",
+        "providerModelKey": "viduimage-2",
+        "features": [
+          {
+            "productFeature": "text_to_image",
+            "parameterSchemaId": "parameters.vidu.image-v1.text-to-image.viduimage-2"
+          },
+          {
+            "productFeature": "image_edit",
+            "parameterSchemaId": "parameters.vidu.image-v1.image-edit.viduimage-2"
+          }
+        ],
+        "officialContractIds": [],
+        "state": "deferred_by_owner",
+        "liveVerified": false
+      },
+      {
+        "provider": "vidu",
+        "providerModelKey": "viduq2",
+        "features": [
+          {
+            "productFeature": "text_to_image",
+            "parameterSchemaId": "parameters.vidu.reference-image-v2.text-to-image.viduq2"
+          },
+          {
+            "productFeature": "reference_to_image",
+            "parameterSchemaId": "parameters.vidu.reference-image-v2.reference-to-image.viduq2"
+          },
+          {
+            "productFeature": "image_edit",
+            "parameterSchemaId": "parameters.vidu.reference-image-v2.image-edit.viduq2"
+          }
+        ],
+        "officialContractIds": [
+          "official.vidu.viduq2.reference-image"
+        ],
+        "state": "source_contract_candidate_requires_explicit_binding",
+        "liveVerified": false
+      },
+      {
+        "provider": "vidu",
+        "providerModelKey": "viduq1",
+        "features": [
+          {
+            "productFeature": "reference_to_image",
+            "parameterSchemaId": "parameters.vidu.reference-image-v2.reference-to-image.viduq1"
+          }
+        ],
+        "officialContractIds": [
+          "official.vidu.viduq1.reference-image"
+        ],
+        "state": "source_contract_candidate_requires_explicit_binding",
+        "liveVerified": false
+      },
+      {
+        "provider": "vidu",
+        "providerModelKey": "q2-fast",
+        "features": [
+          {
+            "productFeature": "reference_to_image",
+            "parameterSchemaId": "parameters.vidu.gemini-image-v2.reference-to-image.q2-fast"
+          }
+        ],
+        "officialContractIds": [],
+        "state": "deferred_by_owner",
+        "liveVerified": false
+      },
+      {
+        "provider": "vidu",
+        "providerModelKey": "q2-pro",
+        "features": [
+          {
+            "productFeature": "reference_to_image",
+            "parameterSchemaId": "parameters.vidu.gemini-image-v2.reference-to-image.q2-pro"
+          }
+        ],
+        "officialContractIds": [],
+        "state": "deferred_by_owner",
+        "liveVerified": false
+      },
+      {
+        "provider": "vidu",
+        "providerModelKey": "q3-fast",
+        "features": [
+          {
+            "productFeature": "reference_to_image",
+            "parameterSchemaId": "parameters.vidu.gemini-image-v2.reference-to-image.q3-fast"
+          }
+        ],
+        "officialContractIds": [],
+        "state": "deferred_by_owner",
+        "liveVerified": false
+      },
+      {
+        "provider": "vidu",
+        "providerModelKey": "q3-lite",
+        "features": [
+          {
+            "productFeature": "reference_to_image",
+            "parameterSchemaId": "parameters.vidu.gemini-image-v2.reference-to-image.q3-lite"
+          }
+        ],
+        "officialContractIds": [],
+        "state": "deferred_by_owner",
+        "liveVerified": false
+      },
+      {
+        "provider": "minimax",
+        "providerModelKey": "MiniMax-H3",
+        "features": [
+          {
+            "productFeature": "text_to_video",
+            "parameterSchemaId": "parameters.minimax-h3.text_to_video.89e5085462a5f7d480ca"
+          },
+          {
+            "productFeature": "image_to_video",
+            "parameterSchemaId": "parameters.minimax-h3.image_to_video.89e5085462a5f7d480ca"
+          }
+        ],
+        "officialContractIds": [
+          "official.minimax.MiniMax-H3.video"
+        ],
+        "state": "source_contract_candidate_requires_explicit_binding",
+        "liveVerified": false
+      },
+      {
+        "provider": "minimax",
+        "providerModelKey": "MiniMax-H3-Max",
+        "features": [
+          {
+            "productFeature": "text_to_video",
+            "parameterSchemaId": "parameters.minimax-h3.text_to_video.99dfcb56e382c5c1b3ec"
+          },
+          {
+            "productFeature": "image_to_video",
+            "parameterSchemaId": "parameters.minimax-h3.image_to_video.99dfcb56e382c5c1b3ec"
+          }
+        ],
+        "officialContractIds": [
+          "official.minimax.MiniMax-H3-Max.video"
+        ],
+        "state": "source_contract_candidate_requires_explicit_binding",
+        "liveVerified": false
+      },
+      {
+        "provider": "unicompapi-studio-h3",
+        "providerModelKey": "minimax-h3",
+        "features": [
+          {
+            "productFeature": "text_to_video",
+            "parameterSchemaId": "parameters.unicompapi-studio-h3.text_to_video.3040067ab0d78cd5685e"
+          }
+        ],
+        "officialContractIds": [],
+        "state": "relay_owned_protocol",
+        "liveVerified": false
+      },
+      {
+        "provider": "unicompapi",
+        "providerModelKey": "deepseek-r1-0528",
+        "features": [
+          {
+            "productFeature": "text_chat",
+            "parameterSchemaId": "parameters.unicompapi.text_chat.official"
+          },
+          {
+            "productFeature": "text_reasoning",
+            "parameterSchemaId": "parameters.unicompapi.text_reasoning.official"
+          }
+        ],
+        "officialContractIds": [],
+        "state": "deferred_by_owner",
+        "liveVerified": false
+      },
+      {
+        "provider": "unicompapi",
+        "providerModelKey": "deepseek-v3",
+        "features": [
+          {
+            "productFeature": "text_chat",
+            "parameterSchemaId": "parameters.unicompapi.text_chat.official"
+          },
+          {
+            "productFeature": "text_reasoning",
+            "parameterSchemaId": "parameters.unicompapi.text_reasoning.official"
+          }
+        ],
+        "officialContractIds": [],
+        "state": "deferred_by_owner",
+        "liveVerified": false
+      },
+      {
+        "provider": "unicompapi",
+        "providerModelKey": "deepseek-v3.2",
+        "features": [
+          {
+            "productFeature": "text_chat",
+            "parameterSchemaId": "parameters.unicompapi.text_chat.official"
+          },
+          {
+            "productFeature": "text_reasoning",
+            "parameterSchemaId": "parameters.unicompapi.text_reasoning.official"
+          }
+        ],
+        "officialContractIds": [],
+        "state": "deferred_by_owner",
+        "liveVerified": false
+      },
+      {
+        "provider": "unicompapi",
+        "providerModelKey": "deepseek-v3.2-exp",
+        "features": [
+          {
+            "productFeature": "text_chat",
+            "parameterSchemaId": "parameters.unicompapi.text_chat.official"
+          },
+          {
+            "productFeature": "text_reasoning",
+            "parameterSchemaId": "parameters.unicompapi.text_reasoning.official"
+          }
+        ],
+        "officialContractIds": [],
+        "state": "deferred_by_owner",
+        "liveVerified": false
+      },
+      {
+        "provider": "unicompapi",
+        "providerModelKey": "deepseek-v4-flash",
+        "features": [
+          {
+            "productFeature": "text_chat",
+            "parameterSchemaId": "parameters.unicompapi.text_chat.official"
+          },
+          {
+            "productFeature": "text_reasoning",
+            "parameterSchemaId": "parameters.unicompapi.text_reasoning.official"
+          }
+        ],
+        "officialContractIds": [
+          "official.deepseek.v4.chat"
+        ],
+        "state": "source_contract_candidate_requires_explicit_binding",
+        "liveVerified": false
+      },
+      {
+        "provider": "unicompapi",
+        "providerModelKey": "deepseek-v4-pro",
+        "features": [
+          {
+            "productFeature": "text_chat",
+            "parameterSchemaId": "parameters.unicompapi.text_chat.official"
+          },
+          {
+            "productFeature": "text_reasoning",
+            "parameterSchemaId": "parameters.unicompapi.text_reasoning.official"
+          }
+        ],
+        "officialContractIds": [
+          "official.deepseek.v4.chat"
+        ],
+        "state": "source_contract_candidate_requires_explicit_binding",
+        "liveVerified": false
+      },
+      {
+        "provider": "unicompapi",
+        "providerModelKey": "doubao-seedance-2-0-260128",
+        "features": [
+          {
+            "productFeature": "text_to_video",
+            "parameterSchemaId": "parameters.unicompapi.doubao_seedance_2_0_260128.text_to_video.official"
+          },
+          {
+            "productFeature": "image_to_video",
+            "parameterSchemaId": "parameters.unicompapi.doubao_seedance_2_0_260128.image_to_video.official"
+          }
+        ],
+        "officialContractIds": [
+          "official.volcengine.seedance-2.0.video"
+        ],
+        "state": "source_contract_candidate_requires_explicit_binding",
+        "liveVerified": false
+      },
+      {
+        "provider": "unicompapi",
+        "providerModelKey": "doubao-seedance-2-0-fast-260128",
+        "features": [
+          {
+            "productFeature": "text_to_video",
+            "parameterSchemaId": "parameters.unicompapi.doubao_seedance_2_0_fast_260128.text_to_video.official"
+          },
+          {
+            "productFeature": "image_to_video",
+            "parameterSchemaId": "parameters.unicompapi.doubao_seedance_2_0_fast_260128.image_to_video.official"
+          }
+        ],
+        "officialContractIds": [
+          "official.volcengine.seedance-2.0-fast.video"
+        ],
+        "state": "source_contract_candidate_requires_explicit_binding",
+        "liveVerified": false
+      },
+      {
+        "provider": "unicompapi",
+        "providerModelKey": "doubao-seedream-5-0-260128",
+        "features": [
+          {
+            "productFeature": "text_to_image",
+            "parameterSchemaId": "parameters.unicompapi.doubao_seedream_5_0_260128.text_to_image.official"
+          }
+        ],
+        "officialContractIds": [
+          "official.volcengine.seedream-5-lite.image"
+        ],
+        "state": "source_contract_candidate_requires_explicit_binding",
+        "liveVerified": false
+      },
+      {
+        "provider": "unicompapi",
+        "providerModelKey": "glm-4.6",
+        "features": [
+          {
+            "productFeature": "text_chat",
+            "parameterSchemaId": "parameters.unicompapi.text_chat.official"
+          },
+          {
+            "productFeature": "text_reasoning",
+            "parameterSchemaId": "parameters.unicompapi.text_reasoning.official"
+          }
+        ],
+        "officialContractIds": [
+          "official.zhipu.glm-4.6.chat"
+        ],
+        "state": "source_contract_candidate_requires_explicit_binding",
+        "liveVerified": false
+      },
+      {
+        "provider": "unicompapi",
+        "providerModelKey": "glm-4.7",
+        "features": [
+          {
+            "productFeature": "text_chat",
+            "parameterSchemaId": "parameters.unicompapi.text_chat.official"
+          },
+          {
+            "productFeature": "text_reasoning",
+            "parameterSchemaId": "parameters.unicompapi.text_reasoning.official"
+          }
+        ],
+        "officialContractIds": [
+          "official.zhipu.glm-4.7.chat"
+        ],
+        "state": "source_contract_candidate_requires_explicit_binding",
+        "liveVerified": false
+      },
+      {
+        "provider": "unicompapi",
+        "providerModelKey": "glm-5",
+        "features": [
+          {
+            "productFeature": "text_chat",
+            "parameterSchemaId": "parameters.unicompapi.text_chat.official"
+          },
+          {
+            "productFeature": "text_reasoning",
+            "parameterSchemaId": "parameters.unicompapi.text_reasoning.official"
+          }
+        ],
+        "officialContractIds": [
+          "official.zhipu.glm-5.chat"
+        ],
+        "state": "source_contract_candidate_requires_explicit_binding",
+        "liveVerified": false
+      },
+      {
+        "provider": "unicompapi",
+        "providerModelKey": "glm-5.1",
+        "features": [
+          {
+            "productFeature": "text_chat",
+            "parameterSchemaId": "parameters.unicompapi.text_chat.official"
+          },
+          {
+            "productFeature": "text_reasoning",
+            "parameterSchemaId": "parameters.unicompapi.text_reasoning.official"
+          }
+        ],
+        "officialContractIds": [
+          "official.zhipu.glm-5.1.chat"
+        ],
+        "state": "source_contract_candidate_requires_explicit_binding",
+        "liveVerified": false
+      },
+      {
+        "provider": "unicompapi",
+        "providerModelKey": "glm-5.2",
+        "features": [
+          {
+            "productFeature": "text_chat",
+            "parameterSchemaId": "parameters.unicompapi.text_chat.official"
+          },
+          {
+            "productFeature": "text_reasoning",
+            "parameterSchemaId": "parameters.unicompapi.text_reasoning.official"
+          }
+        ],
+        "officialContractIds": [
+          "official.zhipu.glm-5.2.chat"
+        ],
+        "state": "source_contract_candidate_requires_explicit_binding",
+        "liveVerified": false
+      },
+      {
+        "provider": "unicompapi",
+        "providerModelKey": "gpt-5.6-luna",
+        "features": [
+          {
+            "productFeature": "text_chat",
+            "parameterSchemaId": "parameters.unicompapi.text_chat.official"
+          }
+        ],
+        "officialContractIds": [],
+        "state": "deferred_by_owner",
+        "liveVerified": false
+      },
+      {
+        "provider": "unicompapi",
+        "providerModelKey": "gpt-5.6-sol",
+        "features": [
+          {
+            "productFeature": "text_chat",
+            "parameterSchemaId": "parameters.unicompapi.text_chat.official"
+          }
+        ],
+        "officialContractIds": [],
+        "state": "deferred_by_owner",
+        "liveVerified": false
+      },
+      {
+        "provider": "unicompapi",
+        "providerModelKey": "gpt-5.6-terra",
+        "features": [
+          {
+            "productFeature": "text_chat",
+            "parameterSchemaId": "parameters.unicompapi.text_chat.official"
+          }
+        ],
+        "officialContractIds": [],
+        "state": "deferred_by_owner",
+        "liveVerified": false
+      },
+      {
+        "provider": "unicompapi",
+        "providerModelKey": "happyhorse-1.0-i2v",
+        "features": [
+          {
+            "productFeature": "image_to_video",
+            "parameterSchemaId": null
+          }
+        ],
+        "officialContractIds": [],
+        "state": "deferred_by_owner",
+        "liveVerified": false
+      },
+      {
+        "provider": "unicompapi",
+        "providerModelKey": "happyhorse-1.0-r2v",
+        "features": [],
+        "officialContractIds": [],
+        "state": "deferred_by_owner",
+        "liveVerified": false
+      },
+      {
+        "provider": "unicompapi",
+        "providerModelKey": "happyhorse-1.0-t2v",
+        "features": [
+          {
+            "productFeature": "text_to_video",
+            "parameterSchemaId": null
+          }
+        ],
+        "officialContractIds": [],
+        "state": "deferred_by_owner",
+        "liveVerified": false
+      },
+      {
+        "provider": "unicompapi",
+        "providerModelKey": "happyhorse-1.0-video-edit",
+        "features": [],
+        "officialContractIds": [],
+        "state": "deferred_by_owner",
+        "liveVerified": false
+      },
+      {
+        "provider": "unicompapi",
+        "providerModelKey": "happyhorse-1.1-i2v",
+        "features": [
+          {
+            "productFeature": "image_to_video",
+            "parameterSchemaId": null
+          }
+        ],
+        "officialContractIds": [],
+        "state": "deferred_by_owner",
+        "liveVerified": false
+      },
+      {
+        "provider": "unicompapi",
+        "providerModelKey": "happyhorse-1.1-r2v",
+        "features": [],
+        "officialContractIds": [],
+        "state": "deferred_by_owner",
+        "liveVerified": false
+      },
+      {
+        "provider": "unicompapi",
+        "providerModelKey": "happyhorse-1.1-t2v",
+        "features": [
+          {
+            "productFeature": "text_to_video",
+            "parameterSchemaId": null
+          }
+        ],
+        "officialContractIds": [],
+        "state": "deferred_by_owner",
+        "liveVerified": false
+      },
+      {
+        "provider": "unicompapi",
+        "providerModelKey": "kimi-k2.6",
+        "features": [
+          {
+            "productFeature": "text_chat",
+            "parameterSchemaId": "parameters.unicompapi.text_chat.official"
+          }
+        ],
+        "officialContractIds": [
+          "official.moonshot.kimi-k2.6.chat"
+        ],
+        "state": "source_contract_candidate_requires_explicit_binding",
+        "liveVerified": false
+      },
+      {
+        "provider": "unicompapi",
+        "providerModelKey": "kling-v3-turbo",
+        "features": [
+          {
+            "productFeature": "text_to_video",
+            "parameterSchemaId": null
+          },
+          {
+            "productFeature": "image_to_video",
+            "parameterSchemaId": null
+          }
+        ],
+        "officialContractIds": [],
+        "state": "deferred_by_owner",
+        "liveVerified": false
+      },
+      {
+        "provider": "unicompapi",
+        "providerModelKey": "kimi-k3",
+        "features": [
+          {
+            "productFeature": "text_chat",
+            "parameterSchemaId": "parameters.unicompapi.text_chat.official"
+          },
+          {
+            "productFeature": "text_reasoning",
+            "parameterSchemaId": "parameters.unicompapi.text_reasoning.official"
+          }
+        ],
+        "officialContractIds": [
+          "official.moonshot.kimi-k3.chat"
+        ],
+        "state": "source_contract_candidate_requires_explicit_binding",
+        "liveVerified": false
+      },
+      {
+        "provider": "unicompapi",
+        "providerModelKey": "qwen-image",
+        "features": [
+          {
+            "productFeature": "text_to_image",
+            "parameterSchemaId": "parameters.unicompapi.qwen_image.text_to_image.official"
+          }
+        ],
+        "officialContractIds": [],
+        "state": "deferred_by_owner",
+        "liveVerified": false
+      },
+      {
+        "provider": "unicompapi",
+        "providerModelKey": "qwen-image-edit-2509",
+        "features": [
+          {
+            "productFeature": "reference_to_image",
+            "parameterSchemaId": "parameters.unicompapi.qwen_image_edit_2509.reference_to_image.official"
+          }
+        ],
+        "officialContractIds": [],
+        "state": "deferred_by_owner",
+        "liveVerified": false
+      },
+      {
+        "provider": "unicompapi",
+        "providerModelKey": "qwen3-235b-a22b",
+        "features": [
+          {
+            "productFeature": "text_chat",
+            "parameterSchemaId": "parameters.unicompapi.text_chat.official"
+          },
+          {
+            "productFeature": "text_reasoning",
+            "parameterSchemaId": "parameters.unicompapi.text_reasoning.official"
+          }
+        ],
+        "officialContractIds": [],
+        "state": "deferred_by_owner",
+        "liveVerified": false
+      },
+      {
+        "provider": "unicompapi",
+        "providerModelKey": "qwen3-32b",
+        "features": [
+          {
+            "productFeature": "text_chat",
+            "parameterSchemaId": "parameters.unicompapi.text_chat.official"
+          },
+          {
+            "productFeature": "text_reasoning",
+            "parameterSchemaId": "parameters.unicompapi.text_reasoning.official"
+          }
+        ],
+        "officialContractIds": [],
+        "state": "deferred_by_owner",
+        "liveVerified": false
+      },
+      {
+        "provider": "unicompapi",
+        "providerModelKey": "viduq3",
+        "features": [],
+        "officialContractIds": [
+          "official.vidu.viduq3.reference-video"
+        ],
+        "state": "source_contract_candidate_requires_explicit_binding",
+        "liveVerified": false
+      },
+      {
+        "provider": "unicompapi",
+        "providerModelKey": "viduq3-mix",
+        "features": [],
+        "officialContractIds": [
+          "official.vidu.viduq3-mix.reference-video"
+        ],
+        "state": "source_contract_candidate_requires_explicit_binding",
+        "liveVerified": false
+      },
+      {
+        "provider": "unicompapi",
+        "providerModelKey": "viduq3-pro",
+        "features": [
+          {
+            "productFeature": "text_to_video",
+            "parameterSchemaId": "parameters.unicompapi.viduq3_pro.text_to_video.official_mapping"
+          }
+        ],
+        "officialContractIds": [
+          "official.vidu.viduq3-pro.text-video",
+          "official.vidu.viduq3-pro.image-video"
+        ],
+        "state": "source_contract_candidate_requires_explicit_binding",
+        "liveVerified": false
+      },
+      {
+        "provider": "unicompapi",
+        "providerModelKey": "viduq3-turbo",
+        "features": [
+          {
+            "productFeature": "text_to_video",
+            "parameterSchemaId": "parameters.unicompapi.viduq3_turbo.text_to_video.official_mapping"
+          },
+          {
+            "productFeature": "image_to_video",
+            "parameterSchemaId": "parameters.unicompapi.viduq3_turbo.image_to_video.official_mapping"
+          }
+        ],
+        "officialContractIds": [
+          "official.vidu.viduq3-turbo.text-video",
+          "official.vidu.viduq3-turbo.image-video",
+          "official.vidu.viduq3-turbo.reference-video"
+        ],
+        "state": "source_contract_candidate_requires_explicit_binding",
+        "liveVerified": false
+      }
+    ]
+  }
+}

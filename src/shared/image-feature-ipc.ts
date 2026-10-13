@@ -52,6 +52,7 @@ export interface ImageFeatureParameterFieldDto {
     | 'string_array'
     | 'number_array'
     | 'object'
+    | 'json'
     | 'media_slot';
   readonly exposure: string;
   readonly defaultPolicy: string;

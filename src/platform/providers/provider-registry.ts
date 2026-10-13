@@ -42,6 +42,7 @@ import {
   type RoutingPreference,
   type VideoGenerationCapabilitySchema
 } from '../../domain';
+import { parseModelApiContractBinding } from '../../domain/entities/parameter-compatibility';
 import type {
   ProviderIpcResult,
   ProviderRegistryDto
@@ -307,7 +308,7 @@ export class ProviderRegistryController {
             );
             const productFeatures = [...new Set(
               modelProfiles
-                .filter((candidate) => candidate.status === 'verified')
+                .filter((candidate) => candidate.status === 'verified' || candidate.status === 'declared' && candidate.apiContract)
                 .flatMap((candidate) =>
                   candidate.features.map((feature) => feature.productFeature)
                 )
@@ -330,6 +331,11 @@ export class ProviderRegistryController {
             enabled: model.enabled,
             nativeSearch: modelProfiles.find(profile => profile.nativeSearch)?.nativeSearch,
             profileStatus: activeProfile?.status,
+            ...(activeProfile?.apiContract ? { apiContract: {
+              contractId: activeProfile.apiContract.contractId, revision: activeProfile.apiContract.contractRevision,
+              authority: 'model_vendor' as const, state: 'declared' as const,
+              rules: activeProfile.apiContract.rules
+            } } : {}),
             productFeatures: productFeatures.length > 0 ? productFeatures : undefined
             };
           }),
@@ -963,6 +969,12 @@ function parseProfileFeature(value: unknown): ModelFeatureProfileFeature {
 
 function parseModelProfile(value: unknown): ModelFeatureProfile {
   const item = requireRecord(value);
+  let apiContractConnectionPin: ModelFeatureProfile['apiContractConnectionPin'];
+  if (item.apiContractConnectionPin !== undefined) {
+    const pin = requireRecord(item.apiContractConnectionPin);
+    if (Object.keys(pin).some(key => !['connectionConfigVersionId', 'credentialVersionId'].includes(key))) throw new TypeError('Invalid contract connection pin');
+    apiContractConnectionPin = { connectionConfigVersionId: requireStableString(pin.connectionConfigVersionId), credentialVersionId: requireStableString(pin.credentialVersionId) };
+  }
   if (
     item.schemaVersion !== 1 ||
     !Number.isSafeInteger(item.revision) ||
@@ -988,6 +1000,8 @@ function parseModelProfile(value: unknown): ModelFeatureProfile {
     schemaVersion: 1,
     profileId: requireStableString(item.profileId),
     ...(item.nativeSearch !== undefined ? { nativeSearch: parseNativeSearchCapability(item.nativeSearch) } : {}),
+    ...(item.apiContract !== undefined ? { apiContract: parseModelApiContractBinding(item.apiContract) } : {}),
+    ...(apiContractConnectionPin ? { apiContractConnectionPin } : {}),
     revision: Number(item.revision),
     packageId: requireStableString(item.packageId),
     sourceTemplateId: requireStableString(item.sourceTemplateId),

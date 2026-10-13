@@ -1,6 +1,8 @@
 import { parseNativeSearchRequest, type NativeSearchRequest, type NativeSearchEvidence } from '../../../domain/entities/native-search';
 import { nativeSearchTools, runNativeSearch, type NativeSearchMessage } from '../native-search-stream';
 import { parseConversationImageInput, type ConversationImageInput } from '../conversation-image-input';
+import { buildBoundTextParameterSchema, mapBoundTextParameters } from '../contracts/bound-text-contract';
+import { getOfficialApiContract, officialRequestProperties } from '../contracts/official-api-contracts';
 ﻿import { randomUUID } from 'node:crypto';
 import {
   createProviderUsageObservation,
@@ -70,6 +72,8 @@ import {
 } from './newapi-runtime';
 import { emitProductionDiagnostic } from '../../conversation-production-trace';
 import { ExecutionBudgetError, type HostExecutionBudget } from '../../../application/execution-budget';
+import { createHash } from 'node:crypto';
+import { UNICOMPAPI_WWW_PROVIDER_PACKAGE_ID } from './unicompapi-contracts';
 import { createDocumentGenerationFinalizer, documentGenerationFinalization, type DocumentFinalizationToolBridge } from '../provider-document-finalization';
 
 export interface NewApiCredentialResolverPort {
@@ -330,7 +334,8 @@ export class NewApiChatAdapter {
     const request = parseDispatchRequest(input.request);
     const [connection, parameterSchema] = await runWithExecutionBudget(input.executionBudget, 'prepare', input.signal, () => Promise.all([
       this.connections.get(route.connectionId),
-      this.parameterSchemas.get(route.parameterSchemaId, route.parameterSchemaRevision)
+      route.parameterContract ? Promise.resolve(buildBoundTextParameterSchema(route.parameterContract, route.productFeature))
+        : this.parameterSchemas.get(route.parameterSchemaId, route.parameterSchemaRevision)
     ]));
     if (!connection || connection.id !== route.connectionId) {
       throw new NewApiChatAdapterError(
@@ -451,6 +456,7 @@ export class NewApiChatAdapter {
           input.executionBudget?.assertCanProceed('model');
           if (externalController.signal.aborted) throw new NewApiRuntimeError('cancelled', 'not_retryable');
           const opened = await this.runtime.openChatStream({ connection, credentials: credential, body,
+            ...(route.packageId === UNICOMPAPI_WWW_PROVIDER_PACKAGE_ID ? { idempotencyKey: `uc-${createHash('sha256').update(`${request.invocationAttemptId}:${round}`).digest('hex')}` } : {}),
             signal: externalController.signal, beforeRequestStarted });
           if (externalController.signal.aborted || input.executionBudget?.stopReason) {
             opened.close();
@@ -609,6 +615,8 @@ export class NewApiChatAdapter {
         appendAssistant: (response, messages) => messages.push({
           role: 'assistant',
           content: response.content ?? '',
+          ...('reasoningContent' in response && typeof response.reasoningContent === 'string' && response.reasoningContent
+            ? { reasoningContent: response.reasoningContent } : {}),
           toolCalls: toControlledProviderAssistantToolCalls(
             'toolCalls' in response ? response.toolCalls ?? [] : []
           )
@@ -929,6 +937,7 @@ async function consumeNewApiStream(
   readonly contentLength: number;
   readonly usage?: readonly UsageFactV1[];
   readonly content?: string;
+  readonly reasoningContent?: string;
   readonly toolCalls?: readonly ControlledProviderToolCall[];
 }> {
   const decoder = new TextDecoder('utf-8', { fatal: true });
@@ -940,6 +949,7 @@ async function consumeNewApiStream(
   let responseModel: string | undefined;
   let contentLength = 0;
   let content = '';
+  let reasoningContent = '';
   const toolDeltas: ControlledProviderToolCallDelta[] = [];
 
   const processEvent = async (eventText: string) => {
@@ -973,6 +983,8 @@ async function consumeNewApiStream(
       usage = chunk.usage;
     }
     if (chunk.reasoningDelta) {
+      reasoningContent += chunk.reasoningDelta;
+      if (reasoningContent.length > 1_000_000) throw invalidStream('NewApi reasoning exceeded the local limit', 'content_limit_exceeded');
       await appendLocalDelta(onReasoning, chunk.reasoningDelta);
     }
     if (chunk.contentDelta) {
@@ -1027,6 +1039,7 @@ async function consumeNewApiStream(
     contentLength,
     ...(usage ? { usage } : {}),
     ...(content ? { content } : {}),
+    ...(reasoningContent ? { reasoningContent } : {}),
     ...(toolCalls ? { toolCalls } : {})
   };
 }
@@ -1264,6 +1277,39 @@ function serializeRequest(
   providerToolChoice?: string
 ): Uint8Array {
   const parameters = validateParameterValues(schema, 'full', request.parameterValues);
+  if (typeof parameters.n === 'number' && parameters.n !== 1) throw invalidRequest('This conversation supports one response');
+  if (route.parameterContract) {
+    const contract = getOfficialApiContract(route.parameterContract.contractId, route.parameterContract.contractRevision);
+    const officialFields = officialRequestProperties(contract);
+    const mapped = mapBoundTextParameters(route.parameterContract, route.productFeature, parameters);
+    const body: Record<string, unknown> = {
+      ...mapped, model: route.providerModelKey,
+      messages: request.messages.map((message, index) => ({ role: message.role,
+        content: request.image && message.role === 'user' && index === request.messages.map(item => item.role).lastIndexOf('user')
+          ? [{ type: 'text', text: message.content }, { type: 'image_url', image_url: { url: `data:${request.image.mimeType};base64,${request.image.base64}` } }]
+          : message.content,
+        ...(message.toolCallId !== undefined ? { tool_call_id: message.toolCallId } : {}),
+        ...(message.name !== undefined ? { name: message.name } : {}),
+        ...(message.toolCalls ? { tool_calls: message.toolCalls } : {}),
+        ...(message.reasoningContent ? { reasoning_content: message.reasoningContent } : {}) })),
+      stream: true,
+      ...(officialFields.stream_options ? { stream_options: { include_usage: true } } : {})
+    };
+    if (request.nativeSearch) throw invalidRequest('Bound text native search requires a separately verified compatible search contract');
+    if (request.tools) body.tools = request.tools.map(tool => ({ type: tool.type, function: {
+      name: tool.function.name, description: tool.function.description, parameters: tool.function.parameters } }));
+    if (providerToolChoice) {
+      // Host requirement remains enforced by Work/readback gates; unsupported forcing is explicitly projected to auto.
+      body.tool_choice = contract.toolChoices?.includes(providerToolChoice) ? providerToolChoice : 'auto';
+    }
+    if (contract.conditions?.includes('required_and_named_tools_require_non_thinking_mode') && body.tools && body.tool_choice === 'required' &&
+        !(isRecord(parameters.thinking) && parameters.thinking.type === 'disabled') &&
+        !['none', 'minimal'].includes(String(parameters.reasoning_effort ?? ''))) body.tool_choice = 'auto';
+    if (hostToolFreeFinalization) { delete body.tools; delete body.tool_choice; }
+    const encoded = new TextEncoder().encode(JSON.stringify(body));
+    if (encoded.byteLength > (request.image ? 14 : 2) * 1024 * 1024) throw invalidRequest('NewApi request exceeded the local size limit');
+    return encoded;
+  }
   // UniCompAPI / OpenAI-compatible gateways accept temperature and top_p together.
   const body: Record<string, unknown> = {
     model: route.providerModelKey,

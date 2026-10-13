@@ -48,7 +48,7 @@ import {
   type NewApiParameterSchemaResolverPort,
   type NewApiSharedRuntime,
 } from './newapi';
-import { UNICOMPAPI_PROVIDER_PACKAGE_ID, UNICOMPAPI_PROVIDER_PACKAGE_VERSION } from './newapi/unicompapi-contracts';
+import { UNICOMPAPI_PROVIDER_PACKAGE_ID, UNICOMPAPI_PROVIDER_PACKAGE_VERSION, UNICOMPAPI_WWW_PROVIDER_PACKAGE_ID } from './newapi/unicompapi-contracts';
 import { KIMI_PROVIDER_PACKAGE_ID, KIMI_PROVIDER_PACKAGE_VERSION } from './kimi/kimi-contracts';
 import { createTextProviderFeatureContracts } from './project-text-feature';
 import type { JsonProviderRegistryStore } from './provider-registry';
@@ -181,7 +181,9 @@ export function createConversationTextDispatchBridge(
     wrapChatAdapter({
       packageId: NEWAPI_PROVIDER_PACKAGE_ID,
       packageVersion: NEWAPI_PROVIDER_PACKAGE_VERSION,
-      acceptedPackages: [{
+      acceptedPackages: [
+        ...(options.providerPackages.listSafeTemplates?.().some(template => template.packageId === UNICOMPAPI_WWW_PROVIDER_PACKAGE_ID)
+          ? [{ packageId: UNICOMPAPI_WWW_PROVIDER_PACKAGE_ID, packageVersion: UNICOMPAPI_PROVIDER_PACKAGE_VERSION }] : []), {
         packageId: UNICOMPAPI_PROVIDER_PACKAGE_ID,
         packageVersion: UNICOMPAPI_PROVIDER_PACKAGE_VERSION
       }, {

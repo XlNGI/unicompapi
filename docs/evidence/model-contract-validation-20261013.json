@@ -1,0 +1,49 @@
+{
+  "schemaVersion": 1,
+  "decisionDate": "2026-10-13",
+  "branch": "feature/model-contract-compatibility",
+  "baselineCommit": "8ee2a43",
+  "scope": "retained_public_vendor_contracts_text_binding_compatibility_and_two_distinct_relay_cards",
+  "ownerDeferredModelsSource": "docs/evidence/model-contract-sources-20261012.json#deferredByUser",
+  "sourcesEvidence": "docs/evidence/model-contract-sources-20261012.json",
+  "catalog": {
+    "contractCount": 26,
+    "exactVendorModelKeyCount": 27,
+    "localStaticModelRecordCount": 53,
+    "sourceContractCandidates": 28,
+    "ownerDeferredModelRecords": 24,
+    "relayOwnedProtocolRecords": 1,
+    "unclassifiedLocalModelRecords": 0,
+    "allModelsOfficiallyAligned": false,
+    "liveProviderVerified": false
+  },
+  "checks": [
+    { "command": "pnpm typecheck", "status": "passed", "exitCode": 0 },
+    { "command": "pnpm lint", "status": "passed", "exitCode": 0 },
+    { "command": "pnpm build", "status": "passed", "exitCode": 0, "existingWarnings": ["vite_cjs_deprecated", "large_bundle_chunk"] },
+    { "command": "node --test tests/*.test.mjs tests/ui/*.test.mjs", "status": "passed", "tests": 401, "failed": 0, "skipped": 0 },
+    { "command": "pnpm exec vitest run tests/application tests/domain tests/platform validation tests/evaluation --maxWorkers=1 --minWorkers=1", "status": "passed", "testFiles": 343, "tests": 3572, "failed": 0, "skipped": 0, "durationSeconds": 426.39 },
+    { "command": "git diff --check", "status": "passed", "exitCode": 0 },
+    { "command": "node scripts/compile-official-model-contracts.cjs", "status": "passed", "sourceBodyHashesVerified": true },
+    { "command": "node scripts/audit-model-contracts.cjs --write-evidence", "status": "passed", "credentialReads": 0, "networkRequests": 0 },
+    { "command": "pnpm exec electron scripts/verify-agent-provider-mock-electron.cjs", "status": "passed",
+      "boundary": "production Electron BrowserWindow preload IPC and isolated storage with in-process mock transport",
+      "mockRequests": 7, "externalRequests": 0,
+      "checks": ["ordinary_agent_response", "persistent_execution_identity", "cancel_start_boundary", "tool_call_continuation", "ppt_registered_work", "word_registered_work", "excel_registered_work"],
+      "pptWorkCount": 1, "threadReceiptAndArtifact": true }
+  ],
+  "priorFailures": [
+    { "scope": "default_concurrent_full_vitest", "failedTests": 6, "failureKind": "production_document_generation_loop_5000ms_timeout", "resolution": "same_timeouts_passed_in_single_file_and_serial_full_run", "timeoutsChanged": false },
+    { "scope": "new_official_contract_regressions", "failedTests": 2, "failureKind": "allOf_constraint_overwrite_and_vendor_multipleOf_omission", "resolution": "shared_bounded_validator_and_constraint_intersection", "regressionsPassed": true }
+  ],
+  "externalEffects": { "realCredentialReads": 0, "realGenerationRequests": 0, "paidProbeRequests": 0, "unknownGenerationRetries": 0, "userProjectDataModified": false },
+  "remainingOutsideCurrentDelivery": [
+    "owner_deferred_legacy_and_relay_alias_model_contracts",
+    "generic_media_contract_binding_and_adapter_compilation",
+    "www_unicompapi_media_quote_and_submit_lifecycle",
+    "real_provider_generation_matrix",
+    "macOS_real_device_verification"
+  ],
+  "uploadAuthorization": "explicit_owner_instruction_push_feature_branch_only",
+  "shutdownAuthorization": "explicit_owner_instruction_normal_windows_shutdown_after_verified_push"
+}

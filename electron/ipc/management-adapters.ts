@@ -17,6 +17,7 @@ import {
   NewApiTransportFailure,
   KIMI_PROVIDER_PACKAGE_ID,
   UNICOMPAPI_PROVIDER_PACKAGE_ID,
+  UNICOMPAPI_WWW_PROVIDER_PACKAGE_ID,
   ViduManagementAdapter,
   ViduSharedRuntime,
   ViduTransportFailure,
@@ -109,6 +110,7 @@ export function createLiveProviderManagementComposition(options: {
       new NewApiManagementAdapter(newApiRuntime, {
         packageId: UNICOMPAPI_PROVIDER_PACKAGE_ID
       }),
+      new NewApiManagementAdapter(newApiRuntime, { packageId: UNICOMPAPI_WWW_PROVIDER_PACKAGE_ID }),
       new NewApiManagementAdapter(newApiRuntime, {
         packageId: KIMI_PROVIDER_PACKAGE_ID
       }),

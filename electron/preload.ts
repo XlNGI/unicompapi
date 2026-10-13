@@ -220,6 +220,8 @@ const storage: StorageApi = {
 };
 
 const providers: ProviderApi = {
+  listModelApiContracts: () => ipcRenderer.invoke(providerIpcChannels.listModelApiContracts),
+  bindModelApiContract: request => ipcRenderer.invoke(providerIpcChannels.bindModelApiContract, request),
   getRegistry: () => ipcRenderer.invoke(providerIpcChannels.getRegistry),
   listTemplates: () => ipcRenderer.invoke(providerIpcChannels.listTemplates),
   createConnection: (input) =>
