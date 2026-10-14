@@ -1,5 +1,11 @@
 # UniComp 开发计划
 
+### 只读诊断：当前应用仍使用旧 PPT 模板路径（2026-10-14）
+
+负责人反馈生成的 PPT 仍套旧模板。真实进程 `--app-path` 确认应用从原工作区 `feature/chat-progress-summary@4692337` 启动，源码和编译产物都没有自主设计树；上一轮新实现仍在隔离工作树 `feature/llm-autonomous-design@3ff8ab8`，没有被当前进程加载。最近正式 10 页 PPT 的持久候选显示 `art_direction_timeout` → `art_direction_invalid` → `legacy-fallback`，Design IR/Layout IR 缺失；设计请求约 120.208 秒后回退。旧文件的 QA passed、available 和实际 Hash 一致，不构成自主设计执行证明。
+
+本轮只读核查启动目录、源码/编译产物、持久候选/QA 收据和脱敏时序，没有修改用户项目、读取凭证、发起收费请求、合并分支或重启应用。下一步应将已验收实现与当前界面修改整合到实际启动工作区，重建主进程后正常重启；只重启原目录或重试生成不能加载另一工作树代码。新门禁会拒绝设计超时后的模板回退；Provider 时限内未完成设计的具体原因仍需另行评测。见[诊断记录](docs/current/autonomous-design-active-workspace-diagnosis-20261014.md)及[机器证据](docs/evidence/autonomous-design-active-workspace-diagnosis-20261014.json)。
+
 ### 维护扩展：LLM 自主设计与系统忠实执行（2026-10-14；Windows 自动、本地 Office 与隔离 Electron 验收通过）
 
 负责人明确要求“先不要优化模板，我要的是 llm 的自主设计，系统根据设计实现”，并授权实施、做好实施记录。本轮属于既有 PPT 生成链路维护扩展，从 `develop@4692337` 在隔离工作树建立 `feature/llm-autonomous-design`；原 `feature/chat-progress-summary` 工作区及未提交改动保留。依据负责人最新要求、AGENTS.md、本文件顶部维护事实与当前源码；不依据历史阶段状态推进。
