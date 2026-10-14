@@ -264,11 +264,13 @@ function derivePageConstraint(
     maximumElementCount: Math.max(1, Math.min(128, elements.length + (page.density === 'dense' ? 4 : 1))),
     elements: Object.freeze(elements),
     relationships: Object.freeze(relationships),
-    ...(features.contentOrganization ? { contentOrganization: features.contentOrganization } : {})
+    ...(features.contentOrganization ? { contentOrganization: features.contentOrganization } : {}),
+    ...(page.designTree ? { designTree: page.designTree } : {})
   });
 }
 
 function resolveContentOrganization(page: PresentationDesignIRPage, units: readonly InternalContentUnit[]): ResolvedPresentationContentOrganization | undefined {
+  if (page.designTree && !page.organization) return undefined;
   const content = units.filter(unit => unit.kind !== 'generated');
   const headers = content.filter(unit => unit.kind === 'heading' || unit.kind === 'title');
   if (page.organization === undefined) return inferContentOrganization(page, content, headers);

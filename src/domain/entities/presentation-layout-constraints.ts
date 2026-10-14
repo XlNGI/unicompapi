@@ -12,6 +12,7 @@ import {
   type PresentationPageRole
 } from './presentation-design-contract';
 import type { PresentationPageKind } from './document-generation';
+import { parsePresentationDesignTree, type PresentationDesignTree } from './presentation-design-tree';
 
 export const presentationLayoutDensityLevels = ['sparse', 'balanced', 'dense'] as const;
 export type PresentationLayoutDensity = (typeof presentationLayoutDensityLevels)[number];
@@ -125,6 +126,7 @@ export interface ResolvedPresentationContentOrganization {
 
 /** Page-level limits describe available extents and insets, not element placement. */
 export interface PresentationPageConstraint {
+  readonly designTree?: PresentationDesignTree;
   readonly pageNumber: number;
   readonly pageRole: PresentationPageRole;
   readonly pageIntent: string;
@@ -254,7 +256,7 @@ export function validatePresentationLayoutConstraintModel(
     value.pages.forEach((page, index) => {
       const pagePath = `$.pages[${index}]`;
       if (!isRecord(page)) { diagnostics.push(issue('invalid_shape', pagePath, 'page must be an object')); return; }
-      checkKeys(page, ['pageNumber', 'pageRole', 'pageIntent', 'designIntent', 'density', 'contentDensity', 'safeArea', 'contentBounds', 'minimumGap', 'preferredGap', 'maximumElementCount', 'elements', 'relationships', 'contentOrganization'], pagePath, diagnostics, ['contentOrganization']);
+      checkKeys(page, ['pageNumber', 'pageRole', 'pageIntent', 'designIntent', 'density', 'contentDensity', 'safeArea', 'contentBounds', 'minimumGap', 'preferredGap', 'maximumElementCount', 'elements', 'relationships', 'contentOrganization', 'designTree'], pagePath, diagnostics, ['contentOrganization', 'designTree']);
       if (!isIntegerInRange(page.pageNumber, 1, MAX_PAGES)) diagnostics.push(issue('invalid_value', `${pagePath}.pageNumber`, 'pageNumber is out of range'));
       else pageNumbers.push(page.pageNumber);
       if (typeof page.pageRole !== 'string' || !enumHas(['hero', 'statement', 'comparison', 'metric', 'process', 'evidence', 'section', 'content', 'closing'], page.pageRole)) diagnostics.push(issue('invalid_value', `${pagePath}.pageRole`, 'pageRole is invalid'));
@@ -269,6 +271,10 @@ export function validatePresentationLayoutConstraintModel(
       else page.relationships.forEach((relationship, relationshipIndex) => validateRelationship(relationship, `${pagePath}.relationships[${relationshipIndex}]`, refs, diagnostics));
       validateDesignIntent(page.designIntent, `${pagePath}.designIntent`, refs, diagnostics);
       if (page.contentOrganization !== undefined) validateResolvedOrganization(page.contentOrganization, `${pagePath}.contentOrganization`, refs, diagnostics);
+      if (page.designTree !== undefined) {
+        try { parsePresentationDesignTree(page.designTree, [...refs]); }
+        catch { diagnostics.push(issue('invalid_reference', `${pagePath}.designTree`, 'Executable design tree is invalid')); }
+      }
     });
     const duplicates = pageNumbers.filter((page, index) => pageNumbers.indexOf(page) !== index);
     duplicates.forEach(page => diagnostics.push(issue('duplicate_page', '$.pages', `page ${page} is duplicated`)));

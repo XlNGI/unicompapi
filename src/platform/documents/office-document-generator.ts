@@ -37,6 +37,7 @@ import { buildDocumentContentSnapshot, parseDocumentContentSnapshot, documentCon
 import type { PresentationPlanPrepared } from './presentation-production-plan';
 import { canonicalizeLayoutJson } from '../../domain/entities/presentation-layout-ir';
 import { compilePresentationRenderPlan, buildPresentationDesignSnapshot } from './presentation-render-plan-compiler';
+import { loadPresentationRenderAssets } from './presentation-render-assets';
 import type { PresentationDesignCompilationSnapshot, PresentationDesignStatus } from './presentation-render-plan-compiler';
 import { renderPresentationRenderPlan } from './presentation-design-renderer';
 import { applyOfficeDocumentPatchesToBuffer } from './office-document-tool-executor';
@@ -857,7 +858,9 @@ async function buildPptBuffer(
   try {
   const renderOutline = normalizePresentationOutline(outline);
   const canonicalContent = contentSnapshot ?? buildDocumentContentSnapshot({ outline });
-  const compilation = designIR === undefined ? undefined : compilePresentationRenderPlan(outline, designIR, template.tokens, { contentSnapshot: canonicalContent });
+  const authored = designIR?.pages.some(page => page.designTree !== undefined) === true;
+  const assets = authored ? await loadPresentationRenderAssets(images) : [];
+  const compilation = designIR === undefined ? undefined : compilePresentationRenderPlan(outline, designIR, template.tokens, { contentSnapshot: canonicalContent, assets });
   if (compilation?.diagnostics.some(diagnostic => ['content_snapshot_conflict', 'invalid_content_snapshot'].includes(diagnostic.code))) {
     throw new TypeError('content_snapshot_conflict');
   }
@@ -867,14 +870,14 @@ async function buildPptBuffer(
   if (designIR === undefined && compatibilityReason) fallbackReason = compatibilityReason;
   if (fallbackReason === undefined && renderOutline.sections.length !== outline.sections.length) fallbackReason = 'outline_normalization';
   if (fallbackReason === undefined && containsSceneContent) fallbackReason = 'unsupported_scene_content';
-  if (fallbackReason === undefined && images.length > 0) fallbackReason = 'external_images_require_legacy_path';
+  if (fallbackReason === undefined && images.length > 0 && !authored) fallbackReason = 'external_images_require_legacy_path';
   if (fallbackReason === undefined && compilation?.plan && compilation.plan.pages.length > presentationOutlineLimits.maxEstimatedPages) {
     fallbackReason = 'page_count_limit';
   }
 
   // A declared business organization is an execution requirement. A generic
   // template cannot certify that its comparison, sequence or support ran.
-  if (designIR?.pages.some(page => page.organization !== undefined) && fallbackReason !== undefined) {
+  if (designIR?.pages.some(page => page.organization !== undefined || page.designTree !== undefined) && fallbackReason !== undefined) {
     throw new PresentationLayoutError('The declared content organization could not be rendered');
   }
 
@@ -900,7 +903,7 @@ async function buildPptBuffer(
     ...(designAware && compilation?.layoutIR ? { layoutIR: compilation.layoutIR } : {}),
     ...(designAware && compilation?.plan ? { renderPlan: compilation.plan } : {}), snapshot }));
   if (designAware) {
-    renderPresentationRenderPlan(pptx, compilation.plan!);
+    renderPresentationRenderPlan(pptx, compilation.plan!, assets);
   } else {
       renderPresentationCover(pptx, outline, template);
       pages!.forEach((page, index) => renderPresentationPage(pptx, page, template, index + 2));

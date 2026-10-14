@@ -140,7 +140,7 @@ const factEnums: Readonly<Record<string, readonly string[]>> = {
   artDirectionStatus: ['validated', 'invalid', 'missing'], designIrStatus: ['validated', 'invalid', 'missing'], layoutStatus: ['success', 'failed', 'skipped'],
   renderPlanStatus: ['valid', 'invalid', 'skipped'], repairAction: ['reduce_gap', 'rebalance_regions', 'reduce_font_size', 'compatible_composition'],
   pageRole: ['hero', 'statement', 'comparison', 'metric', 'process', 'evidence', 'section', 'content', 'closing'],
-  composition: ['single-focus', 'comparison', 'evidence-led', 'sequence', 'structured'], selectedLayout: ['weighted-regions', 'adaptive-grid', 'flow-track'],
+  composition: ['single-focus', 'comparison', 'evidence-led', 'sequence', 'structured', 'authored'], selectedLayout: ['weighted-regions', 'adaptive-grid', 'flow-track', 'design-tree'],
   density: ['sparse', 'balanced', 'dense'], whitespace: ['minimal', 'balanced', 'generous'], primaryRegion: ['left', 'center', 'right', 'top', 'bottom', 'leading', 'trailing', 'supporting'],
   resultStatus: ['ok', 'failed', 'unknown_result'], finishReason: ['stop', 'tool_calls', 'length', 'content_filter', 'unknown'],
   admissionPhase: ['pending', 'admitted', 'rejected', 'replayed', 'unknown'],

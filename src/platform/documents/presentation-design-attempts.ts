@@ -25,6 +25,7 @@ export interface PresentationDesignAttempt {
   readonly renderHash?: string;
   readonly parentAttempt?: { readonly attempt: number; readonly attemptHash: string };
   readonly targetSectionIds: readonly string[];
+  readonly targetSystemPages?: readonly ('cover' | 'closing')[];
   readonly targetPageIds: readonly string[];
   readonly diagnosisCodes: readonly string[];
   readonly createdAt: string;
@@ -50,7 +51,7 @@ export function parsePresentationDesignAttempt(value: unknown): PresentationDesi
   const raw = object(value);
   exact(raw, ['schemaVersion', 'executionId', 'sourceDraftId', 'draftRevision', 'attempt', 'contentVersion',
     'designVersion', 'layoutVersion', 'renderVersion', 'contentHash', 'designHash', 'layoutHash', 'renderHash',
-    'parentAttempt', 'targetSectionIds', 'targetPageIds', 'diagnosisCodes', 'createdAt', 'plan', 'attemptHash']);
+    'parentAttempt', 'targetSectionIds', 'targetPageIds', 'targetSystemPages', 'diagnosisCodes', 'createdAt', 'plan', 'attemptHash']);
   if (raw.schemaVersion !== 1 || !id(raw.executionId) || !id(raw.sourceDraftId) ||
     !integer(raw.draftRevision, 0, 1_000_000) || !integer(raw.attempt, 0, 2) || !integer(raw.contentVersion, 1, 1_000_000) ||
     !hash(raw.contentHash) || !hash(raw.attemptHash) || typeof raw.createdAt !== 'string' || !Number.isFinite(Date.parse(raw.createdAt))) {
@@ -72,10 +73,12 @@ export function parsePresentationDesignAttempt(value: unknown): PresentationDesi
   }
   const targetSectionIds = safeList(raw.targetSectionIds, 40);
   const targetPageIds = safeList(raw.targetPageIds, 40);
+  const targetSystemPages = parseTargetSystemPages(raw.targetSystemPages);
   if (targetSectionIds.some(sectionId => !plan.contentSnapshot.sections.some(section => section.sectionId === sectionId))) {
     throw new TypeError('design_attempt_target_invalid');
   }
-  const expectedPages = plan.layoutIR?.pages.filter(page => page.source.kind === 'content' && targetSectionIds.includes(page.source.sectionId)).map(page => page.pageId) ?? [];
+  const expectedPages = plan.layoutIR?.pages.filter(page => page.source.kind === 'content' ? targetSectionIds.includes(page.source.sectionId)
+    : targetSystemPages.includes(page.source.key)).map(page => page.pageId) ?? [];
   if (digest(targetPageIds) !== digest(expectedPages)) throw new TypeError('design_attempt_target_invalid');
   codes(raw.diagnosisCodes);
   if (raw.attempt === 0) {
@@ -100,6 +103,7 @@ export async function persistPreparedPresentationAttempt(input: {
   readonly prepared: PreparedPresentationDesignPlan;
   readonly previousAttempt?: PresentationDesignAttempt;
   readonly targetSectionIds?: readonly string[];
+  readonly targetSystemPages?: readonly ('cover' | 'closing')[];
   readonly diagnosisCodes?: readonly string[];
   readonly now: string;
 }): Promise<PresentationDesignAttempt> {
@@ -123,7 +127,9 @@ export async function persistPreparedPresentationAttempt(input: {
   if (new Set(targetSectionIds).size !== targetSectionIds.length || targetSectionIds.some(id => !contentSnapshot.sections.some(section => section.sectionId === id))) {
     throw new TypeError('design_attempt_target_invalid');
   }
-  const targetPageIds = layoutIR?.pages.filter(page => page.source.kind === 'content' && targetSectionIds.includes(page.source.sectionId)).map(page => page.pageId) ?? [];
+  const targetSystemPages = parseTargetSystemPages(input.targetSystemPages);
+  const targetPageIds = layoutIR?.pages.filter(page => page.source.kind === 'content' ? targetSectionIds.includes(page.source.sectionId)
+    : targetSystemPages.includes(page.source.key)).map(page => page.pageId) ?? [];
   const diagnosisCodes = [...(input.diagnosisCodes ?? [])];
   if (diagnosisCodes.length > 40 || diagnosisCodes.some(code => !/^[a-z][a-z0-9_]{0,79}$/u.test(code))) throw new TypeError('design_attempt_diagnosis_invalid');
   const version = input.attempt + 1;
@@ -136,6 +142,7 @@ export async function persistPreparedPresentationAttempt(input: {
     contentHash: computeDocumentContentDigest(contentSnapshot),
     ...(input.previousAttempt ? { parentAttempt: { attempt: input.previousAttempt.attempt, attemptHash: input.previousAttempt.attemptHash } } : {}),
     targetSectionIds, targetPageIds, diagnosisCodes, createdAt: input.now,
+    ...(targetSystemPages.length ? { targetSystemPages } : {}),
     plan: { contentSnapshot, outline, ...(designIR ? { designIR } : {}), ...(layoutIR ? { layoutIR } : {}),
       ...(renderPlan ? { renderPlan } : {}), snapshot }
   };
@@ -145,6 +152,12 @@ export async function persistPreparedPresentationAttempt(input: {
     return result;
   });
   return result;
+}
+
+function parseTargetSystemPages(value: unknown): readonly ('cover' | 'closing')[] {
+  if (value === undefined) return [];
+  if (!Array.isArray(value) || value.length > 2 || new Set(value).size !== value.length || value.some(key => key !== 'cover' && key !== 'closing')) throw new TypeError('design_attempt_target_invalid');
+  return value;
 }
 
 /** Artifact/QA evidence is separate from the immutable pre-write plan identity. */
@@ -196,7 +209,13 @@ function validatePreparedPlan(value: PreparedPresentationDesignPlan): PreparedPr
     (renderPlan && digest(renderPlan) !== digest(value.renderPlan))) throw new TypeError('design_attempt_render_mismatch');
   const snapshot = object(value.snapshot);
   exact(snapshot, ['designPath', 'fallbackReason', 'designIR', 'artDirectionStatus', 'designIrStatus', 'layoutStatus',
-    'renderPlanStatus', 'repairCount', 'repairs', 'diagnostics', 'strategies', 'pages', 'visualAudit']);
+    'renderPlanStatus', 'repairCount', 'repairs', 'diagnostics', 'strategies', 'pages', 'visualAudit', 'designExecution']);
+  if (snapshot.designExecution !== undefined) {
+    const audit = object(snapshot.designExecution);
+    exact(audit, ['status', 'authoredPageCount', 'nodeCount', 'verifiedElementCount']);
+    if (audit.status !== 'passed' || !integer(audit.authoredPageCount, 1, 40) || !integer(audit.nodeCount, 1, 3840) ||
+      !integer(audit.verifiedElementCount, 1, 5120)) throw new TypeError('design_attempt_execution_audit_invalid');
+  }
   if (!['design-aware', 'legacy-fallback'].includes(String(snapshot.designPath)) ||
     !['validated', 'invalid', 'missing'].includes(String(snapshot.artDirectionStatus)) ||
     !['validated', 'invalid', 'missing'].includes(String(snapshot.designIrStatus)) ||

@@ -8,8 +8,10 @@ import {
   type PresentationPageFeatures,
   type ResolvedPresentationContentOrganization
 } from '../../domain/entities/presentation-layout-constraints';
+import { solvePresentationDesignTree, type ResolvedPresentationDesignNode } from './presentation-design-tree-layout';
+import type { PresentationNodeStyle, PresentationTextSpan } from '../../domain/entities/presentation-design-tree';
 
-export type PresentationLayoutComposition = 'single-focus' | 'comparison' | 'evidence-led' | 'sequence' | 'structured';
+export type PresentationLayoutComposition = 'single-focus' | 'comparison' | 'evidence-led' | 'sequence' | 'structured' | 'authored';
 export type PresentationLayoutDiagnosticCode =
   | 'layout_overflow'
   | 'layout_overlap'
@@ -27,6 +29,9 @@ export interface PresentationLayoutGeometry {
 }
 
 export interface PresentationLayoutPlacement {
+  readonly designNodeId?: string;
+  readonly designStyle?: PresentationNodeStyle;
+  readonly textSpans?: readonly PresentationTextSpan[];
   readonly groupId?: string;
   readonly sourceRef: string;
   readonly role: PresentationElementConstraint['role'];
@@ -42,7 +47,8 @@ export interface PresentationLayoutPageResult {
   readonly pageNumber: number;
   readonly pageRole: PresentationPageFeatures['pageRole'];
   readonly composition: PresentationLayoutComposition;
-  readonly selectedLayout: 'weighted-regions' | 'adaptive-grid' | 'flow-track';
+  readonly selectedLayout: 'weighted-regions' | 'adaptive-grid' | 'flow-track' | 'design-tree';
+  readonly authoredNodes?: readonly ResolvedPresentationDesignNode[];
   readonly density: PresentationLayoutDensity;
   readonly whitespace: 'minimal' | 'balanced' | 'generous';
   readonly primaryRegion: PresentationLayoutRegion;
@@ -52,6 +58,7 @@ export interface PresentationLayoutPageResult {
 }
 
 export interface PresentationLayoutDiagnostic {
+  readonly nodeId?: string;
   readonly code: PresentationLayoutDiagnosticCode;
   readonly pageNumber: number;
   readonly sourceRef?: string;
@@ -153,6 +160,8 @@ function applyRepair(
   let changed = false;
   const pages = model.pages.map(page => {
     if (!targets.has(page.pageNumber)) return page;
+    // Explicit authored proportions, gap and type are never changed by local repair.
+    if (page.designTree) return page;
     if (action === 'reduce_gap') {
       if (page.preferredGap <= page.minimumGap) return page;
       changed = true;
@@ -191,6 +200,7 @@ function solvePage(
   canvas: PresentationLayoutConstraintModel['canvas']
 ): { readonly page?: PresentationLayoutPageResult; readonly diagnostics: readonly PresentationLayoutDiagnostic[] } {
   const diagnostics: PresentationLayoutDiagnostic[] = [];
+  if (page.designTree) return solvePresentationDesignTree(page, canvas);
   if (features.hasImage) return { diagnostics: [{ code: 'unsupported_content_type', pageNumber: page.pageNumber }] };
   if (page.elements.length === 0 || page.elements.length > page.maximumElementCount) {
     return { diagnostics: [{ code: 'content_too_dense', pageNumber: page.pageNumber }] };

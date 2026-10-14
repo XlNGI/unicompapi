@@ -144,7 +144,7 @@ export function derivePresentationRenderPlanFromLayoutIR(value: ProductionPresen
       pageNumber: page.pageNumber, pageRole: page.pageRole, backgroundColor: page.backgroundColor,
       elements: page.elements.map(element => {
         const resolved = element.source.kind === 'generated'
-          ? generatedContent(element.source.key, page.pageNumber)
+          ? generatedContent(element.source, page.pageNumber)
           : contentForSource(index, element.source.ref, page, allowedSources, layout.compatibility.origin === 'legacy-render-plan');
         if (element.type !== resolved.type) throw new TypeError('layout_content_type_mismatch');
         return {
@@ -172,7 +172,7 @@ export function parseVerifiedProductionPresentationLayoutIR(value: unknown, opti
     const index = contentReferenceIndex(content);
     const allowedSources = contentSourceAllowlist(content, index);
     for (const page of layout.pages) for (const element of page.elements) {
-      const payload = element.source.kind === 'generated' ? generatedContent(element.source.key, page.pageNumber) : contentForSource(index, element.source.ref, page, allowedSources, layout.compatibility.origin === 'legacy-render-plan');
+      const payload = element.source.kind === 'generated' ? generatedContent(element.source, page.pageNumber) : contentForSource(index, element.source.ref, page, allowedSources, layout.compatibility.origin === 'legacy-render-plan');
       if (payload.type !== element.type) throw new TypeError('layout_content_type_mismatch');
     }
     verifySolverSourceCoverage(layout, allowedSources);
@@ -219,7 +219,7 @@ function buildLayout(input: LayoutBuildInput, compatibility: ProductionPresentat
         const canonicalSource = element.source.kind === 'generated' ? element.source
           : reference ? { kind: 'content' as const, ref: reference.id } : undefined;
         if (!canonicalSource) throw new TypeError('layout_content_source_unresolved');
-        const expected = canonicalSource.kind === 'generated' ? generatedContent(canonicalSource.key, page.pageNumber)
+        const expected = canonicalSource.kind === 'generated' ? generatedContent(canonicalSource, page.pageNumber)
           : contentForSource(index, canonicalSource.ref, pageIdentity, allowedSources, compatibility.origin === 'legacy-render-plan');
         if (JSON.stringify(canonicalizeLayoutJson(element.content)) !== JSON.stringify(canonicalizeLayoutJson(expected))) throw new TypeError('layout_candidate_content_mismatch');
         return {
@@ -369,7 +369,7 @@ function verifySolverSourceCoverage(layout: ProductionPresentationLayoutIR,
     if (!expected || actual.length !== expected.size || new Set(actual).size !== actual.length ||
       actual.some(reference => !expected.has(reference))) throw new TypeError('layout_source_coverage_mismatch');
     const generated = page.elements.flatMap(element => element.source.kind === 'generated' ? [element.source.key] : []);
-    if (generated.filter(key => key === 'page-number').length !== 1 || generated.some(key => key !== 'page-number' && key !== 'decoration-line' && key !== 'decoration-node')) throw new TypeError('layout_generated_source_coverage_mismatch');
+    if (generated.filter(key => key === 'page-number').length !== 1 || generated.some(key => !['page-number', 'decoration-line', 'decoration-node', 'decoration-rect', 'decoration-roundRect', 'asset-image'].includes(key))) throw new TypeError('layout_generated_source_coverage_mismatch');
   }
 }
 function contentForSource(index: ReadonlyMap<string, ContentReference>, ref: string, page: Pick<ProductionPresentationLayoutPage, 'source' | 'pageNumber'>,
@@ -387,7 +387,11 @@ function pageIdForNumber(pages: readonly ProductionPresentationLayoutPage[], num
   if (!page) throw new TypeError('layout_repair_page_unresolved');
   return page.pageId;
 }
-function generatedContent(key: 'closing-label' | 'page-number' | 'decoration-line' | 'decoration-node', pageNumber: number): PresentationRenderPlanContent {
+function generatedContent(source: Extract<PresentationRenderPlanElement['source'], { kind: 'generated' }>, pageNumber: number): PresentationRenderPlanContent {
+  const key = source.key;
+  if (source.key === 'asset-image') return { type: 'image', assetKey: source.assetKey, assetDigest: source.assetDigest, imageFit: source.imageFit, aspectRatio: source.aspectRatio,
+    ...(source.imageMask ? { imageMask: source.imageMask } : {}) };
+  if (key === 'decoration-rect' || key === 'decoration-roundRect') return { type: 'shape', shapeKind: key === 'decoration-rect' ? 'rect' : 'roundRect' };
   return key === 'decoration-line' ? { type: 'shape', shapeKind: 'line' }
     : key === 'decoration-node' ? { type: 'shape', shapeKind: 'ellipse' }
       : { type: 'text', text: key === 'page-number' ? String(pageNumber) : '谢谢观看' };

@@ -61,14 +61,14 @@ export function resolvePresentationPageStyle(input: {
     throw new TypeError('invalid_presentation_style_intent');
   const neutral = design.colorDirection === 'monochrome' || design.colorDirection === 'neutral';
   const palette = design.visualSystem?.palette ?? tokens;
-  const paint = (value: string) => neutral ? grayscale(color(value)) : color(value);
+  const paint = (value: string) => neutral && !design.visualSystem?.palette ? grayscale(color(value)) : color(value);
   const base = paint(palette.background);
   const surface = paint(palette.surface);
   const text = paint(palette.text);
   const accent = paint(palette.accent);
   const secondary = paint(palette.secondaryAccent);
   const muted = paint(palette.muted);
-  const backgroundColor = page.pageRole === 'hero'
+  const backgroundColor = page.designTree ? base : page.pageRole === 'hero'
     ? recipe.strongHero ? accent : mix(base, accent, recipe.hero)
     : page.pageRole === 'closing' ? mix(base, accent, recipe.closing)
       : page.pageRole === 'statement' ? mix(base, accent, recipe.statement)
