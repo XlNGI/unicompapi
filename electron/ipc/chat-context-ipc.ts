@@ -1,4 +1,4 @@
-import { app, ipcMain } from 'electron';
+import { app, ipcMain, type WebContents } from 'electron';
 import {
   createChatContextRuntime,
   type DeepSeekSharedRuntime,
@@ -51,7 +51,11 @@ export function registerChatContextIpcHandlers(options: {
   const contexts = runtime.projectContexts;
   const workflows = runtime.workflows;
   const webResearch = runtime.webResearch;
-  const responseSubscriptionOwners = new Map<string, number>();
+  const responseSubscriptionOwners = new Map<string, {
+    readonly ownerId: number;
+    readonly sender: WebContents;
+    readonly onDestroyed: () => void;
+  }>();
 
   ipcMain.handle(chatContextIpcChannels.createConversation, (_event, request: unknown) =>
     conversations.create(request)
@@ -187,7 +191,29 @@ export function registerChatContextIpcHandlers(options: {
       if (typeof subscriberId !== 'string') {
         return Promise.resolve({ ok: false, error: { code: 'invalid_request', message: 'Response event subscription is invalid' } });
       }
-      const ownerId = event.sender.id;
+      const sender = event.sender;
+      const ownerId = sender.id;
+      if (sender.isDestroyed()) {
+        return Promise.resolve({ ok: false, error: { code: 'invalid_request', message: 'Response event subscription is closed' } });
+      }
+      if (responseSubscriptionOwners.has(subscriberId)) {
+        return Promise.resolve({ ok: false, error: { code: 'invalid_request', message: 'Response event subscription already exists' } });
+      }
+      let owner: { readonly ownerId: number; readonly sender: WebContents; readonly onDestroyed: () => void };
+      const onDestroyed = () => {
+        if (responseSubscriptionOwners.get(subscriberId) !== owner) return;
+        responseSubscriptionOwners.delete(subscriberId);
+        runtime.responses.unsubscribeEvents(subscriberId);
+      };
+      owner = { ownerId, sender, onDestroyed };
+      responseSubscriptionOwners.set(subscriberId, owner);
+      sender.once('destroyed', onDestroyed);
+      const forgetOwner = () => {
+        if (responseSubscriptionOwners.get(subscriberId) !== owner) return false;
+        responseSubscriptionOwners.delete(subscriberId);
+        sender.removeListener('destroyed', onDestroyed);
+        return true;
+      };
       return runtime.responses.subscribeEvents(
         { responseExecutionId: (request as { responseExecutionId?: unknown }).responseExecutionId },
         subscriberId,
@@ -196,16 +222,29 @@ export function registerChatContextIpcHandlers(options: {
             event.sender.send(chatContextIpcChannels.responseEvent, { subscriberId, event: responseEvent });
           }
         },
-        () => { responseSubscriptionOwners.delete(subscriberId); }
+        () => {
+          forgetOwner();
+        }
       ).then((result) => {
-        if (result.ok) responseSubscriptionOwners.set(subscriberId, ownerId);
+        if (!result.ok) {
+          forgetOwner();
+          return result;
+        }
+        if (sender.isDestroyed() || responseSubscriptionOwners.get(subscriberId) !== owner) {
+          runtime.responses.unsubscribeEvents(subscriberId);
+          return { ok: false, error: { code: 'invalid_request', message: 'Response event subscription is closed' } } as const;
+        }
         return result;
+      }).catch((error: unknown) => {
+        forgetOwner();
+        runtime.responses.unsubscribeEvents(subscriberId);
+        throw error;
       });
     }
   );
   ipcMain.on(chatContextIpcChannels.acknowledgeResponseEvents, (event, request: unknown) => {
     const value = request as { subscriberId?: unknown; sequence?: unknown };
-    if (typeof value?.subscriberId === 'string' && responseSubscriptionOwners.get(value.subscriberId) === event.sender.id && typeof value.sequence === 'number' && Number.isSafeInteger(value.sequence)) {
+    if (typeof value?.subscriberId === 'string' && responseSubscriptionOwners.get(value.subscriberId)?.ownerId === event.sender.id && typeof value.sequence === 'number' && Number.isSafeInteger(value.sequence)) {
       runtime.responses.acknowledgeEvents(value.subscriberId, value.sequence);
     }
   });
@@ -213,9 +252,12 @@ export function registerChatContextIpcHandlers(options: {
     const subscriberId = request && typeof request === 'object'
       ? (request as { subscriberId?: unknown }).subscriberId
       : undefined;
-    if (typeof subscriberId === 'string' && responseSubscriptionOwners.get(subscriberId) === event.sender.id) {
-      responseSubscriptionOwners.delete(subscriberId);
-      runtime.responses.unsubscribeEvents(subscriberId);
+    const responseSubscriptionId = typeof subscriberId === 'string' ? subscriberId : undefined;
+    const owner = responseSubscriptionId ? responseSubscriptionOwners.get(responseSubscriptionId) : undefined;
+    if (responseSubscriptionId && owner?.ownerId === event.sender.id) {
+      responseSubscriptionOwners.delete(responseSubscriptionId);
+      owner.sender.removeListener('destroyed', owner.onDestroyed);
+      runtime.responses.unsubscribeEvents(responseSubscriptionId);
     }
   });
   ipcMain.handle(chatContextIpcChannels.createContextDraft, (_event, request: unknown) =>

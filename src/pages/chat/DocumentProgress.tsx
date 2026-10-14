@@ -1,4 +1,4 @@
-import { useMemo } from 'react';
+import { useCallback, useMemo, useSyncExternalStore } from 'react';
 import { LuChevronRight, LuCircle, LuCircleAlert, LuCircleCheck, LuCirclePause } from 'react-icons/lu';
 import type { ConversationTaskProgressSnapshot } from '../../shared/conversation-task-progress';
 import { productionTraceEventIdentity, type ProductionTraceEventDto } from '../../shared/conversation-production-ipc';
@@ -8,6 +8,7 @@ import { projectDocumentBody } from './documentBodyPreview';
 import { executionStopLabel, responseFailureFactsFromTrace } from '../../ui/chat-response-failure-notice';
 import { retainedDocumentSummary } from '../../ui/chat-response-failure-notice';
 import type { MessageDto } from '../../shared/chat-context-ipc';
+import { getThreadItemStreamContent, subscribeThreadItemStream } from './threadItemStreamStore';
 
 export interface DocumentProgressProps {
   readonly detail: string;
@@ -28,6 +29,7 @@ export interface DocumentProgressProps {
   readonly activeDetail?: string;
   /** Raw model content is projected to safe, readable document text before display. */
   readonly bodyContent?: string;
+  readonly streamItemId?: string;
   readonly bodyStreaming?: boolean;
   /** When developer mode is enabled, structured facts like docId, nodeId, duration and tool calls can be inspected */
   readonly developerMode?: boolean;
@@ -137,7 +139,13 @@ function eventDetails(event: ProductionTraceEventDto): string[] {
   return details;
 }
 
-export function DocumentProgress({ detail, taskProgress = [], preferDetail = false, events = [], request, requestBySource, incomplete, terminalDetail, terminalStatus, genericTerminalFailure = false, retainedDocumentResult, activeDetail, bodyContent, bodyStreaming = false, developerMode = false }: DocumentProgressProps) {
+export function DocumentProgress({ detail, taskProgress = [], preferDetail = false, events = [], request, requestBySource, incomplete, terminalDetail, terminalStatus, genericTerminalFailure = false, retainedDocumentResult, activeDetail, bodyContent, streamItemId, bodyStreaming = false, developerMode = false }: DocumentProgressProps) {
+  const subscribeBody = useCallback((listener: () => void) => streamItemId
+    ? subscribeThreadItemStream(streamItemId, listener) : () => undefined, [streamItemId]);
+  const getBodySnapshot = useCallback(() => streamItemId
+    ? getThreadItemStreamContent(streamItemId) : undefined, [streamItemId]);
+  const streamedBody = useSyncExternalStore(subscribeBody, getBodySnapshot, getBodySnapshot);
+  const liveBodyContent = streamedBody ?? bodyContent;
   const latest = taskProgress.reduce<ConversationTaskProgressSnapshot | undefined>(
     (previous, event) => !previous || event.sequence > previous.sequence ? event : previous,
     undefined
@@ -169,7 +177,7 @@ export function DocumentProgress({ detail, taskProgress = [], preferDetail = fal
       <span>{summary}</span>
     </span>
   );
-  const preview = useMemo(() => projectDocumentBody(bodyContent ?? ''), [bodyContent]);
+  const preview = useMemo(() => projectDocumentBody(liveBodyContent ?? ''), [liveBodyContent]);
   const body = preview.content;
   const bodyPreview = body || preview.truncated ? (
     <section className="uc-chat-generated-body" aria-label="生成正文">

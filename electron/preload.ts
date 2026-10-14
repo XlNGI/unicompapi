@@ -999,6 +999,10 @@ const chatContexts: ChatContextApi = {
         disconnect();
         return;
       }
+      if (responseSubscriptions.get(subscriberId) !== subscription) {
+        ipcRenderer.send(chatContextIpcChannels.unsubscribeResponseEvents, { subscriberId });
+        return;
+      }
       return ipcRenderer.invoke(chatContextIpcChannels.replayResponseEvents, {
         responseExecutionId,
         afterSequence

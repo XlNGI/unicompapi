@@ -182,7 +182,8 @@ test('document production exposes readable body content without rendering the ra
   assert.match(page, /item\.documentResult\?\.validatedContent \?\? item\.content/);
   assert.match(page, /bodyStreaming=\{item\.state === 'streaming'/);
   assert.match(progress, /aria-label="生成正文"/);
-  assert.match(progress, /projectDocumentBody\(bodyContent \?\? ''\)/);
+  assert.match(progress, /const liveBodyContent = streamedBody \?\? bodyContent/);
+  assert.match(progress, /projectDocumentBody\(liveBodyContent \?\? ''\)/);
   assert.match(progress, /<StreamingMarkdown content=\{body\} streaming allowImages=\{false\} \/>/);
   assert.match(progress, /<MarkdownMessage content=\{body\} allowImages=\{false\} \/>/);
   assert.match(progress, /<\/details>\s*\) : summaryContent\}[\s\S]*?\{bodyPreview\}/);

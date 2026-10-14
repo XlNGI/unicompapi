@@ -25,6 +25,7 @@ let abortCount = 0;
 let transportMode = 'normal';
 let toolCallCount = 0;
 let toolCallId;
+let streamGates;
 const hostDiagnostics = [];
 
 function sseResponse(model, text) {
@@ -52,10 +53,35 @@ function sseToolCallResponse(model) {
     stream: (async function* () { yield Buffer.from(body); })() };
 }
 
+function sseStreamResumeResponse(model) {
+  if (!streamGates) throw new Error('Stream resume gates are not initialized');
+  const packet = (content, finishReason = null) => `data: ${JSON.stringify({
+    id: 'agent-mock-stream-resume', object: 'chat.completion.chunk', created: 1, model,
+    choices: [{ index: 0, delta: content ? { content } : {}, finish_reason: finishReason }]
+  })}\n\n`;
+  return { status: 200, headers: { 'content-type': 'text/event-stream' }, stream: (async function* () {
+    yield Buffer.from(packet('第一段到达。'));
+    await streamGates.first;
+    yield Buffer.from(packet('离页期间继续。'));
+    await streamGates.final;
+    yield Buffer.from(packet('返回后更新。', 'stop'));
+    yield Buffer.from('data: [DONE]\n\n');
+  })() };
+}
+
+function createStreamGates() {
+  let releaseFirst;
+  let releaseFinal;
+  const first = new Promise(resolve => { releaseFirst = resolve; });
+  const final = new Promise(resolve => { releaseFinal = resolve; });
+  return { releaseFirst, releaseFinal, first, final };
+}
+
 const transport = {
   send: async ({ body, signal }) => {
     requestCount += 1;
     const payload = JSON.parse(Buffer.from(body).toString('utf8'));
+    if (transportMode === 'stream-resume') return sseStreamResumeResponse(payload.model);
     if (transportMode === 'cancel') {
       await new Promise((resolve, reject) => {
         const onAbort = () => { abortCount += 1; reject(Object.assign(new Error('synthetic abort'), { name: 'AbortError' })); };
@@ -133,8 +159,10 @@ async function run() {
   if (!candidateResult?.ok || !candidateResult.value?.length) throw new Error(`No synthetic candidate: ${JSON.stringify(candidateResult)}`);
   const candidateId = candidateResult.value[0].candidateId;
   if (process.argv.includes('--ui-navigation')) {
+    streamGates = createStreamGates();
     const result = await require('./lib/verify-document-navigation.cjs')({ browserWindow, lifecycle,
-      session: sessions.get(), candidateId, setTransportMode: mode => { transportMode = mode; } });
+      session: sessions.get(), candidateId, setTransportMode: mode => { transportMode = mode; },
+      releaseStream: part => part === 'first' ? streamGates.releaseFirst() : streamGates.releaseFinal() });
     process.stdout.write(`${JSON.stringify(result)}\n`);
     return;
   }

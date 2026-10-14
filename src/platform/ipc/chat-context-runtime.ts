@@ -1105,10 +1105,11 @@ export function createChatContextRuntime(
     turnCoordinatorForContinuation = turnCoordinator;
     if (turnCoordinator) {
       projectThreadStreamEvent = async event => {
+        if (!['stream_completed', 'stream_failed', 'stream_cancelled', 'stream_interrupted'].includes(event.type)) return;
         const execution = await responseLifecycle.readModel(event.responseExecutionId);
-        const conversation = await modelHistory!.readConversation({ threadId: toThreadId(execution.conversationId) });
+        const current = await modelHistory!.readConversation({ threadId: toThreadId(execution.conversationId) });
         const assistant = threadResponseMessage(execution, event,
-          conversation.messages.find(message => message.id === execution.assistantMessageId));
+          current.messages.find(message => message.id === execution.assistantMessageId));
         const status: ItemStatus = execution.state === 'completed' ? 'completed'
           : execution.state === 'cancelled' ? 'cancelled'
             : execution.state === 'failed' ? 'failed'

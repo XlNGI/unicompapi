@@ -1,8 +1,9 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { ReactElement, ReactNode } from 'react';
 import type * as ReactModule from 'react';
-import type { ThreadItemsPageDto, ThreadSummaryPageDto } from '../../src/shared/chat-context-ipc';
+import type { ConversationResponseStreamEventDto, ThreadItemsPageDto, ThreadSummaryPageDto } from '../../src/shared/chat-context-ipc';
 import type { ProductionTraceEventDto } from '../../src/shared/conversation-production-ipc';
+import { getThreadItemStreamContent } from '../../src/pages/chat/threadItemStreamStore';
 
 // A small hook runner lets us exercise the real JSX event handlers without a DOM.
 // State is allocated by React's hook ordering, never by component-specific indexes.
@@ -47,7 +48,12 @@ function find(node: ReactNode, predicate: (element: Element) => boolean): Elemen
   if (Array.isArray(node)) return node.map((child) => find(child, predicate)).find(Boolean);
   if (!node || typeof node !== 'object' || !('props' in node)) return undefined;
   const element = node as Element;
-  return predicate(element) ? element : find(element.props.children as ReactNode, predicate);
+  if (predicate(element)) return element;
+  if (typeof element.type === 'function' && (element.type as { name?: string }).name === 'ChatMessageList') {
+    const props = element.props as { itemIds?: readonly string[]; renderItem?: (id: string, style: Record<string, never>) => ReactNode };
+    if (props.itemIds && props.renderItem) return find(props.itemIds.map(id => props.renderItem!(id, {})), predicate);
+  }
+  return find(element.props.children as ReactNode, predicate);
 }
 
 function deferred<T>() {
@@ -154,6 +160,8 @@ describe('chat composer event behavior', () => {
       addEventListener: vi.fn(), removeEventListener: vi.fn(), confirm: () => true,
       requestAnimationFrame: (callback: () => void) => { callback(); return 1; },
       cancelAnimationFrame: vi.fn(),
+      setTimeout: globalThis.setTimeout.bind(globalThis),
+      clearTimeout: globalThis.clearTimeout.bind(globalThis),
       unicomp: {
         chatContexts: {
           listConversations: vi.fn(async () => ({ ok: true, value: initialConversationId ? [conversation] : [] })),
@@ -337,15 +345,22 @@ describe('chat composer event behavior', () => {
     else expect(startAgentResponse).not.toHaveBeenCalled();
   });
 
-  it('restores an active response subscription and stop control after a Thread page remount', async () => {
+  it('restores the latest snapshot and resumes an active response after a five-second page remount', async () => {
     initialConversationId = conversation.conversationId;
     const summary = { ...conversation, threadId: conversation.conversationId, messageCount: 0, turnCount: 1,
       hasActiveDocumentGeneration: false };
-    const execution = { responseExecutionId: 'restored-execution', conversationId: conversation.conversationId,
+    let execution = { responseExecutionId: 'restored-execution', conversationId: conversation.conversationId,
       userMessageId: 'source-1', assistantMessageId: 'assistant-1', productFeature: 'text_chat',
-      state: 'streaming', streamSequence: 2, reasoningContent: '', content: '',
+      state: 'streaming', streamSequence: 2, reasoningContent: '', content: 'restored snapshot',
       createdAt: conversation.updatedAt, updatedAt: conversation.updatedAt };
-    const subscribeResponseEvents = vi.fn(() => vi.fn());
+    const callbacks: ((event: ConversationResponseStreamEventDto) => void)[] = [];
+    const unsubscribers: ReturnType<typeof vi.fn>[] = [];
+    const subscribeResponseEvents = vi.fn((_id: string, _sequence: number, callback: (event: ConversationResponseStreamEventDto) => void) => {
+      callbacks.push(callback);
+      const unsubscribe = vi.fn();
+      unsubscribers.push(unsubscribe);
+      return unsubscribe;
+    });
     const cancelResponseExecution = vi.fn(async () => ({ ok: true, value: { ...execution, state: 'cancelled' } }));
     Object.assign(window.unicomp!.chatContexts!, { subscribeResponseEvents, cancelResponseExecution,
       listThreadSummaries: vi.fn(async () => ({ ok: true, value: { items: [summary], hasMore: false, readAtSequence: 0 } })),
@@ -356,13 +371,42 @@ describe('chat composer event behavior', () => {
       getResponseExecution: vi.fn(async () => ({ ok: true, value: execution })) });
     await settle(32);
     expect(subscribeResponseEvents).toHaveBeenCalledWith(execution.responseExecutionId, 2, expect.any(Function));
+    expect(getThreadItemStreamContent('message:assistant-1')).toBe('restored snapshot');
+    const event = (sequence: number, contentDelta: string): ConversationResponseStreamEventDto => ({
+      schemaVersion: 1, responseExecutionId: execution.responseExecutionId,
+      conversationId: conversation.conversationId, assistantMessageId: 'assistant-1',
+      sequence, type: 'content_delta', contentDelta, occurredAt: conversation.updatedAt
+    });
+    const lastCallback = callbacks.at(-1)!;
+    lastCallback(event(3, ' + next'));
+    lastCallback(event(3, ' + next'));
+    await new Promise(resolve => setTimeout(resolve, 70));
+    expect(getThreadItemStreamContent('message:assistant-1')).toBe('restored snapshot + next');
+    execution = { ...execution, streamSequence: 3, content: 'restored snapshot + next' };
     unmount();
+    expect(unsubscribers.every(unsubscribe => unsubscribe.mock.calls.length === 1)).toBe(true);
+    await new Promise(resolve => setTimeout(resolve, 5000));
+    execution = { ...execution, streamSequence: 4, content: 'restored snapshot + next while away' };
+    callbacks[0]!(event(4, ' while away'));
     await settle(32);
-    expect(subscribeResponseEvents).toHaveBeenCalledTimes(2);
+    expect(subscribeResponseEvents).toHaveBeenLastCalledWith(execution.responseExecutionId, 4, expect.any(Function));
+    expect(getThreadItemStreamContent('message:assistant-1')).toBe('restored snapshot + next while away');
+    callbacks.at(-1)!(event(5, ' after return'));
+    await new Promise(resolve => setTimeout(resolve, 70));
+    expect(getThreadItemStreamContent('message:assistant-1')).toBe('restored snapshot + next while away after return');
+    execution = { ...execution, streamSequence: 5, content: 'restored snapshot + next while away after return' };
+    unmount();
+    expect(unsubscribers.every(unsubscribe => unsubscribe.mock.calls.length === 1)).toBe(true);
+    await settle(32);
+    expect(subscribeResponseEvents).toHaveBeenLastCalledWith(execution.responseExecutionId, 5, expect.any(Function));
+    expect(getThreadItemStreamContent('message:assistant-1')).toBe('restored snapshot + next while away after return');
     (element('停止生成').props.onClick as () => void)();
     await settle(20);
     expect(cancelResponseExecution).toHaveBeenCalledWith(execution.responseExecutionId);
-  });
+    expect(subscribeResponseEvents).toHaveBeenCalledTimes(3);
+    unmount();
+    expect(unsubscribers.every(unsubscribe => unsubscribe.mock.calls.length === 1)).toBe(true);
+  }, 12000);
 
   it.each([true, false])('keeps a persisted document draft preview after navigation without hiding ordinary JSON (document: %s)', async document => {
     initialConversationId = conversation.conversationId;

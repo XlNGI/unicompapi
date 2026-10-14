@@ -8,7 +8,7 @@ const { registerConversationProductionIpcHandlers } = require('../../dist-electr
 
 // Isolated renderer uses production React, preload, IPC, Tool runtime and local
 // Office generation. Only Provider transport and a bounded render wait are fake.
-module.exports = async function verifyDocumentNavigation({ browserWindow, lifecycle, session, candidateId, setTransportMode }) {
+module.exports = async function verifyDocumentNavigation({ browserWindow, lifecycle, session, candidateId, setTransportMode, releaseStream }) {
   const vite = await require('vite').createServer({ server: { host: '127.0.0.1', port: 0, strictPort: false } });
   const js = source => browserWindow.webContents.executeJavaScript(source);
   const delay = ms => new Promise(resolve => setTimeout(resolve, ms));
@@ -44,6 +44,44 @@ module.exports = async function verifyDocumentNavigation({ browserWindow, lifecy
     await browserWindow.setSize(1280, 820);
     await browserWindow.loadURL(url.href);
     await wait(() => js('Boolean(document.querySelector("textarea[aria-label=对话输入]:not(:disabled)"))'), 'composer ready');
+    setTransportMode('stream-resume');
+    await js(`(()=>{const input=document.querySelector('textarea[aria-label="对话输入"]');
+      Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype,'value').set.call(input,'请复述 STREAM_RESUME_FIXTURE');
+      input.dispatchEvent(new Event('input',{bubbles:true}));})()`);
+    await wait(() => js('Boolean(document.querySelector("[aria-label=发送消息]:not(:disabled)"))'), 'stream fixture draft ready');
+    await js('document.querySelector("[aria-label=发送消息]").click()');
+    await wait(() => js('document.querySelector(".uc-chat-page__messages")?.innerText.includes("第一段到达")'), 'first stream chunk rendered');
+    let streamExecutionId;
+    await wait(async () => {
+      streamExecutionId = await js(`(async()=>{const page=await window.unicomp.chatContexts.listThreadSummaries({includeArchived:true,includeDeleted:false,limit:20});
+        for(const thread of page.value?.items??[]){const id=thread.threadId??thread.conversationId;if(typeof id!=="string")continue;
+          const detail=await window.unicomp.chatContexts.getThread(id);if(!detail.ok)continue;
+          const run=detail.value.parentRuns?.find(item=>item.responseExecutionId&&["running","executing_tool"].includes(item.state));
+          if(run)return run.responseExecutionId;}return undefined;})()`);
+      return Boolean(streamExecutionId);
+    }, 'stream execution snapshot available');
+    await js('document.getElementById("fixture-leave").click()');
+    await wait(() => js('!document.querySelector(".uc-chat-page")'), 'stream page unmounted');
+    await delay(5000);
+    releaseStream('first');
+    await wait(async () => {
+      const result = await js(`window.unicomp.chatContexts.getResponseExecution(${JSON.stringify(streamExecutionId)})`);
+      return result.ok && result.value.state === 'streaming' && result.value.content.includes('离页期间继续');
+    }, 'runtime snapshot advanced while page was absent');
+    await js('document.getElementById("fixture-return").click()');
+    await wait(() => js('document.querySelector(".uc-chat-page__messages")?.innerText.includes("第一段到达") && document.querySelector(".uc-chat-page__messages")?.innerText.includes("离页期间继续")'), 'latest stream snapshot restored');
+    releaseStream('final');
+    await wait(async () => {
+      const result = await js(`window.unicomp.chatContexts.getResponseExecution(${JSON.stringify(streamExecutionId)})`);
+      return result.ok && result.value.state === 'completed' && result.value.content.includes('返回后更新');
+    }, 'stream completed after return');
+    await wait(() => js('document.querySelector(".uc-chat-page__messages")?.innerText.includes("返回后更新")'), 'final stream chunk rendered');
+    const streamResume = await js(`(()=>{const text=document.querySelector('.uc-chat-page__messages')?.innerText??'';return {
+      firstCount:(text.match(/第一段到达/g)??[]).length,awayCount:(text.match(/离页期间继续/g)??[]).length,
+      finalCount:(text.match(/返回后更新/g)??[]).length};})()`);
+    if (streamResume.firstCount !== 1 || streamResume.awayCount !== 1 || streamResume.finalCount !== 1) {
+      throw new Error('Resumed stream lost or duplicated content: ' + JSON.stringify(streamResume));
+    }
     setTransportMode('tool-call');
     await js(`(()=>{const input=document.querySelector('textarea[aria-label="对话输入"]');
       Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype,'value').set.call(input,'帮我生成一个测试ppt');
@@ -51,14 +89,15 @@ module.exports = async function verifyDocumentNavigation({ browserWindow, lifecy
     await wait(() => js('Boolean(document.querySelector("[aria-label=发送消息]:not(:disabled)"))'), 'draft ready');
     await js('document.querySelector("[aria-label=发送消息]").click()');
     await wait(() => generationCount === 1, 'generation tool started');
-    const before = await js(`(async()=>{const list=await window.unicomp.chatContexts.listThreadSummaries({includeArchived:true,includeDeleted:false,limit:100});
-      const thread=list.value.items.find(item=>item.title.includes('帮我生成'));return window.unicomp.chatContexts.getThread(thread.threadId);})()`);
+    const before = await js(`(async()=>{const execution=await window.unicomp.chatContexts.getResponseExecution(${JSON.stringify(streamExecutionId)});
+      return window.unicomp.chatContexts.getThread(execution.value.conversationId);})()`);
     const active = before.value.parentRuns.find(item => item.state === 'executing_tool');
     if (!active) throw new Error('Expected live document task');
     const visits = [];
     for (let visit = 0; visit < 3; visit += 1) {
       await js('document.getElementById("fixture-leave").click()');
       await wait(() => js('!document.querySelector(".uc-chat-page")'), 'page unmounted');
+      if (visit === 0) await delay(5000);
       await js('document.getElementById("fixture-return").click()');
       await wait(() => js('Boolean(document.querySelector("[aria-label=停止生成]"))'), 'stop control restored');
       const execution = await js(`window.unicomp.chatContexts.getResponseExecution(${JSON.stringify(active.responseExecutionId)})`);
@@ -118,11 +157,13 @@ module.exports = async function verifyDocumentNavigation({ browserWindow, lifecy
     if (!layout.readable || layout.rawJsonVisible || !layout.truthfulStatus || layout.lastBottom > layout.composerTop || layout.gaps.some(gap => gap < 23)) {
       throw new Error('Document layout regression: ' + JSON.stringify(layout));
     }
-    const report = { status: 'passed', externalRequests: 0, generationCount, generatedWorkCount, completedReceiptRestored: true, visits, layout };
+    const report = { status: 'passed', externalRequests: 0, streamResume, generationCount, generatedWorkCount, completedReceiptRestored: true, visits, layout };
     await writeFile(path.join(outputDirectory, 'electron-navigation.json'), JSON.stringify(report, null, 2) + '\n');
     return report;
   } finally {
     release();
+    releaseStream('first');
+    releaseStream('final');
     PlatformDocumentGenerationExecutor.prototype.run = run;
     channels.forEach(channel => ipcMain.removeHandler(channel));
     await production.clearSubscriptions();

@@ -1,5 +1,5 @@
 import { Children, cloneElement, isValidElement, useEffect, useMemo, useRef, useState } from 'react';
-import type { ClipboardEvent, FormEvent, ReactNode, RefObject } from 'react';
+import type { ClipboardEvent, CSSProperties, FormEvent, ReactElement, ReactNode, RefObject } from 'react';
 import {
   LuArchive,
   LuArchiveRestore,
@@ -28,6 +28,7 @@ import { ActionMenu } from '../../components/ActionMenu';
 import { Button } from '../../components/Button';
 import { Card } from '../../components/Card';
 import { EmptyState } from '../../components/EmptyState';
+import { StreamingItem } from './StreamingItem';
 import { StreamingMarkdown } from './StreamingMarkdown';
 import { ChatAttachment } from './ChatAttachment';
 import { DocumentProgress } from './DocumentProgress';
@@ -85,7 +86,8 @@ import {
   type OfficeRequestAction
 } from '../../application';
 import { documentPresentationPreferences } from '../../application/document-presentation-preferences';
-import { createThreadItemStore, mergeThreadItemStore, threadItemStoreItems, type ThreadItemStore } from './threadItemStore';
+import { createThreadItemStore, mergeThreadItemStore, threadItemKey, threadItemStoreItems, type ThreadItemStore } from './threadItemStore';
+import { appendThreadItemStreamContent, clearThreadItemStreamContent, getThreadItemStreamContent, setThreadItemStreamSnapshot } from './threadItemStreamStore';
 import { createThreadSummaryStore, replaceThreadSummaryStore, threadSummaryStoreItems, type ThreadSummaryStore } from './threadSummaryStore';
 import { VirtualMessageList } from './VirtualMessageList';
 import '../../styles/pages.css';
@@ -560,15 +562,15 @@ function messagesFromThreadItems(
   });
 }
 
-function ChatMessageList({ virtualized, itemIds, containerRef, children }: {
+function ChatMessageList({ virtualized, itemIds, containerRef, renderItem }: {
   readonly virtualized: boolean;
   readonly itemIds: readonly string[];
   readonly containerRef: RefObject<HTMLDivElement>;
-  readonly children: ReactNode;
+  readonly renderItem: (itemId: string, style: CSSProperties) => ReactElement | null;
 }) {
   return virtualized
-    ? <VirtualMessageList itemIds={itemIds} containerRef={containerRef}>{children}</VirtualMessageList>
-    : <ol className="uc-chat-page__message-list">{children}</ol>;
+    ? <VirtualMessageList itemIds={itemIds} containerRef={containerRef} renderItem={renderItem} />
+    : <ol className="uc-chat-page__message-list">{itemIds.map(itemId => renderItem(itemId, {}))}</ol>;
 }
 
 function retainProjectOrder(
@@ -1100,20 +1102,9 @@ export function ChatPage({
     }
     return ids;
   }, [selected?.messages, previousUserByMessageId]);
-  const displayMessages = useMemo(() => {
-    return productionProjection.messages.map((message) => {
-      if (!responseExecution || message.messageId !== responseExecution.assistantMessageId) {
-        return message;
-      }
-      const state = mapExecutionStateToMessageState(responseExecution.state);
-      return {
-        ...message,
-        state,
-        reasoningContent: responseExecution.reasoningContent || message.reasoningContent,
-        content: responseExecution.content || message.content
-      };
-    });
-  }, [productionProjection.messages, responseExecution]);
+  const displayMessages = productionProjection.messages;
+  const displayItemIds = useMemo(() => displayMessages.map(item => item.messageId), [displayMessages]);
+  const displayMessagesById = useMemo(() => new Map(displayMessages.map(item => [item.messageId, item])), [displayMessages]);
   const lastDisplayMessage = displayMessages[displayMessages.length - 1];
   const duplicateIncludedContexts = useMemo(() => {
     const included = registeredContexts.filter((context) =>
@@ -1707,16 +1698,18 @@ export function ChatPage({
     });
     let active = true;
     let terminalReceived = false;
-    let animationFrame: number | undefined;
+    let batchTimer: number | undefined;
     let unsubscribe: (() => void) | undefined;
     let queuedEvents: ConversationResponseStreamEventDto[] = [];
     let latestSequence = execution.streamSequence;
     const executionId = execution.responseExecutionId;
     const conversationId = execution.conversationId;
     const userMessageId = execution.userMessageId;
+    const assistantItemId = threadItemKey({ itemId: { namespace: 'message', value: execution.assistantMessageId } });
+    setThreadItemStreamSnapshot(assistantItemId, execution.content);
 
     const flushEvents = () => {
-      animationFrame = undefined;
+      batchTimer = undefined;
       if (!active || queuedEvents.length === 0) return;
       const events = queuedEvents;
       queuedEvents = [];
@@ -1726,11 +1719,14 @@ export function ChatPage({
       });
       const contentDelta = events.map((event) => event.contentDelta ?? '').join('');
       const reasoningDelta = events.map((event) => event.reasoningDelta ?? '').join('');
+      appendThreadItemStreamContent(assistantItemId, contentDelta);
+      const controlEvents = events.filter(event => event.type !== 'content_delta' && event.type !== 'reasoning_delta');
+      if (controlEvents.length === 0) return;
       setResponseExecution((current) => {
         if (!current || current.responseExecutionId !== executionId) return current;
         let state = current.state;
         let taskProgress = current.taskProgress;
-        for (const event of events) {
+        for (const event of controlEvents) {
           state = event.type === 'stream_completed' ? 'completed'
             : event.type === 'stream_cancelled' ? 'cancelled'
               : event.type === 'stream_failed' ? 'failed'
@@ -1746,8 +1742,8 @@ export function ChatPage({
           state,
           streamSequence: lastEvent.sequence,
           taskProgress,
-          reasoningContent: `${current.reasoningContent}${reasoningDelta}`,
-          content: `${current.content}${contentDelta}`,
+          reasoningContent: reasoningDelta ? `${current.reasoningContent}${reasoningDelta}` : current.reasoningContent,
+          content: getThreadItemStreamContent(assistantItemId) ?? current.content,
           updatedAt: lastEvent.occurredAt
         };
       });
@@ -1766,7 +1762,8 @@ export function ChatPage({
         type: event.type,
         safeCode: event.safeCode
       });
-      if (animationFrame !== undefined) window.cancelAnimationFrame(animationFrame);
+      if (batchTimer !== undefined) window.clearTimeout(batchTimer);
+      batchTimer = undefined;
       flushEvents();
       unsubscribe?.();
       cancelRequestedRef.current = false;
@@ -1774,6 +1771,7 @@ export function ChatPage({
       void chat.getConversation(conversationId).then((result) => {
         if (!active || !result.ok) return;
         replaceConversation(result.value);
+        clearThreadItemStreamContent(assistantItemId);
         const assistant = result.value.messages.find(
           (message) => message.messageId === event.assistantMessageId
         );
@@ -1806,8 +1804,11 @@ export function ChatPage({
         handleTerminalEvent(event);
         return;
       }
-      if (animationFrame === undefined) {
-        animationFrame = window.requestAnimationFrame(flushEvents);
+      if (batchTimer === undefined) {
+        batchTimer = window.setTimeout(() => {
+          batchTimer = undefined;
+          flushEvents();
+        }, 60);
       }
     };
 
@@ -1819,7 +1820,7 @@ export function ChatPage({
         hadUnsubscribe: Boolean(unsubscribe)
       });
       active = false;
-      if (animationFrame !== undefined) window.cancelAnimationFrame(animationFrame);
+      if (batchTimer !== undefined) window.clearTimeout(batchTimer);
       unsubscribe?.();
     };
   }, [chat, responseExecution?.responseExecutionId]);
@@ -4473,10 +4474,14 @@ export function ChatPage({
               ) : null}
               <ChatMessageList
                 virtualized={threadReadsEnabled}
-                itemIds={displayMessages.map(item => item.messageId)}
+                itemIds={displayItemIds}
                 containerRef={messagesRef}
-              >
-                {displayMessages.map((item) => {
+                renderItem={(itemId, style) => {
+                  const persistedItem = displayMessagesById.get(itemId);
+                  if (!persistedItem) return null;
+                  const item = responseExecution?.assistantMessageId === persistedItem.messageId
+                    ? { ...persistedItem, state: mapExecutionStateToMessageState(responseExecution.state) }
+                    : persistedItem;
                   const isCurrentAssistant = item.role === 'assistant' &&
                     item.messageId === responseExecution?.assistantMessageId;
                   const sourceMessage = previousUserByMessageId.get(item.messageId);
@@ -4546,7 +4551,7 @@ export function ChatPage({
                             ? '回复已停止'
                             : item.content ? '回复已中断' : '回复未完成';
                   return (
-                    <li className={`uc-chat-page__message-item uc-chat-page__message-item--${item.role}`} key={item.messageId}>
+                    <li className={`uc-chat-page__message-item uc-chat-page__message-item--${item.role}`} key={item.messageId} style={style}>
                       {isCurrentAssistant && !showProductionProgress ? (
                         <p className="uc-chat-page__response-status" aria-label="回复状态" role="status">
                           {responseLabel}
@@ -4580,6 +4585,9 @@ export function ChatPage({
                               bodyContent={(isDocumentDraftMessage || hideDocumentDraftContent)
                                 ? item.documentResult?.validatedContent ?? item.content
                                 : undefined}
+                              streamItemId={item.state === 'streaming'
+                                ? threadItemKey({ itemId: { namespace: 'message', value: item.messageId } })
+                                : undefined}
                               bodyStreaming={item.state === 'streaming' &&
                                 (isDocumentDraftMessage || hideDocumentDraftContent)}
                               terminalDetail={item.documentResult ? '文档已生成并保存。'
@@ -4602,10 +4610,18 @@ export function ChatPage({
                             />
                           ) : null}
                           {!isDocumentDraftMessage && !hideDocumentDraftContent && (item.content || !showProductionProgress) ? (
-                            <StreamingMarkdown
-                              streaming={item.state === 'streaming' && Boolean(item.content)}
-                              content={item.content || (item.state === 'failed' ? '' : item.state === 'streaming' || item.state === 'pending' ? '正在接收…' : '尚无内容')}
-                            />
+                            item.state === 'streaming' ? (
+                              <StreamingItem
+                                itemId={threadItemKey({ itemId: { namespace: 'message', value: item.messageId } })}
+                                streaming
+                                content={item.content || '正在接收…'}
+                              />
+                            ) : (
+                              <StreamingMarkdown
+                                streaming={false}
+                                content={item.content || (item.state === 'failed' ? '' : item.state === 'pending' ? '正在接收…' : '尚无内容')}
+                              />
+                            )
                           ) : null}
                           {item.state === 'failed' ? (
                             <p aria-label="回复失败原因">
@@ -4687,8 +4703,8 @@ export function ChatPage({
                       ) : null}
                     </li>
                   );
-                })}
-              </ChatMessageList>
+                }}
+              />
               </>
             )}
             <div className="uc-chat-page__message-item uc-chat-page__message-item--assistant" aria-label="助手任务回复">

@@ -1,5 +1,29 @@
 # UniComp 开发计划
 
+### 负责人决定：以当前功能分支内容覆盖 develop（2026-10-14）
+
+负责人在查看双向差异后明确要求“将当前分支覆盖develop”。本轮以 `feature/office-agent-item-stream` 的已提交内容及当前工作区为最终内容来源，纳入 Thread 流式渲染、页面恢复和 20 个 PPT 审计证据文件。覆盖前来源 HEAD 为 `5d90d0e`，本地及刷新后的远程 develop 均为 `f8e4a19`。采用保留双方历史的 ours 策略合并，再让 develop 快进到同一提交并正常推送；保留功能分支，不删除原提交，不使用强制推送。实际交付结果以本地和远程引用核对为准。
+
+此最新内容优先决定覆盖此前“保留 develop 的 PPT 后续修复再整合”的建议。原 develop 独有的局部视觉修订、指定页替换及其生产验收快照不带入最终文件内容；原提交仍可从合并历史追溯。当前来源中的局部视觉修订保持合并前版本，不以旧 develop 的 2026-10-14 验收证明当前已修复。下方历史维护记录只描述当时范围，不扩大本轮验收结论。
+
+验证：类型检查、全仓 lint、生产构建、平台约束审计通过；Node/UI 首轮 400/401，一条正文来源断言仍引用旧 bodyContent，按实际流式缓存回退和正文投影更新后 401/401。串行全量 Vitest 为 345 文件、3579/3581，两个失败用例仍要求每个流式片段写 Thread；保留原始失败日志，改为验证 Response 快照恢复、流式期间已提交 Item 不变、终态唯一 Item 及 Legacy 故障欠账恢复后，该文件 28/28 通过。修订只涉及旧测试合同，没有删测试或放宽时限；本轮未再次执行完整 Vitest，不将结果记为单次全量全绿。
+
+隔离真实 Electron/preload/IPC 验收通过：普通流式回复离页 5 秒后恢复，三段各显示一次；活动 Office 工具任务连续三次切页恢复停止控制，生成 1 次、Work 1 个、完成收据可恢复。Agent Mock 链路普通回复、取消边界、工具续轮、PPT/Word/Excel 物理文件登记及 Thread 收据通过，7 次本地 Mock 请求、真实 Provider 外发 0。未重新验收真实收费 Provider、macOS 实机或被覆盖的 PPT 局部视觉修订。结构化记录见 [当前分支覆盖验收](docs/evidence/develop-current-branch-overwrite-20261014.json)。后续若恢复被覆盖的 PPT 局部视觉修订，应独立迁移保留历史中的修复并重新验证。
+
+### 维护优化：PPT 视觉设计链路增量审计（2026-10-13；定向门禁通过）
+
+基于真实调用链完成 PPT Art Direction、Design IR v2、布局求解、Render Plan/Layout IR、Pptx writer 和本地 Office/PDF QA 审计。确认原 v2 的 palette、精细 typography、页面 surface treatment 和 sequence 装饰组件存在表达/执行缺口；没有伪造多模态视觉审核。增量扩展唯一 Design IR v2 的 `visualSystem`/`visualTreatment`，贯通受控 palette、字重/行距/字距和由 IR 选择的 `none/nodes/track/frame` 视觉原语；流程节点/连线以 generated shape 持久化，并新增确定性 `PresentationVisualAudit` 与可复核六页案例证据。基线/优化 PPTX 均 6 页、PPTX 几何错误 0；优化流程页 Render Plan 含 4 节点、3 连线。
+
+验证：88 项 PPT 定向 Vitest、`npm run typecheck`、`npm run lint`、`npm run build` 通过。已登记 PPT 的明确局部视觉修订接入同一生产计划、QA 和登记链路；证据和未完成边界见 [PPT 视觉设计审计](docs/current/ppt-visual-design-audit-20261013.md)。多模态视觉模型、图片裁切/遮罩仍未实施，不计入完成项。
+
+### 维护优化：Thread 流式渲染与页面恢复（2026-10-13；Windows 自动及隔离 Electron 验收通过）
+
+根因已由调用链确认：Thread-first Runtime 对每个 Response stream event 都执行 Thread model history 读取、Conversation 读取、Assistant message 投影和 Legacy Outbox drain；renderer 每批 chunk 又更新顶层 ResponseExecution，再将全量消息转换并构造 React children，虚拟列表此时才裁剪行。虚拟布局行高更新还重新计算/扫描完整历史。页面卸载会解除 renderer IPC 订阅；Runtime 仍由主进程持有，已有 ResponseExecution snapshot、`afterSequence` replay 和 preload sequence 去重，但 IPC owner 记录晚于异步注册，存在极快卸载时 unsubscribe 先于 owner 登记的竞态。
+
+修复让 Thread-first stream 的 Assistant Item/Legacy 投影只在终态执行；虚拟列表按可见 itemId 构造行，Item 正文订阅独立的约 60ms 批处理缓存，布局索引采用 Fenwick tree。页面重挂载以主进程 ResponseExecution 快照初始化，再按 sequence 订阅和 replay；renderer 退订不取消生成，迟到注册、renderer destroyed 均会释放 IPC owner。Thread Item 仍是已提交会话消息和列表身份来源；活跃生成的可恢复权威快照继续由现有 ResponseExecution 持久事件负责，未新增第二个持久事实源。运行中 Item 自身成为 Runtime 唯一权威实体仍未迁移。
+
+验证：类型检查、生产构建、全仓 ESLint、Node/UI 契约通过；消息订阅/恢复、100,000 条历史的布局和可见行构造、Office 进度正文恢复及 chat/runtime 定向 Vitest 通过。隔离 Electron 使用本地 Provider mock、外部请求 0：真实流式 UI 离页 5 秒，期间 Runtime snapshot 前进；返回后正文立即包含前两段、后续末段续收，三段各显示一次。接着同一 Electron 流程在活动 Office Agent 工具任务中再往返三次，Runtime 保持 streaming/executing_tool，stop 控件恢复，最终仅登记 1 个 Work。没有对真实 Provider 收费请求、macOS 或完整全仓 Vitest 做本轮验收。Legacy Conversation fallback/read 与非 Thread-first execution 分支仍保留；Thread-first 实时正文不再由 Legacy stream projection 驱动。
+
 ### 模型适配：官方合同目录、文本兼容层与双中转卡片（2026-10-12 至 2026-10-13；本轮自动门禁通过）
 
 负责人已要求完成后上传新增代码，并在推送确认后正常关机。本轮范围已按负责人决定调整：旧版/别名模型合同暂缓并登记，不阻塞已有来源合同与文本兼容层交付；最终门禁通过后按已给授权推送 `origin/feature/model-contract-compatibility`，确认远端引用后再正常关机。不合入 develop/main 或发布。

@@ -13,6 +13,9 @@ const failureNoticeSource = await readFile(
   'utf8'
 );
 const markdownSource = await readFile('src/components/MarkdownMessage.tsx', 'utf8');
+const chatRuntimeSource = await readFile('src/platform/ipc/chat-context-runtime.ts', 'utf8');
+const responsePreloadSource = await readFile('electron/preload.ts', 'utf8');
+const responseIpcSource = await readFile('electron/ipc/chat-context-ipc.ts', 'utf8');
 
 test('chat page uses project conversations and composer-first streaming workflow', () => {
   for (const operation of [
@@ -143,7 +146,17 @@ test('chat page uses project conversations and composer-first streaming workflow
   assert.match(source, /chat\.subscribeResponseEvents\(/);
   assert.match(source, /subscribeResponseEvents\(executionId, latestSequence, onEvent\)/);
   assert.match(source, /event\.sequence <= latestSequence/);
-  assert.match(source, /window\.requestAnimationFrame\(flushEvents\)/);
+  assert.match(source, /appendThreadItemStreamContent\(assistantItemId, contentDelta\)/);
+  assert.match(source, /displayMessagesById\.get\(itemId\)/);
+  assert.doesNotMatch(source, /displayMessages\.map\(\(item\)/);
+  assert.match(source, /const controlEvents = events\.filter\(event => event\.type !== 'content_delta' && event\.type !== 'reasoning_delta'\)/);
+  assert.match(source, /if \(controlEvents\.length === 0\) return/);
+  assert.match(source, /window\.setTimeout\(\(\) => \{[\s\S]*flushEvents\(\);[\s\S]*\}, 60\)/);
+  assert.match(chatRuntimeSource, /projectThreadStreamEvent = async event => \{\s*if \(!\['stream_completed', 'stream_failed', 'stream_cancelled', 'stream_interrupted'\]\.includes\(event\.type\)\) return;\s*const execution = await responseLifecycle\.readModel/);
+  assert.match(responsePreloadSource, /if \(responseSubscriptions\.get\(subscriberId\) !== subscription\) \{\s*ipcRenderer\.send\(chatContextIpcChannels\.unsubscribeResponseEvents, \{ subscriberId \}\);\s*return;/);
+  assert.match(responseIpcSource, /responseSubscriptionOwners\.set\(subscriberId, owner\);\s*sender\.once\('destroyed', onDestroyed\);[\s\S]*runtime\.responses\.subscribeEvents\(/);
+  assert.match(responseIpcSource, /sender\.once\('destroyed', onDestroyed\)/);
+  assert.match(responseIpcSource, /runtime\.responses\.unsubscribeEvents\(subscriberId\)/);
   assert.match(source, /const keepActiveResponse = Boolean\([\s\S]*activeConversationId === selected\?\.conversationId/);
   assert.match(source, /if \(!keepActiveResponse\) \{[\s\S]*clearResponseDraftState\(\);/);
   assert.match(markdownSource, /memo\(function MarkdownMessage/);

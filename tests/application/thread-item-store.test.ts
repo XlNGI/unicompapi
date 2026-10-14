@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import type { MessageDto, ThreadItemDto } from '../../src/shared/chat-context-ipc';
 import {
   createThreadItemStore,
@@ -6,6 +6,14 @@ import {
   threadItemKey,
   threadItemStoreItems
 } from '../../src/pages/chat/threadItemStore';
+import {
+  appendThreadItemStreamContent,
+  clearThreadItemStreamContent,
+  getThreadItemStreamContent,
+  setThreadItemStreamSnapshot,
+  subscribeThreadItemStream
+} from '../../src/pages/chat/threadItemStreamStore';
+import { VirtualMessageLayoutIndex } from '../../src/pages/chat/VirtualMessageList';
 
 function item(sequence: number, content = `message-${sequence}`): ThreadItemDto {
   const message: MessageDto = {
@@ -33,6 +41,47 @@ function item(sequence: number, content = `message-${sequence}`): ThreadItemDto 
 }
 
 describe('Thread Item renderer store', () => {
+  it('indexes large history offsets and height updates logarithmically', () => {
+    const heights = Array.from({ length: 100_000 }, () => 112);
+    const layout = new VirtualMessageLayoutIndex(heights, 24);
+    expect(layout.offsetOf(99_999)).toBe(99_999 * 136);
+    expect(layout.itemAt(99_999 * 136 + 12)).toBe(99_999);
+    expect(layout.update(50_000, 180)).toBe(true);
+    expect(layout.offsetOf(99_999)).toBe(99_999 * 136 + 68);
+    expect(layout.totalHeight).toBe(100_000 * 112 + 99_999 * 24 + 68);
+  });
+
+  it('notifies only subscribers for the changed Item and releases subscriptions', () => {
+    const first = vi.fn();
+    const second = vi.fn();
+    const unsubscribe = subscribeThreadItemStream('message:first', first);
+    const unsubscribeSecond = subscribeThreadItemStream('message:second', second);
+
+    setThreadItemStreamSnapshot('message:first', 'snapshot');
+    appendThreadItemStreamContent('message:first', ' delta');
+
+    expect(getThreadItemStreamContent('message:first')).toBe('snapshot delta');
+    expect(first).toHaveBeenCalledTimes(2);
+    expect(second).not.toHaveBeenCalled();
+    unsubscribe();
+    clearThreadItemStreamContent('message:first');
+    expect(first).toHaveBeenCalledTimes(2);
+    unsubscribeSecond();
+  });
+
+  it('restores a complete snapshot before accepting resumed deltas', () => {
+    setThreadItemStreamSnapshot('message:resume', 'latest before remount');
+    const changed = vi.fn();
+    const unsubscribe = subscribeThreadItemStream('message:resume', changed);
+    expect(getThreadItemStreamContent('message:resume')).toBe('latest before remount');
+
+    appendThreadItemStreamContent('message:resume', ' + next');
+    expect(getThreadItemStreamContent('message:resume')).toBe('latest before remount + next');
+    expect(changed).toHaveBeenCalledOnce();
+    unsubscribe();
+    clearThreadItemStreamContent('message:resume');
+  });
+
   it('keeps identity keyed state and stable sequence order across page merges', () => {
     const first = item(2);
     const store = createThreadItemStore([first, item(3)], {

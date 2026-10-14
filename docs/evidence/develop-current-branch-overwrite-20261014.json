@@ -1,0 +1,91 @@
+{
+  "schemaVersion": 1,
+  "date": "2026-10-14",
+  "userDecision": "将当前分支覆盖develop",
+  "sourceBranch": "feature/office-agent-item-stream",
+  "sourceHeadBeforeWorktreeCommit": "5d90d0e2ff4dd9d16a6030eb31322738791d44ad",
+  "developBeforeOverwrite": "f8e4a19bda712e29a24a2947979953838549c69c",
+  "operation": {
+    "strategy": "history-preserving ours merge followed by develop fast-forward",
+    "contentSource": "current source branch including the existing worktree and corrected test contracts",
+    "preserveFeatureBranch": true,
+    "preserveBothCommitHistories": true,
+    "forcePush": false,
+    "deliveryVerification": "local and remote refs and source/merge tree equality"
+  },
+  "checks": {
+    "typecheck": "passed",
+    "eslint": "passed",
+    "productionBuild": "passed",
+    "platformAudit": "passed",
+    "nodeUiInitial": { "passed": 400, "failed": 1, "skipped": 0 },
+    "nodeUiFinal": { "passed": 401, "failed": 0, "skipped": 0 },
+    "vitestInitial": {
+      "mode": "serial",
+      "files": 345,
+      "passedFiles": 344,
+      "failedFiles": 1,
+      "passed": 3579,
+      "failed": 2,
+      "skipped": 0
+    },
+    "vitestChangedFileFinal": {
+      "file": "tests/platform/r04-r05-production-continuation.test.ts",
+      "passed": 28,
+      "failed": 0,
+      "skipped": 0
+    },
+    "testContractResolution": {
+      "nodeUi": "Document body projection consumes the live Item stream with the existing bodyContent fallback.",
+      "vitest": "Live response content is recoverable from ResponseExecution; committed Thread Items remain unchanged during streaming and receive the unique terminal result, including recoverable Legacy projection debt.",
+      "businessSourceChangedForResolution": false,
+      "testsRemoved": false,
+      "timeoutsIncreased": false,
+      "fullVitestRerunAfterTestOnlyCorrections": false
+    },
+    "electronNavigation": {
+      "status": "passed",
+      "externalRequests": 0,
+      "streamResume": { "firstCount": 1, "awayCount": 1, "finalCount": 1 },
+      "officeNavigationVisits": 3,
+      "stopControlRestoredEveryVisit": true,
+      "generationCount": 1,
+      "generatedWorkCount": 1,
+      "completedReceiptRestored": true,
+      "rawOutlineVisible": false
+    },
+    "electronAgentMock": {
+      "status": "passed",
+      "localMockRequests": 7,
+      "externalRequests": 0,
+      "normalResponseAndCancelBoundary": "passed",
+      "toolRoundtrip": "passed",
+      "pptArtifactRegistered": true,
+      "pptGeneratedWorkCount": 1,
+      "wordPhysicalFileAndThreadReceipt": "passed",
+      "excelPhysicalFileAndThreadReceipt": "passed"
+    }
+  },
+  "localLogs": {
+    "directory": "outputs/develop-overwrite-20261014",
+    "initialFailuresPreserved": ["node-ui.log", "vitest.log"],
+    "finalVerification": [
+      "typecheck-final.log",
+      "lint-final.log",
+      "build.log",
+      "platform-audit.log",
+      "node-ui-final.log",
+      "vitest-continuation-final.log",
+      "electron-navigation.log",
+      "electron-agent-mock.log"
+    ]
+  },
+  "boundaries": {
+    "paidProviderRequests": 0,
+    "unknownResultRetries": 0,
+    "macosHardware": "not_run",
+    "oldDevelopScopedPptVisualRevisionFix": "excluded by explicit current-content override",
+    "oldDevelopPptIntegrationValidationAppliesToFinalContent": false,
+    "fullVitestSinglePassGreen": false
+  }
+}

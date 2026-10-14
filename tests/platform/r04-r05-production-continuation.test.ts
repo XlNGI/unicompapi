@@ -185,7 +185,7 @@ async function waitForExecution(host: ChatContextRuntime, id: string) {
 }
 
 describe('R04/R05 production Host continuation boundary', () => {
-  it.each([false, true])('commits current streaming content to Thread before a stale or failed Legacy projection (failure: %s)', async failLegacy => {
+  it.each([false, true])('restores live response content and commits Thread only at completion despite a stale or failed Legacy projection (failure: %s)', async failLegacy => {
     let release!: () => void;
     const gate = new Promise<void>(resolve => { release = resolve; });
     cleanups.push(async () => release());
@@ -202,10 +202,14 @@ describe('R04/R05 production Host continuation boundary', () => {
       const started = await f.runtime.responses.startAgent(await f.request('只回复一句话，介绍培训流程。', 'thread-stream-authority'));
       if (!started.ok || !('execution' in started.value)) throw new Error('Expected normal response: ' + JSON.stringify(started));
       const id = started.value.execution.responseExecutionId;
+      const committedAssistantItems = (await threads.readItems(toThreadId(f.conversation.id))).filter(item => item.type === 'assistant_message');
+      expect(committedAssistantItems).toHaveLength(1);
       try {
-        await vi.waitFor(async () => expect((await threads.readItems(toThreadId(f.conversation.id))).find(item => item.type === 'assistant_message'))
-          .toMatchObject({ status: 'streaming', content: '已接收补充信息，', legacyMessageSnapshot: { content: '已接收补充信息，', state: 'streaming' } }),
+        await vi.waitFor(async () => expect(await f.runtime.responses.getExecution({ responseExecutionId: id }))
+          .toMatchObject({ ok: true, value: { state: 'streaming', content: '已接收补充信息，' } }),
         { timeout: 5_000, interval: 25 });
+        expect((await threads.readItems(toThreadId(f.conversation.id))).filter(item => item.type === 'assistant_message'))
+          .toEqual(committedAssistantItems);
       } catch (error) {
         throw new Error(String(error) + '; synthetic phases: ' + f.streamPhases.join(',') + '; events: ' +
           (await f.executions.listEvents(toConversationResponseExecutionId(id))).map(event => event.type).join(',') +
