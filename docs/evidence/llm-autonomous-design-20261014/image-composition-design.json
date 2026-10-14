@@ -1,0 +1,250 @@
+{
+  "schemaVersion": 2,
+  "globalDesign": {
+    "visualTone": "editorial",
+    "visualRhythm": "steady",
+    "density": "balanced",
+    "whitespace": "balanced",
+    "typographyDirection": "balanced",
+    "colorDirection": "restrained",
+    "visualSystem": {
+      "palette": {
+        "background": "07111F",
+        "surface": "102A43",
+        "text": "F5FAFF",
+        "muted": "B7C9DC",
+        "accent": "35D6C8",
+        "secondaryAccent": "FE5EA8"
+      }
+    }
+  },
+  "pages": [
+    {
+      "pageNumber": 1,
+      "pageRole": "hero",
+      "pageIntent": "hero page",
+      "hierarchy": {
+        "primary": [
+          "outline.title"
+        ],
+        "secondary": [],
+        "supporting": []
+      },
+      "composition": {
+        "principle": "single-focus",
+        "focalArea": "center",
+        "balance": "asymmetric-right",
+        "flow": "left-to-right"
+      },
+      "density": "sparse",
+      "whitespace": "generous",
+      "emphasis": {
+        "target": "outline.title",
+        "strength": "dominant"
+      },
+      "contentRoles": {
+        "title": [
+          "outline.title"
+        ],
+        "body": [],
+        "metric": [],
+        "evidence": [],
+        "image": [],
+        "chart": []
+      },
+      "visualStrategy": "single statement with generous whitespace",
+      "designTree": {
+        "schemaVersion": 1,
+        "root": {
+          "nodeId": "page-root",
+          "type": "column",
+          "gap": 0.02,
+          "children": [
+            {
+              "nodeId": "content-0",
+              "type": "content",
+              "contentRef": "outline.title",
+              "style": {
+                "fontSize": 40,
+                "fontWeight": 700,
+                "alignment": "center",
+                "verticalAlignment": "middle"
+              }
+            }
+          ]
+        }
+      }
+    },
+    {
+      "pageNumber": 2,
+      "pageRole": "content",
+      "pageIntent": "content page",
+      "hierarchy": {
+        "primary": [
+          "outline.sections[0].heading"
+        ],
+        "secondary": [
+          "outline.sections[0].blocks[0]"
+        ],
+        "supporting": [
+          "outline.sections[0].blocks[1]",
+          "outline.sections[0].blocks[2]"
+        ]
+      },
+      "composition": {
+        "principle": "asymmetric",
+        "focalArea": "left",
+        "balance": "asymmetric-right",
+        "flow": "left-to-right"
+      },
+      "density": "balanced",
+      "whitespace": "balanced",
+      "emphasis": {
+        "target": "outline.sections[0].heading",
+        "strength": "moderate"
+      },
+      "contentRoles": {
+        "title": [
+          "outline.sections[0].heading"
+        ],
+        "body": [
+          "outline.sections[0].blocks[0]",
+          "outline.sections[0].blocks[1]",
+          "outline.sections[0].blocks[2]"
+        ],
+        "metric": [],
+        "evidence": [],
+        "image": [],
+        "chart": []
+      },
+      "visualStrategy": "content led composition",
+      "designTree": {
+        "schemaVersion": 1,
+        "root": {
+          "nodeId": "story",
+          "type": "column",
+          "gap": 0.04,
+          "children": [
+            {
+              "nodeId": "headline",
+              "type": "content",
+              "contentRef": "outline.sections[0].heading",
+              "weight": 20,
+              "style": {
+                "fontSize": 34,
+                "fontWeight": 700
+              }
+            },
+            {
+              "nodeId": "body",
+              "type": "row",
+              "weight": 80,
+              "gap": 0.06,
+              "children": [
+                {
+                  "nodeId": "copy",
+                  "type": "column",
+                  "weight": 55,
+                  "gap": 0.04,
+                  "children": [
+                    {
+                      "nodeId": "fact-0",
+                      "type": "content",
+                      "contentRef": "outline.sections[0].blocks[0]",
+                      "style": {
+                        "fontSize": 30,
+                        "color": "35D6C8"
+                      }
+                    },
+                    {
+                      "nodeId": "fact-1",
+                      "type": "content",
+                      "contentRef": "outline.sections[0].blocks[1]",
+                      "style": {
+                        "fontSize": 24,
+                        "color": "F5FAFF"
+                      }
+                    },
+                    {
+                      "nodeId": "fact-2",
+                      "type": "content",
+                      "contentRef": "outline.sections[0].blocks[2]",
+                      "style": {
+                        "fontSize": 24,
+                        "color": "F5FAFF"
+                      }
+                    }
+                  ]
+                },
+                {
+                  "nodeId": "art",
+                  "type": "image",
+                  "weight": 45,
+                  "assetKey": "image-1",
+                  "imageFit": "cover",
+                  "imageMask": "ellipse"
+                }
+              ]
+            }
+          ]
+        }
+      }
+    },
+    {
+      "pageNumber": 3,
+      "pageRole": "closing",
+      "pageIntent": "closing page",
+      "hierarchy": {
+        "primary": [
+          "outline.title"
+        ],
+        "secondary": [],
+        "supporting": []
+      },
+      "composition": {
+        "principle": "centered",
+        "focalArea": "center",
+        "balance": "asymmetric-right",
+        "flow": "left-to-right"
+      },
+      "density": "sparse",
+      "whitespace": "generous",
+      "emphasis": {
+        "target": "outline.title",
+        "strength": "moderate"
+      },
+      "contentRoles": {
+        "title": [
+          "outline.title"
+        ],
+        "body": [],
+        "metric": [],
+        "evidence": [],
+        "image": [],
+        "chart": []
+      },
+      "visualStrategy": "closing led composition",
+      "designTree": {
+        "schemaVersion": 1,
+        "root": {
+          "nodeId": "page-root",
+          "type": "column",
+          "gap": 0.02,
+          "children": [
+            {
+              "nodeId": "content-0",
+              "type": "content",
+              "contentRef": "outline.title",
+              "style": {
+                "fontSize": 40,
+                "fontWeight": 700,
+                "alignment": "center",
+                "verticalAlignment": "middle"
+              }
+            }
+          ]
+        }
+      }
+    }
+  ]
+}

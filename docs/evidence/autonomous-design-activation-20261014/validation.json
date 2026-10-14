@@ -1,0 +1,156 @@
+{
+  "schemaVersion": 1,
+  "date": "2026-10-14",
+  "status": "implementation_verified_application_start_pending",
+  "branch": "feature/chat-progress-summary",
+  "integration": {
+    "sourceCommits": [
+      "82c2d98",
+      "01e5f4d"
+    ],
+    "actualWorkspaceCommits": [
+      "880cd3a",
+      "4beed2a"
+    ],
+    "sourceBranchRetained": true,
+    "existingPendingFiles": 23,
+    "existingOtherFilesPreserved": true
+  },
+  "policy": {
+    "modelDesignFirst": true,
+    "newPlansRequireDesignTree": true,
+    "templateFallbackAllowed": true,
+    "maxModelCorrections": 2,
+    "maxLocalTemplateFallbacks": 1,
+    "maxCandidateFiles": 4,
+    "cancellationBudgetAuthorizationContentHashAndScopeGatesPreserved": true
+  },
+  "checks": {
+    "typecheck": "passed",
+    "lint": "passed",
+    "productionBuild": "passed",
+    "platformAudit": "passed",
+    "nodeUi": {
+      "passed": 401,
+      "failed": 0,
+      "skipped": 0
+    },
+    "vitest": {
+      "files": 352,
+      "passed": 3662,
+      "failed": 0,
+      "skipped": 0
+    },
+    "totalTestsPassed": 4063,
+    "firstFullRun": {
+      "passed": 3655,
+      "failed": 7,
+      "skipped": 0,
+      "resolved": true,
+      "log": "vitest-first-run.log.gz"
+    },
+    "regression": {
+      "files": 7,
+      "passed": 70
+    }
+  },
+  "native": {
+    "autonomous": {
+      "status": "passed",
+      "designPath": "design-aware",
+      "pptWorkCount": 1,
+      "threadReceipt": true,
+      "requests": 7
+    },
+    "fallback": {
+      "status": "passed",
+      "designPath": "legacy-fallback",
+      "fallbackReason": "art_direction_invalid",
+      "pptWorkCount": 1,
+      "threadReceipt": true,
+      "requests": 7
+    },
+    "realProviderRequests": 0
+  },
+  "userApplication": {
+    "oldAppClosedNormally": true,
+    "oldAppForcedTermination": false,
+    "currentWindowStartConfirmed": false,
+    "automaticApproval": {
+      "action": "start visible application window",
+      "outcome": "rejected",
+      "statedReason": "blocked by policy",
+      "bypassed": false
+    },
+    "instrumentationFailuresRetained": true,
+    "temporaryDevServerStopped": true,
+    "nextStep": "Run pnpm dev in the original workspace terminal"
+  },
+  "scope": {
+    "templateDefinitionsChanged": false,
+    "existingPptOverwritten": false,
+    "newPaidProviderRequests": 0,
+    "pushed": false,
+    "mergedToDevelopOrMain": false,
+    "additionalFallbackChangesCommitted": false
+  },
+  "rawLogArchives": [
+    {
+      "file": "build.log.gz",
+      "originalSha256": "77826a2dcf22f940daceb7cdd8b9264ff9d5e4fc6189167cd5c37be6574b65a4"
+    },
+    {
+      "file": "electron-autonomous.stderr.log.gz",
+      "originalSha256": "1fa7fe4fe36d0d2e86e22aff8e630ad138e1833cf51d197afb4aca92e062c92c"
+    },
+    {
+      "file": "electron-autonomous.stdout.log.gz",
+      "originalSha256": "8b75fdbc020440466ce352c362cbd0027aff30badab42871fd5fadf546fcc859"
+    },
+    {
+      "file": "electron-fallback.stderr.log.gz",
+      "originalSha256": "10ff39d84aa5632d005fa9f938feff56e55eea3851705bb02477ec84eec45577"
+    },
+    {
+      "file": "electron-fallback.stdout.log.gz",
+      "originalSha256": "23a7f302327a889358c31c05f142700593689dfe01dded14dea0ba739b180a55"
+    },
+    {
+      "file": "lint.log.gz",
+      "originalSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "file": "node-ui.log.gz",
+      "originalSha256": "d340e955519962818a67b39153f93a1361fc02d89f93dc61fee38ebc51550b5a"
+    },
+    {
+      "file": "regression.log.gz",
+      "originalSha256": "b0b4a75021bf610112d50d3bec56788a37cb4c17aeb83d64bbac11fd2fb821db"
+    },
+    {
+      "file": "targeted.log.gz",
+      "originalSha256": "054609fba0f430ad7568a6a25337ee3538dd3223a8dfc2d61e598ca99e5f369e"
+    },
+    {
+      "file": "typecheck.log.gz",
+      "originalSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "file": "ui-final.log.gz",
+      "originalSha256": "8db665f9ccbe77a61f153f959e279099dbe6794ba029423723569d92ffb8b892"
+    },
+    {
+      "file": "vitest-first-run.log.gz",
+      "originalSha256": "74c1279e2c58d51b9fb689466e568f4d28c5845ff3ba4f8d87ffdd2ad27b05a2"
+    },
+    {
+      "file": "vitest-full.log.gz",
+      "originalSha256": "ff6900b8bd3604ae9fe580116058a137e2d68626b01b59e9b9c881f3cdb35bdf"
+    }
+  ],
+  "limitations": [
+    "real paid LLM design quality not evaluated",
+    "multimodal aesthetic review not implemented",
+    "macOS device validation deferred"
+  ]
+}

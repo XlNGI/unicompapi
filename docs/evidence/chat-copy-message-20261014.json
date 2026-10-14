@@ -1,0 +1,99 @@
+{
+  "schemaVersion": 1,
+  "date": "2026-10-14",
+  "branch": "feature/chat-progress-summary",
+  "base": "develop@4692337",
+  "request": "复制按钮失效。",
+  "findings": [
+    "原点击处理仅调用 navigator.clipboard.writeText；隔离 Electron 未聚焦时实际返回 NotAllowedError。",
+    "文档消息渲染经过可读正文投影，但原复制直接使用 message.content，可能复制内部 JSON 或过期草稿。",
+    "原复制入口仅由 content 控制，正式文档仅有 validatedContent 时入口可能缺失。"
+  ],
+  "changes": [
+    "preload 暴露只写文本的原生剪贴板桥，执行端仅接收字符串且上限 2,000,000 字符；没有暴露读取、原生对象或任意执行能力。",
+    "复制优先使用桌面桥；无桥的浏览器环境继续使用 navigator.clipboard。",
+    "文档复制复用显示用的正文投影，并优先使用已校验内容；普通 Markdown 保持原文。",
+    "只有正文时才写剪贴板；无正文或写入失败给出明确反馈。写入成功后显示已复制并恢复按钮。",
+    "不修改现有消息、工具、授权、费用、路径或作品登记事实。"
+  ],
+  "validation": {
+    "typecheck": {
+      "command": "pnpm typecheck",
+      "status": "passed"
+    },
+    "lint": {
+      "command": "pnpm lint; changed copy source/test ESLint rechecked",
+      "status": "passed"
+    },
+    "build": {
+      "command": "pnpm build",
+      "status": "passed",
+      "warnings": [
+        "existing Vite CJS deprecation",
+        "existing large chunk warning"
+      ]
+    },
+    "platformAudit": {
+      "command": "pnpm audit:platform",
+      "status": "passed",
+      "violations": 0
+    },
+    "vitest": {
+      "files": 4,
+      "passed": 87,
+      "failed": 0
+    },
+    "uiContracts": {
+      "passed": 24,
+      "failed": 0
+    },
+    "electron": {
+      "command": "electron scripts/verify-chat-production-progress-electron.cjs --copy-messages",
+      "status": "passed",
+      "scope": "Real ChatPage/Electron clipboard writer and production preload; synthetic conversation IPC, no provider calls",
+      "browserProbe": {
+        "ok": false,
+        "name": "NotAllowedError",
+        "focused": false
+      },
+      "copied": [
+        {
+          "scenario": "codex-conversation",
+          "characters": 1358,
+          "containsReadableBody": true,
+          "noRawOutlineOrPrivateFields": true
+        },
+        {
+          "scenario": "codex-document",
+          "characters": 1358,
+          "containsReadableBody": true,
+          "noRawOutlineOrPrivateFields": true
+        },
+        {
+          "scenario": "saved-completed",
+          "characters": 98,
+          "containsReadableBody": true,
+          "noRawOutlineOrPrivateFields": true
+        }
+      ],
+      "productionPreloadWriteVerified": true,
+      "invalidInputRejected": true,
+      "successFeedbackReset": true,
+      "clipboardRestored": true,
+      "errors": [],
+      "blockedRequests": [],
+      "clipboardRestorationScope": "用户标准文本、HTML、RTF 和图片剪贴板格式保存在内存并于 finally 写回；没有输出原有剪贴板内容。"
+    }
+  },
+  "artifacts": {
+    "report": "outputs/chat-production-progress/copy-messages/report.json",
+    "screenshots": "outputs/chat-production-progress/copy-messages/"
+  },
+  "limitations": [
+    "消息数据和业务 IPC 为合成；复制按钮、原生剪贴板写入/读回及另一个隔离窗口中的真实生产 preload 均实际运行。",
+    "没有进行真实 Provider、真实 Office 生成、全仓 Vitest 或 macOS 实机验收。",
+    "前轮两个既有正文长流程断言保持未修复登记，不扩展本次验收结论。",
+    "preload 能力需要正常重启应用后加载；本轮未重启用户应用。",
+    "未提交、推送、合并或发布；下一步正常重启应用后检查复制并粘贴普通回复和文档正文。"
+  ]
+}

@@ -1,0 +1,78 @@
+{
+  "schemaVersion": 1,
+  "date": "2026-10-14",
+  "branch": "feature/chat-progress-summary",
+  "request": "修复 pnpm dev 因 node_modules/electron/cli.js 缺失而无法启动。",
+  "findings": [
+    "Electron 33.4.11 虚拟包中缺少 cli.js、checksums.json，dist/electron.exe 等运行文件也缺失。",
+    "安装的根依赖 junction 与 .bin NODE_PATH 曾指向另一工作树路径，该工作树 node_modules 又指回本项目。",
+    "缺失文件的来源未能证明；不将其归因于源码、杀毒软件或用户操作。"
+  ],
+  "repair": {
+    "packageVersion": "33.4.11",
+    "packageSource": "系统临时目录中的 pnpm offline install --ignore-scripts，48 包复用本地内容缓存、downloaded 0；只补齐现有包中缺失的文件。",
+    "packageHashComparisons": {
+      "files": 8,
+      "allMatch": true
+    },
+    "binarySource": "现有 electron-v33.4.11-win32-x64.zip 本地缓存，按恢复的包 checksums.json 校验后恢复 dist 与 path.txt。",
+    "binaryZipSha256": "f64c8a5a81d9b420b636fdba13e180f49d69f2198e1d86a8b01f858b17a9483c",
+    "relink": "pnpm install --offline --frozen-lockfile --ignore-scripts",
+    "rootDependencyJunctionsPointingToWorktrees": 0,
+    "repositoryManifestAndLockfileUnchanged": true,
+    "networkDownloads": 0,
+    "notes": "首次位于 .cache 的临时安装被 pnpm 识别为父工作区，根锁文件曾临时改写；已只恢复该操作生成的锁文件改动及虚拟 store 锁，再在系统临时目录安装并最终冻结锁文件复核。"
+  },
+  "validation": {
+    "electronVersion": {
+      "command": "pnpm exec electron --version",
+      "result": "v33.4.11",
+      "status": "passed"
+    },
+    "typecheck": {
+      "command": "pnpm typecheck",
+      "status": "passed"
+    },
+    "build": {
+      "command": "pnpm build",
+      "status": "passed"
+    },
+    "uiContracts": {
+      "passed": 24,
+      "failed": 0
+    },
+    "devStart": {
+      "command": "pnpm dev",
+      "status": "startup_passed",
+      "ok": true,
+      "url": "http://localhost:5173/",
+      "electron": "33.4.11",
+      "ready": {
+        "mounted": true,
+        "buttons": 62,
+        "clipboardBridge": true,
+        "storageBridge": true
+      },
+      "isolatedProfile": true,
+      "noProjectOpened": true,
+      "rendererErrors": [],
+      "blockedRequests": [],
+      "testHook": "Git 忽略的 .cache/verify-dev-start-hook.cjs，仅本次进程通过 NODE_OPTIONS 加载；等 Electron 初始化后观察真实窗口、检查 React/preload/本地 IPC，隐藏验收窗口并正常 app.quit。",
+      "shutdown": "Electron 正常退出 0；concurrently -k 随后 SIGTERM 停止 Vite，开发命令最终为 1。这是主动结束验收的结果，不是 Electron 启动失败，不记为完整命令退出 0。",
+      "warnings": [
+        "既有 Vite CJS 提示",
+        "既有大 chunk 提示",
+        "隐藏测试窗口主动退出后出现 GPU state invalid after WaitForGetOffsetInRange，Renderer 错误为空。"
+      ]
+    }
+  },
+  "artifacts": {
+    "report": "outputs/electron-dependency-repair/dev-start-report.json"
+  },
+  "limitations": [
+    "仅修复本机 Git 忽略的 node_modules 与本地环境，不升级 Electron 或修改业务源码。",
+    "没有运行全仓 Vitest、收费 Provider、用户原项目或 macOS 实机。",
+    "本轮保留此前工作区改动，只新增本轮维护记录与验收证据；没有提交、推送或合并。",
+    "正常终端没有设置本次验收用的 NODE_OPTIONS，重新执行 pnpm dev 即可使用恢复的运行时。"
+  ]
+}

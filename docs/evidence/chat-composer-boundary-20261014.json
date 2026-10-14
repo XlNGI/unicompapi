@@ -1,0 +1,87 @@
+{
+  "schemaVersion": 1,
+  "date": "2026-10-14",
+  "branch": "feature/chat-progress-summary",
+  "base": "develop@4692337",
+  "request": "会话输入框下面不应该出现对话内容。",
+  "rootCause": "浮动输入框叠在延伸到页面底部的消息滚动容器上，透明输入区只靠底部留白让末项可见，中途滚动的正文仍能出现在输入框周边和底部。",
+  "changes": [
+    "对话容器使用 header/banner/messages/composer 四行 Grid，输入区回归正常布局并居中。",
+    "消息滚动容器止于输入区上沿，取消根据浮动输入区高度追加的 clearance 留白，保留正常阅读间距。",
+    "输入框 ResizeObserver 只维护最新回复自动跟随，输入区变高时由 Grid 自动缩小消息区。",
+    "回到最新消息按钮移到输入区容器，定位在其上方，避免随正文滚动裁剪；点击行为继续复用原滚动处理。"
+  ],
+  "validation": {
+    "typecheck": {
+      "command": "pnpm typecheck",
+      "status": "passed"
+    },
+    "lint": {
+      "command": "pnpm lint",
+      "status": "passed"
+    },
+    "build": {
+      "command": "pnpm build",
+      "status": "passed",
+      "warnings": [
+        "existing Vite CJS deprecation",
+        "existing large chunk warning"
+      ]
+    },
+    "uiContracts": {
+      "command": "node --test tests/ui/chat-page-contract.test.mjs tests/ui/chat-document-ui-contract.test.mjs",
+      "passed": 24,
+      "failed": 0
+    },
+    "vitest": {
+      "command": "pnpm exec vitest run tests/application/chat-composer-behavior.test.ts tests/application/virtual-message-list.test.tsx tests/application/chat-production-timeline.test.tsx",
+      "files": 3,
+      "passed": 111,
+      "failed": 0
+    },
+    "electron": {
+      "command": "electron scripts/verify-chat-production-progress-electron.cjs --composer-boundary",
+      "status": "passed",
+      "scope": "Real ChatPage in isolated Electron renderer; synthetic IPC, no provider or HTTP(S) calls",
+      "layoutCases": 30,
+      "configurations": [
+        "codex-conversation 1280x820 light",
+        "codex-document 1280x820 light",
+        "codex-conversation 800x600 light",
+        "codex-document 540x768 dark",
+        "codex-conversation 340x768 light"
+      ],
+      "checks": [
+        "ordinary and document replies at top/middle/bottom",
+        "multiline drafts resize input row and retain following",
+        "message pane clipped above composer",
+        "last reply reachable",
+        "jump-to-latest stays above input and works",
+        "stream progress preserves boundary"
+      ],
+      "messageViewportEndsAboveInput": true,
+      "noPaintedMessagesBelowInput": true,
+      "lastReplyReachable": true,
+      "noHorizontalOverflow": true,
+      "stream": {
+        "messageBottom": 702,
+        "composerRegionTop": 702,
+        "progress": "progress"
+      },
+      "errors": [],
+      "blockedRequests": []
+    }
+  },
+  "artifacts": {
+    "report": "outputs/chat-production-progress/composer-boundary/report.json",
+    "ordinary": "outputs/chat-production-progress/composer-boundary/codex-conversation-middle.png",
+    "document": "outputs/chat-production-progress/composer-boundary/codex-document-middle.png",
+    "multilineDark": "outputs/chat-production-progress/composer-boundary/codex-document-540-multiline.png"
+  },
+  "limitations": [
+    "使用真实 ChatPage/Electron renderer 和合成 IPC，不等同完整 AppLayout/preload/主进程端到端验收。",
+    "540/340px 为聊天组件宿主验证，生产外壳约束不变。",
+    "未执行全仓 Vitest、真实 Provider、macOS 或真实文件生成；上一轮两个既有正文断言仍未修复。",
+    "未提交、推送、合并或重启用户应用；下一步在正常应用检查普通长回复和多行输入时的滚动观感。"
+  ]
+}
