@@ -86,7 +86,8 @@ async function harness(options: { repeat?: boolean; legacy?: boolean; cancelRepa
     draftRevision: 3, sourceDraftId: 'draft-preserve-design', requestLlmRepair: planner, signal: controller.signal,
     ...(options.canonical ? { documentIR: { operation: 'create' as const, attachmentRefs: [], canonicalContent: canonical,
       content: documentContentSnapshotToLegacyContent(canonical) } } : {}),
-    ...(!options.legacy ? { requestArtDirection: async () => repairProductionDesign() } : {})
+    // Exercise the retained explicit v2 compatibility repair contract.
+    ...(!options.legacy ? { designIR: repairProductionDesign(), requestArtDirection: async () => repairProductionDesign() } : {})
   });
   return { root, projectId, result, snapshots, buffers, writes, planner, controller, preparedRecords, storage, executionId, existingFile, canonical };
 }

@@ -7,6 +7,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { toProjectId, type DocumentOutline } from '../../src/domain';
 import { buildDocumentIRFromOutline } from '../../src/domain/entities/document-agent';
 import { buildFallbackPresentationDesignIR } from '../../src/domain/entities/presentation-design-contract';
+import { authoredFixtureDesign } from '../fixtures/presentation-autonomous-design';
 import { DocumentGenerationRunner } from '../../src/platform/documents/document-generation-runner';
 import { generateTemporaryDocumentFile, type GenerateDocumentFileInput } from '../../src/platform/documents/office-document-generator';
 import type { PresentationDesignCompilationSnapshot } from '../../src/platform/documents/presentation-render-plan-compiler';
@@ -38,7 +39,7 @@ async function run(response: unknown, cancel = false) {
 
 describe('Art Direction to real PPTX production wiring', () => {
   it('passes validated Design IR through Runner into writer before Hash/Work publication', async () => {
-    const ir = buildFallbackPresentationDesignIR(outline);
+    const ir = authoredFixtureDesign(outline);
     const data = await run(JSON.stringify(ir));
     const result = await data.result;
     expect(data.requestArtDirection).toHaveBeenCalledTimes(1);
@@ -54,16 +55,11 @@ describe('Art Direction to real PPTX production wiring', () => {
     expect(xml).toContain('18%');
   });
 
-  it('an invalid Design IR still creates and registers a valid legacy PPTX', async () => {
+  it('an invalid autonomous design is refused before writing or Work publication', async () => {
     const data = await run('{truncated');
-    const result = await data.result;
-    expect(data.writes).toHaveLength(1);
-    expect(data.writes[0].designIR).toBeUndefined();
-    expect(data.snapshots[0]).toMatchObject({ designPath: 'legacy-fallback', artDirectionStatus: 'invalid', designIrStatus: 'invalid' });
-    expect(data.snapshots[0]?.diagnostics.map(item => item.code)).toContain('invalid_json');
-    expect(result.execution.state).toBe('completed');
-    expect(result.file.state).toBe('available');
-    expect(result.work.fileId).toBe(result.file.id);
+    await expect(data.result).rejects.toMatchObject({ code: 'invalid_plan' });
+    expect(data.writes).toEqual([]);
+    expect(data.snapshots).toEqual([]);
   });
 
   it('cancel during Art Direction prevents writer and publication', async () => {

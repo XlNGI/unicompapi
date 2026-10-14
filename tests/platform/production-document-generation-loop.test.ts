@@ -19,7 +19,8 @@ import {
 } from '../../src/platform';
 import { ConversationProductionTraceStore } from '../../src/platform/conversation-production-trace';
 import { PlatformDocumentDraftCompiler, PlatformDocumentGenerationExecutor } from '../../src/platform/documents/document-generation-application-adapters';
-import { buildFallbackPresentationDesignIR, parseArtDirection } from '../../src/domain/entities/presentation-design-contract';
+import { parseArtDirection } from '../../src/domain/entities/presentation-design-contract';
+import { authoredFixtureDesign } from '../fixtures/presentation-autonomous-design';
 import { generateTemporaryDocumentFile, type GenerateDocumentFileInput } from '../../src/platform/documents/office-document-generator';
 import type { PresentationDesignCompilationSnapshot } from '../../src/platform/documents/presentation-design-compiler';
 import { RegisteredPresentationReader } from '../../src/platform/documents/registered-presentation-reader';
@@ -97,7 +98,7 @@ async function fixture(revokeAfterAdvertisingRead = false, invalidArtDirection =
   // registration real. Only the external Office renderer is an offline adapter.
   const execute = PlatformDocumentGenerationExecutor.prototype.run;
   const executor = new PlatformDocumentGenerationExecutor(new DocumentGenerationRunner({
-    rootDirectory, projectId, renderPreview: render, requireRenderForPpt: true,
+    rootDirectory, projectId, renderPreview: render, requireRenderForPpt: true, allowLegacyArtDirectionFallback: invalidArtDirection,
     generateTemporaryFile: async input => {
       writes.push(input);
       return generateTemporaryDocumentFile({ ...input, onDesignCompiled: async snapshot => {
@@ -120,7 +121,7 @@ async function fixture(revokeAfterAdvertisingRead = false, invalidArtDirection =
     if (!payload.tools && payload.messages.some(message => message.role === 'system' && message.content.includes('Art Direction'))) {
       artRequests.push(payload);
       const outline = new PlatformDocumentDraftCompiler().compile({ content: generatedContent, kind: 'ppt', operation: 'create' });
-      const initial = buildFallbackPresentationDesignIR(outline);
+      const initial = authoredFixtureDesign(outline);
       const direction = parseArtDirection({ ...initial, globalDesign: { ...initial.globalDesign,
         visualTone: 'editorial', density: 'sparse', whitespace: 'generous', typographyDirection: 'display-led' },
         pages: initial.pages.map(page => page.pageNumber > 1 && page.pageNumber < initial.pages.length ? { ...page,
@@ -545,7 +546,8 @@ describe('production NewAPI generation to verified-file read continuation', () =
     expect(data.writes).toHaveLength(1);
     expect(data.writes[0].designIR?.schemaVersion).toBe(2);
     expect(data.designSnapshots).toHaveLength(1);
-    expect(data.designSnapshots[0].strategies.find(page => page.pageNumber === 2)?.strategy).toBe('evidence');
+    expect(data.designSnapshots[0].strategies.find(page => page.pageNumber === 2)?.strategy).toBe('authored');
+    expect(data.designSnapshots[0].designIR?.pages.every(page => page.designTree)).toBe(true);
     expect(data.designSnapshots[0].designIR?.pages[1].composition.focalArea).toBe('right');
     expect(data.designSnapshots[0]).toMatchObject({ designPath: 'design-aware', layoutStatus: 'success', renderPlanStatus: 'valid' });
     expect(data.designSnapshots[0].pages?.every(page => page.geometrySignature !== undefined)).toBe(true);
@@ -833,7 +835,7 @@ describe('production NewAPI generation to verified-file read continuation', () =
     expect(conversation.messages.some(message => message.role === 'user' && message.content === '可以')).toBe(true);
   }, 15_000);
 
-  it('falls back to the stable template after malformed Art Direction and still registers and reads the real file', async () => {
+  it('retains explicitly enabled legacy fallback after malformed Art Direction and reads the real file', async () => {
     const data = await fixture(false, true);
     const { execution, traces } = await data.run();
     expect(data.artRequests).toHaveLength(1);
