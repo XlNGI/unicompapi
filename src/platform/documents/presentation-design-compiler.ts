@@ -6,7 +6,7 @@ import {
   type ProductionPresentationDesignIR
 } from '../../domain/entities/presentation-design-contract';
 
-export type PresentationDesignStrategy = 'single-focus' | 'comparison' | 'evidence' | 'sequence' | 'structured';
+export type PresentationDesignStrategy = 'single-focus' | 'comparison' | 'evidence' | 'sequence' | 'structured' | 'authored';
 export interface PresentationDesignCompilerDiagnostic {
   readonly code: 'invalid_design_ir' | 'unsupported_design_value' | 'unsupported_capacity' |
     'unresolved_content_reference' | 'advisory_intent' | 'advisory_visual_tone' |

@@ -194,10 +194,13 @@ function projectRenderPlan(layout: ProductionPresentationLayoutIR): Presentation
       pageNumber: page.pageNumber, pageRole: page.pageRole, backgroundColor: page.backgroundColor,
       elements: page.elements.map(element => ({
         renderId: element.elementId, source: element.source, type: element.type,
-        geometry: element.geometry, style: element.style, zIndex: element.zIndex,
+        geometry: element.geometry, style: { ...element.style, textSpans: undefined }, zIndex: element.zIndex,
         content: element.type === 'table' ? { type: 'table' as const, header: ['geometry'], rows: [['validation']] }
           : element.type === 'chart' ? { type: 'chart' as const, chartKind: 'bar' as const, data: [{ label: 'geometry', value: 1 }] }
             : element.type === 'shape' ? { type: 'shape' as const, shapeKind: 'line' as const }
+              : element.type === 'image' && element.source.kind === 'generated' && element.source.key === 'asset-image'
+                ? { type: 'image' as const, assetKey: element.source.assetKey, assetDigest: element.source.assetDigest, imageFit: element.source.imageFit, aspectRatio: element.source.aspectRatio,
+                  ...(element.source.imageMask ? { imageMask: element.source.imageMask } : {}) }
               : { type: 'text' as const, text: 'geometry validation' }
       }))
     }))

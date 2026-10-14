@@ -44,7 +44,7 @@ export function auditPresentationRenderPlan(plan: PresentationRenderPlan): Prese
     }
     for (const element of page.elements) {
       fontFamilies.add(element.style.fontFamily);
-      if (element.type === 'text' && contrastRatio(page.backgroundColor, element.style.color) < (element.style.fontSize >= 24 ? 3 : 4.5)) {
+      if (element.type === 'text' && contrastRatio(element.style.fill ?? page.backgroundColor, element.style.color) < (element.style.fontSize >= 24 ? 3 : 4.5)) {
         diagnostics.push({ code: 'visual_low_contrast', severity: 'warning', pageNumber: page.pageNumber,
           message: 'Text color has insufficient deterministic contrast against the page background' });
       }

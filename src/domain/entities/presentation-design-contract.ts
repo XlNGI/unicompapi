@@ -3,6 +3,9 @@ import type { DocumentIR } from './document-agent';
 import { buildPresentationContentOrganizationJsonSchema, parsePresentationContentOrganization,
   PresentationContentOrganizationParseError, type PresentationContentOrganizationV1 } from './presentation-content-organization';
 export * from './presentation-content-organization';
+import { buildPresentationDesignTreeJsonSchema, parsePresentationDesignTree, PresentationDesignTreeError,
+  flattenPresentationDesignTree, type PresentationDesignTree } from './presentation-design-tree';
+export * from './presentation-design-tree';
 
 /**
  * The bounded vocabulary shared by the Art Direction response and the
@@ -140,6 +143,8 @@ export interface PresentationDesignIRPage {
   /** Optional page-local treatment; layout remains semantic and host-computed. */
   readonly visualTreatment?: PresentationDesignVisualTreatment;
   readonly organization?: PresentationContentOrganizationV1;
+  /** Model-selected composition; Host solves geometry without replacing this structure. */
+  readonly designTree?: PresentationDesignTree;
 }
 
 /**
@@ -172,6 +177,12 @@ export interface PresentationArtDirectionInput {
   };
   readonly visualRequirements?: readonly string[];
   readonly brandingConstraints?: readonly string[];
+  readonly availableAssets?: readonly { readonly assetKey: string; readonly aspectRatio: number }[];
+  readonly designFeedback?: {
+    readonly previousDesign: PresentationDesignIRV2;
+    readonly targetPages: readonly number[];
+    readonly diagnostics: readonly { readonly code: string; readonly pageNumber: number; readonly nodeId?: string }[];
+  };
   readonly documentIRSummary?: {
     readonly contentMapping: readonly { readonly contentRef: string; readonly kind: string }[];
   };
@@ -297,6 +308,8 @@ export function buildPresentationArtDirectionInput(input: {
   readonly documentIR?: DocumentIR;
   readonly visualRequirements?: readonly string[];
   readonly brandingConstraints?: readonly string[];
+  readonly availableAssets?: PresentationArtDirectionInput['availableAssets'];
+  readonly designFeedback?: PresentationArtDirectionInput['designFeedback'];
 }): PresentationArtDirectionInput {
   if (input.outline.kind !== 'ppt') throw new TypeError('Art Direction requires a PPT outline');
   const pages = buildArtDirectionContentPages(input.outline);
@@ -318,13 +331,15 @@ export function buildPresentationArtDirectionInput(input: {
     }),
     ...(visualRequirements.length > 0 ? { visualRequirements: Object.freeze(visualRequirements) } : {}),
     ...(brandingConstraints.length > 0 ? { brandingConstraints: Object.freeze(brandingConstraints) } : {}),
-    ...(documentIRSummary !== undefined ? { documentIRSummary: Object.freeze(documentIRSummary) } : {})
+    ...(documentIRSummary !== undefined ? { documentIRSummary: Object.freeze(documentIRSummary) } : {}),
+    ...(input.availableAssets ? { availableAssets: input.availableAssets } : {}),
+    ...(input.designFeedback ? { designFeedback: input.designFeedback } : {})
   });
 }
 
 /** Revalidate the complete boundary immediately before serializing a Provider request. */
 export function parsePresentationArtDirectionInput(value: unknown): PresentationArtDirectionInput {
-  const root = inputRecord(value, ['userRequirement', 'outline'], ['visualRequirements', 'brandingConstraints', 'documentIRSummary']);
+  const root = inputRecord(value, ['userRequirement', 'outline'], ['visualRequirements', 'brandingConstraints', 'documentIRSummary', 'availableAssets', 'designFeedback']);
   const userRequirement = boundedInputText(root.userRequirement as string, 'userRequirement', 16_000);
   const outline = inputRecord(root.outline, ['title', 'pageCount', 'pages']);
   const title = boundedInputText(outline.title as string, 'outline.title', 200);
@@ -383,7 +398,9 @@ export function parsePresentationArtDirectionInput(value: unknown): Presentation
     userRequirement, outline: Object.freeze({ title, pageCount: pages.length, pages: Object.freeze(pages) }),
     ...(visualRequirements.length === 0 ? {} : { visualRequirements: Object.freeze(visualRequirements) }),
     ...(brandingConstraints.length === 0 ? {} : { brandingConstraints: Object.freeze(brandingConstraints) }),
-    ...(documentIRSummary === undefined ? {} : { documentIRSummary })
+    ...(documentIRSummary === undefined ? {} : { documentIRSummary }),
+    ...(root.availableAssets === undefined ? {} : { availableAssets: parseArtDirectionAssets(root.availableAssets) }),
+    ...(root.designFeedback === undefined ? {} : { designFeedback: parseDesignFeedback(root.designFeedback, pages) })
   });
   if (JSON.stringify(result).length > 100_000) throw new TypeError('Art Direction input exceeds the 100000 character budget');
   return result;
@@ -418,9 +435,15 @@ export function buildPresentationArtDirectionPrompt(input: PresentationArtDirect
     `Allowed typographyDirection: ${presentationTypographyDirections.join(', ')}.`,
     `Allowed colorDirection: ${presentationColorDirections.join(', ')}.`,
     `Allowed pageRole: ${presentationPageRoles.join(', ')}.`,
-    `Allowed composition principle: ${presentationCompositionPrinciples.join(', ')}; focalArea: ${presentationFocalAreas.join(', ')}; balance: ${presentationBalances.join(', ')}; flow: ${presentationFlows.join(', ')}.`,
+    `Allowed composition principle: ${presentationCompositionPrinciples.join(', ')}; focalArea: ${presentationFocalAreas.filter(value => value !== 'full-bleed').join(', ')}; balance: ${presentationBalances.join(', ')}; flow: ${presentationFlows.filter(value => value !== 'radial').join(', ')}.`,
     `Allowed emphasis strength: ${presentationEmphasisStrengths.join(', ')}; surface: ${presentationSurfaceTreatments.join(', ')}; accent: ${presentationAccentTreatments.join(', ')}; component: ${presentationVisualComponents.join(', ')}.`,
     'Use visualSystem when the user asks for a deliberate palette or typography system; use visualTreatment for a page-local surface/accent treatment. Do not emit coordinates.',
+    'Author designTree schemaVersion 1 on every new page. You own the composition: nest row/column/grid/overlay containers, choose child weights, column spans, gaps/padding as fractions of the parent short edge, and anchors/widthFraction/heightFraction for overlay children. No template selection or final coordinates.',
+    'Each content leaf references exactly one rendered atom: title, heading, takeaway, action, paragraph, quote, individual list item, table, or chart. Cover all page content atoms exactly once. A list block itself is not a leaf: expand its listed item refs. Container and leaf styles inherit; explicit fontSize is in points, fontWeight is 400 or 700. textSpans use UTF-16 start/end offsets into existing text, without copying or changing text.',
+    'Shape leaves use rect/roundRect/ellipse/line and only paint style fields. Image leaves may only use assetKey from availableAssets; imageFit is contain or cover and imageMask is none or ellipse. Shapes may be layered behind content; two content boxes or images may not accidentally overlap. An overlay child must supply an anchor.',
+    'With designTree, omit legacy visualTreatment; author every surface/accent/component directly in the tree. Use global typography weights 400 or 700. Text-only lineSpacing/charSpacing/textSpans cannot be applied to tables or charts. Chart style supports chartKind bar/line/pie/doughnut, chartColors, showLegend/showValues, fontSize/fontFamily/color/fill.',
+    'designTree is the executable composition. Do not declare unrelated organization constraints or rely on pageIntent/visualStrategy prose to execute design. minimumFontScale is optional, 0.7..1; omitted means explicit font sizes must be preserved.',
+    'For designFeedback preserve globalDesign and all non-target pages exactly. Repair only the listed pages while preserving content membership and facts. Do not use radial/full-bleed or arbitrary font weights.',
     'Hierarchy primary must contain at least one reference; hierarchy arrays must be disjoint.',
     'Keep pageIntent and visualStrategy concise (600 characters maximum each).',
     'Include organization schemaVersion 1 for each page: layout comparison, metrics, sequence, evidence, or grouped; explicit page-local business groups and compare, sequence, or supports relationships.',
@@ -438,6 +461,7 @@ export function buildPresentationArtDirectionPrompt(input: PresentationArtDirect
 }
 
 export function buildPresentationDesignIRJsonSchema(): Record<string, unknown> {
+  const { nodeDefinition, ...treeSchema } = buildPresentationDesignTreeJsonSchema();
   const object = (properties: Record<string, unknown>) => ({ type: 'object', additionalProperties: false, required: Object.keys(properties), properties });
   const enumeration = (values: readonly string[]) => ({ type: 'string', enum: values });
   const text = { type: 'string', minLength: 1, maxLength: MAX_TEXT_LENGTH };
@@ -454,9 +478,9 @@ export function buildPresentationDesignIRJsonSchema(): Record<string, unknown> {
     visualTreatment: { type: 'object', additionalProperties: false,
       required: ['surface', 'accent'], properties: { surface: enumeration(presentationSurfaceTreatments), accent: enumeration(presentationAccentTreatments),
         component: enumeration(presentationVisualComponents) } },
-    organization: buildPresentationContentOrganizationJsonSchema()
+    organization: buildPresentationContentOrganizationJsonSchema(), designTree: treeSchema
   });
-  page.required = page.required.filter(field => field !== 'visualTreatment' && field !== 'organization');
+  page.required = page.required.filter(field => field !== 'visualTreatment' && field !== 'organization' && field !== 'designTree');
   const globalDesign = object({
     visualTone: enumeration(presentationDesignTones), visualRhythm: enumeration(presentationDesignRhythms),
     density: enumeration(presentationDesignDensities), whitespace: enumeration(presentationDesignWhitespaces),
@@ -477,7 +501,8 @@ export function buildPresentationDesignIRJsonSchema(): Record<string, unknown> {
   });
   globalDesign.required = globalDesign.required.filter(field => field !== 'visualSystem');
   return {
-    ...object({ schemaVersion: { const: 2 }, globalDesign, pages: { type: 'array', minItems: 1, maxItems: MAX_PAGES, items: page } })
+    ...object({ schemaVersion: { const: 2 }, globalDesign, pages: { type: 'array', minItems: 1, maxItems: MAX_PAGES, items: page } }),
+    $defs: { designNode: nodeDefinition }
   };
 }
 
@@ -639,7 +664,7 @@ function parseVisualSystem(value: unknown, path: string, diagnostics: Presentati
 
 function parsePage(value: unknown, path: string, diagnostics: PresentationDesignIRDiagnostic[]): PresentationDesignIRPage | undefined {
   if (!isRecord(value)) { diagnostics.push(error('invalid_shape', path, 'page must be an object')); return undefined; }
-  checkKeys(value, ['pageNumber', 'pageRole', 'pageIntent', 'hierarchy', 'composition', 'density', 'whitespace', 'emphasis', 'contentRoles', 'visualStrategy', 'visualTreatment', 'organization'], path, diagnostics, ['visualTreatment', 'organization']);
+  checkKeys(value, ['pageNumber', 'pageRole', 'pageIntent', 'hierarchy', 'composition', 'density', 'whitespace', 'emphasis', 'contentRoles', 'visualStrategy', 'visualTreatment', 'organization', 'designTree'], path, diagnostics, ['visualTreatment', 'organization', 'designTree']);
   if (typeof value.pageNumber !== 'number' || !Number.isSafeInteger(value.pageNumber) || value.pageNumber < 1 || value.pageNumber > MAX_PAGES) diagnostics.push(error('invalid_page_number', `${path}.pageNumber`, 'pageNumber must be a positive bounded integer'));
   const pageRole = enumValue(value.pageRole, presentationPageRoles, `${path}.pageRole`, diagnostics);
   const pageIntent = boundedText(value.pageIntent, `${path}.pageIntent`, diagnostics);
@@ -652,6 +677,12 @@ function parsePage(value: unknown, path: string, diagnostics: PresentationDesign
   const visualStrategy = boundedText(value.visualStrategy, `${path}.visualStrategy`, diagnostics);
   const visualTreatment = parseVisualTreatment(value.visualTreatment, `${path}.visualTreatment`, diagnostics);
   let organization: PresentationContentOrganizationV1 | undefined;
+  let designTree: PresentationDesignTree | undefined;
+  if (value.designTree !== undefined) {
+    try { designTree = parsePresentationDesignTree(value.designTree); }
+    catch (failure) { diagnostics.push(error(failure instanceof PresentationDesignTreeError ? failure.reason : 'invalid_shape',
+      `${path}.designTree${failure instanceof PresentationDesignTreeError ? failure.path.slice(1) : ''}`, 'Invalid executable page design')); }
+  }
   if (value.organization !== undefined) {
     try { organization = parsePresentationContentOrganization(value.organization); }
     catch (candidateError) {
@@ -664,7 +695,7 @@ function parsePage(value: unknown, path: string, diagnostics: PresentationDesign
   if (!Number.isInteger(value.pageNumber) || pageRole === undefined || pageIntent === undefined || hierarchy === undefined || composition === undefined || density === undefined || whitespace === undefined || emphasis === undefined || contentRoles === undefined || visualStrategy === undefined || (value.visualTreatment !== undefined && visualTreatment === undefined)) return undefined;
   return { pageNumber: value.pageNumber as number, pageRole, pageIntent, hierarchy, composition, density, whitespace, emphasis, contentRoles, visualStrategy,
     ...(visualTreatment ? { visualTreatment } : {}),
-    ...(organization ? { organization } : {}) };
+    ...(organization ? { organization } : {}), ...(designTree ? { designTree } : {}) };
 }
 
 function parseVisualTreatment(value: unknown, path: string, diagnostics: PresentationDesignIRDiagnostic[]): PresentationDesignVisualTreatment | undefined {
@@ -754,12 +785,25 @@ function validateDesignIRReferences(
   }
   ir.pages.forEach((page, index) => {
     if (page.pageNumber !== index + 1) diagnostics.push(error('invalid_page_number', `$.pages[${index}].pageNumber`, 'pages must be ordered consecutively from 1'));
+    if (page.designTree && page.visualTreatment) diagnostics.push(error('invalid_shape', `$.pages[${index}].designTree`, 'Author surface/accent/components as explicit tree nodes; legacy visualTreatment cannot override an authored tree'));
   });
+  if (ir.pages.some(page => page.designTree) && ir.globalDesign.visualSystem?.typography &&
+    [ir.globalDesign.visualSystem.typography.displayWeight, ir.globalDesign.visualSystem.typography.bodyWeight].some(weight => weight !== 400 && weight !== 700)) {
+    diagnostics.push(error('invalid_shape', '$.globalDesign.visualSystem.typography', 'Authored Office typography supports weights 400 and 700'));
+  }
   const allowedPages = options.contentPages ?? (options.outline?.kind === 'ppt' ? buildArtDirectionContentPages(options.outline) : undefined);
   if (allowedPages) {
     const refsByPage = new Map(allowedPages.map(page => [page.pageNumber, new Set(page.contentRefs)]));
     forEachReference(ir, (ref, path, pageNumber) => {
       if (!refsByPage.get(pageNumber)?.has(ref)) diagnostics.push(error('invalid_content_reference', path, 'content reference does not belong to this page'));
+    });
+    ir.pages.forEach((page, index) => {
+      if (!page.designTree) return;
+      const inventory = [...(refsByPage.get(page.pageNumber) ?? [])];
+      const leaves = inventory.filter(ref => !inventory.some(child => child.startsWith(ref + '.')));
+      const actual = flattenPresentationDesignTree(page.designTree).flatMap(node => node.contentRef ? [node.contentRef] : []);
+      if (actual.length !== leaves.length || leaves.some(ref => !actual.includes(ref))) diagnostics.push(error('invalid_content_reference',
+        `$.pages[${index}].designTree`, 'Design tree must cover every page content leaf exactly once'));
     });
   }
   if (options.outline !== undefined) {
@@ -778,7 +822,36 @@ function forEachReference(ir: PresentationDesignIRV2, callback: (ref: string, pa
     callback(page.emphasis.target, `${base}.emphasis.target`, page.pageNumber);
     page.organization?.groups.forEach((group, groupIndex) => group.contentRefs.forEach((ref, refIndex) =>
       callback(ref, `${base}.organization.groups[${groupIndex}].contentRefs[${refIndex}]`, page.pageNumber)));
+    if (page.designTree) flattenPresentationDesignTree(page.designTree).forEach(node => {
+      if (node.contentRef) callback(node.contentRef, `${base}.designTree.${node.nodeId}`, page.pageNumber);
+    });
   });
+}
+
+function parseArtDirectionAssets(value: unknown): NonNullable<PresentationArtDirectionInput['availableAssets']> {
+  if (!Array.isArray(value) || value.length > 24) throw new TypeError('art_direction_asset_inventory_invalid');
+  const seen = new Set<string>();
+  return value.map(raw => {
+    const item = inputRecord(raw, ['assetKey', 'aspectRatio']);
+    if (typeof item.assetKey !== 'string' || !/^image-[1-9]\d{0,2}$/u.test(item.assetKey) || seen.has(item.assetKey) ||
+      typeof item.aspectRatio !== 'number' || !Number.isFinite(item.aspectRatio) || item.aspectRatio < 0.01 || item.aspectRatio > 100) throw new TypeError('art_direction_asset_inventory_invalid');
+    seen.add(item.assetKey); return { assetKey: item.assetKey, aspectRatio: item.aspectRatio };
+  });
+}
+function parseDesignFeedback(value: unknown, pages: PresentationArtDirectionInput['outline']['pages']): NonNullable<PresentationArtDirectionInput['designFeedback']> {
+  const raw = inputRecord(value, ['previousDesign', 'targetPages', 'diagnostics']);
+  const previousDesign = parsePresentationDesignIR(raw.previousDesign, { contentPages: pages });
+  if (!Array.isArray(raw.targetPages) || !raw.targetPages.length || raw.targetPages.length > 40 || new Set(raw.targetPages).size !== raw.targetPages.length ||
+    raw.targetPages.some(page => !Number.isInteger(page) || page < 1 || page > pages.length)) throw new TypeError('design_feedback_target_invalid');
+  const targetPages = raw.targetPages as number[];
+  if (!Array.isArray(raw.diagnostics) || !raw.diagnostics.length || raw.diagnostics.length > 96) throw new TypeError('design_feedback_diagnostics_invalid');
+  const diagnostics = raw.diagnostics.map(value => {
+    const item = inputRecord(value, ['code', 'pageNumber'], ['nodeId']);
+    if (typeof item.code !== 'string' || !/^[a-z][a-z0-9_]{0,79}$/u.test(item.code) || !targetPages.includes(Number(item.pageNumber)) ||
+      item.nodeId !== undefined && (typeof item.nodeId !== 'string' || !/^[A-Za-z][A-Za-z0-9_-]{0,47}$/u.test(item.nodeId))) throw new TypeError('design_feedback_diagnostics_invalid');
+    return { code: item.code, pageNumber: Number(item.pageNumber), ...(typeof item.nodeId === 'string' ? { nodeId: item.nodeId } : {}) };
+  });
+  return { previousDesign, targetPages, diagnostics };
 }
 
 function boundedText(value: unknown, path: string, diagnostics: PresentationDesignIRDiagnostic[]): string | undefined {

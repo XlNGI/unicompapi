@@ -41,7 +41,7 @@ describe('Presentation Render Plan v1 validation', () => {
     expect(validatePresentationRenderPlan(withUnknown).map(item => item.code)).toContain('unknown_field');
 
     const unsupported = plan() as unknown as { pages: Array<{ elements: Array<Record<string, unknown>> }> };
-    unsupported.pages[0]!.elements[0]!.type = 'image';
+    unsupported.pages[0]!.elements[0]!.type = 'video';
     expect(validatePresentationRenderPlan(unsupported).map(item => item.code)).toContain('unsupported_element_type');
 
     const brokenContent = plan() as unknown as { pages: Array<{ elements: Array<{ content: Record<string, unknown> }> }> };

@@ -8,6 +8,12 @@ import {
 
 const maximumHeaderBytes = 1024 * 1024;
 
+/** Inspect exactly the bytes that will be embedded, avoiding path/header races. */
+export function inspectImageBuffer(bytes: Buffer): ImageInspectionResult {
+  if (!bytes.length) throw new ImageInspectionError('empty_file', 'Selected image is empty');
+  return { ...inspectHeader(bytes.subarray(0, maximumHeaderBytes)), sizeBytes: bytes.length };
+}
+
 export class NodeImageInspector implements ImageInspector {
   async inspect(target: string): Promise<ImageInspectionResult> {
     const metadata = await readMetadata(target);
