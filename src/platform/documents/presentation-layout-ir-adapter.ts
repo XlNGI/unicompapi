@@ -223,7 +223,8 @@ function buildLayout(input: LayoutBuildInput, compatibility: ProductionPresentat
           : contentForSource(index, canonicalSource.ref, pageIdentity, allowedSources, compatibility.origin === 'legacy-render-plan');
         if (JSON.stringify(canonicalizeLayoutJson(element.content)) !== JSON.stringify(canonicalizeLayoutJson(expected))) throw new TypeError('layout_candidate_content_mismatch');
         return {
-          elementId: `element-${digest([pageId, canonicalSource]).slice(0, 32)}`,
+          elementId: `element-${digest(canonicalSource.kind === 'generated' && canonicalSource.key.startsWith('decoration-')
+            ? [pageId, canonicalSource, element.renderId] : [pageId, canonicalSource]).slice(0, 32)}`,
           source: { ...canonicalSource }, type: element.type,
           geometry: { ...element.geometry }, style: structuredClone(element.style), zIndex: element.zIndex
         };
@@ -369,7 +370,7 @@ function verifySolverSourceCoverage(layout: ProductionPresentationLayoutIR,
     if (!expected || actual.length !== expected.size || new Set(actual).size !== actual.length ||
       actual.some(reference => !expected.has(reference))) throw new TypeError('layout_source_coverage_mismatch');
     const generated = page.elements.flatMap(element => element.source.kind === 'generated' ? [element.source.key] : []);
-    if (generated.length !== 1 || generated[0] !== 'page-number') throw new TypeError('layout_generated_source_coverage_mismatch');
+    if (generated.filter(key => key === 'page-number').length !== 1 || generated.some(key => key !== 'page-number' && key !== 'decoration-line' && key !== 'decoration-node' && key !== 'decoration-frame')) throw new TypeError('layout_generated_source_coverage_mismatch');
   }
 }
 function contentForSource(index: ReadonlyMap<string, ContentReference>, ref: string, page: Pick<ProductionPresentationLayoutPage, 'source' | 'pageNumber'>,
@@ -387,8 +388,11 @@ function pageIdForNumber(pages: readonly ProductionPresentationLayoutPage[], num
   if (!page) throw new TypeError('layout_repair_page_unresolved');
   return page.pageId;
 }
-function generatedContent(key: 'closing-label' | 'page-number', pageNumber: number): PresentationRenderPlanContent {
-  return { type: 'text', text: key === 'page-number' ? String(pageNumber) : '谢谢观看' };
+function generatedContent(key: 'closing-label' | 'page-number' | 'decoration-line' | 'decoration-node' | 'decoration-frame', pageNumber: number): PresentationRenderPlanContent {
+  return key === 'decoration-line' ? { type: 'shape', shapeKind: 'line' }
+    : key === 'decoration-node' ? { type: 'shape', shapeKind: 'ellipse' }
+      : key === 'decoration-frame' ? { type: 'shape', shapeKind: 'roundRect' }
+        : { type: 'text', text: key === 'page-number' ? String(pageNumber) : '谢谢观看' };
 }
 
 /** D01 resolves all aliases/atoms in one bounded pass; no per-element reparsing. */

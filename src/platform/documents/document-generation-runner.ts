@@ -80,6 +80,9 @@ import { buildDocumentContentSnapshot, documentContentAliases, documentContentSn
   parseDocumentContentSnapshot } from '../../domain/entities/document-content-snapshot';
 import { canonicalizeLayoutJson } from '../../domain/entities/presentation-layout-ir';
 import { persistPreparedPresentationAttempt, persistPresentationAttemptReceipt, type PresentationDesignAttempt } from './presentation-design-attempts';
+import type { ProductionPresentationDesignIR } from '../../domain/entities/presentation-design-contract';
+import { applyPresentationVisualRevision, type PresentationVisualRevision } from '../../application/presentation-design-revision';
+import { RegisteredPresentationReader } from './registered-presentation-reader';
 
 export type DocumentGenerationErrorCode =
   | 'invalid_plan'
@@ -115,6 +118,8 @@ export interface DocumentGenerationPlanInput {
   readonly sourceDraftId: string;
   readonly outline: DocumentOutline;
   readonly documentIR?: DocumentIR;
+  readonly designIR?: ProductionPresentationDesignIR;
+  readonly presentationVisualRevision?: PresentationVisualRevision;
   readonly userRequirement?: string;
   readonly requestArtDirection?: PresentationArtDirectionPlanner;
   readonly artDirectionTimeoutMs?: number;
@@ -265,7 +270,20 @@ export class DocumentGenerationRunner {
       const generateTemporaryFile =
         this.options.generateTemporaryFile ?? generateTemporaryDocumentFile;
       const revisionSource = await this.resolveRevisionSource(context, input);
-      const existingContent = input.documentIR?.canonicalContent === undefined ? undefined : parseDocumentContentSnapshot(input.documentIR.canonicalContent);
+      if (input.presentationVisualRevision && (input.kind !== 'ppt' || !input.parentWorkId || input.revisionPatch ||
+        input.revisionPatches || input.revisionTargetSectionHeading || input.images?.length)) {
+        throw new DocumentGenerationError('revision_scope_violation', 'Visual revision cannot share a content patch or external image request');
+      }
+      const visualSource = input.presentationVisualRevision ? await new RegisteredPresentationReader(this.options)
+        .readWithProductionPlan(input.parentWorkId!) : undefined;
+      const visualPlan = visualSource?.productionPlan?.plan;
+      if (input.presentationVisualRevision && (!visualPlan?.designIR || !visualPlan.layoutIR || !visualPlan.renderPlan ||
+        (input.sourceChecksumSha256 && input.sourceChecksumSha256 !== visualSource?.file.checksumSha256))) {
+        throw new DocumentGenerationError('revision_scope_violation', 'Visual revision requires the verified parent production plan');
+      }
+      const revisedDesign = visualPlan?.designIR && input.presentationVisualRevision ? applyPresentationVisualRevision({
+        outline: visualPlan.outline, designIR: visualPlan.designIR, revision: input.presentationVisualRevision }) : undefined;
+      const existingContent = visualPlan?.contentSnapshot ?? (input.documentIR?.canonicalContent === undefined ? undefined : parseDocumentContentSnapshot(input.documentIR.canonicalContent));
       const authoritativeOutline = existingContent ? documentContentSnapshotToOutline(existingContent) : input.outline;
       if (existingContent && JSON.stringify(canonicalizeLayoutJson(authoritativeOutline)) !== JSON.stringify(canonicalizeLayoutJson(input.outline))) {
         throw new DocumentGenerationError('invalid_plan', 'Canonical content conflicts with the compatibility outline');
@@ -302,21 +320,21 @@ export class DocumentGenerationRunner {
             timeoutMs: input.artDirectionTimeoutMs
           }), { purpose: 'planning', documentKind: 'ppt', count: input.outline.sections.length })
         : undefined;
-      const artDirectionStatus = artDirection === undefined ? 'missing' as const
+      const artDirectionStatus = revisedDesign || input.designIR ? 'validated' as const : artDirection === undefined ? 'missing' as const
         : artDirection.designIR ? 'validated' as const
           : artDirection.diagnostics.some(item => item.code === 'art_direction_unavailable') ? 'missing' as const : 'invalid' as const;
       if (artDirection?.diagnostics.some(diagnostic => diagnostic.code === 'invalid_content_organization')) {
         throw new DocumentGenerationError('invalid_plan', 'The declared content organization is invalid');
       }
-      const designIrStatus = artDirection?.designIR ? 'validated' as const : artDirectionStatus;
+      const designIrStatus = revisedDesign || input.designIR || artDirection?.designIR ? 'validated' as const : artDirectionStatus;
       if (artDirection) await this.reportProgress(input, { code: 'plan_validation', status: 'completed',
         operationId: artDirection.designIR ? 'presentation-design-validated' : 'presentation-design-fallback',
         facts: { purpose: 'planning', documentKind: 'ppt', count: artDirection.diagnostics.length, artDirectionStatus, designIrStatus } });
-      let currentDesignIR = artDirection?.designIR;
+      let currentDesignIR = revisedDesign ?? input.designIR ?? artDirection?.designIR;
       let repairDiagnostics: readonly DocumentQualityDiagnostic[] = [];
       const supportsLlmRepair = input.kind === 'ppt' && input.requestLlmRepair !== undefined &&
         this.options.renderPreview !== undefined &&
-        input.revisionPatch === undefined && input.revisionPatches === undefined;
+        input.revisionPatch === undefined && input.revisionPatches === undefined && !input.presentationVisualRevision;
       const compileAndDiagnose = async (outline: DocumentOutline, attempt: number) => {
         const operationSuffix = attempt === 0 ? '' : `:repair-${attempt}`;
         if (candidateContent && !currentDesignIR && attempt > 0) {
@@ -353,6 +371,10 @@ export class DocumentGenerationRunner {
             input.executionBudget?.assertCanProceed('tool');
           } } : {}),
           kind: input.kind,
+          ...(visualSource && visualPlan && input.presentationVisualRevision ? { visualRevision: {
+            sourceBuffer: visualSource.buffer, previousLayoutIR: visualPlan.layoutIR!,
+            previousDesignIR: visualPlan.designIR!, targetPageNumbers: input.presentationVisualRevision.targetPageNumbers
+          } } : {}),
           ...(input.parentWorkId ? { compatibilityReason: input.revisionPatch || input.revisionPatches || input.revisionTargetSectionHeading
             ? 'verified_parent_xml_patch' as const : 'existing_parent_work_regeneration' as const } : {}),
           // Layout-only repair updates Design IR while the canonical facts remain unchanged.
@@ -522,6 +544,11 @@ export class DocumentGenerationRunner {
          ? await this.readRevisedOutline(input, verifiedGenerated.temporaryPath) : undefined;
       await this.observe(input, 'document_publish', 'document-atomic-publish', async () => {
         await syncFile(verifiedGenerated.temporaryPath);
+        if (visualSource) {
+          const parent = await new RegisteredPresentationReader(this.options).read(visualSource.work.id);
+          if (parent.file.checksumSha256 !== visualSource.file.checksumSha256) throw new DocumentGenerationError('revision_scope_violation', 'Visual revision parent changed before publication');
+          this.assertNotCancelled(input.signal);
+        }
         await (this.options.publishFile ?? rename)(verifiedGenerated.temporaryPath, verifiedGenerated.finalPath);
       }, { tool: 'publish', bytes: verifiedGenerated.sizeBytes });
       temporaryPath = undefined;

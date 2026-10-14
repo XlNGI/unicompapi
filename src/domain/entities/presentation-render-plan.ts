@@ -1,6 +1,6 @@
 import type { PresentationPageRole } from './presentation-design-contract';
 
-export type PresentationRenderElementType = 'text' | 'table' | 'chart';
+export type PresentationRenderElementType = 'text' | 'table' | 'chart' | 'shape';
 export type PresentationRenderAlignment = 'left' | 'center' | 'right' | 'justify';
 export type PresentationRenderVerticalAlignment = 'top' | 'middle' | 'bottom';
 
@@ -14,7 +14,7 @@ export interface PresentationRenderPlanGeometry {
 export type PresentationRenderSourceReference =
   | { readonly kind: 'outline'; readonly ref: string }
   | { readonly kind: 'content'; readonly ref: string }
-  | { readonly kind: 'generated'; readonly key: 'closing-label' | 'page-number' };
+  | { readonly kind: 'generated'; readonly key: 'closing-label' | 'page-number' | 'decoration-line' | 'decoration-node' | 'decoration-frame' };
 
 /** Host provenance of the sole Layout IR from which this writer input was projected. */
 export interface PresentationRenderInputIdentity {
@@ -30,8 +30,12 @@ export interface PresentationRenderPlanStyle {
   readonly fontFamily: string;
   readonly fontSize: number;
   readonly bold: boolean;
+  readonly fontWeight?: number;
+  readonly lineSpacingMultiple?: number;
+  readonly charSpacing?: number;
   readonly color: string;
   readonly fill?: string;
+  readonly borderWidth?: number;
   readonly alignment: PresentationRenderAlignment;
   readonly verticalAlignment: PresentationRenderVerticalAlignment;
   readonly tableHeaderFill?: string;
@@ -62,7 +66,12 @@ export interface PresentationRenderChartContent {
   readonly data: readonly { readonly label: string; readonly value: number }[];
 }
 
-export type PresentationRenderPlanContent = PresentationRenderTextContent | PresentationRenderTableContent | PresentationRenderChartContent;
+export interface PresentationRenderShapeContent {
+  readonly type: 'shape';
+  readonly shapeKind: 'line' | 'ellipse' | 'roundRect';
+}
+
+export type PresentationRenderPlanContent = PresentationRenderTextContent | PresentationRenderTableContent | PresentationRenderChartContent | PresentationRenderShapeContent;
 
 export interface PresentationRenderPlanElement {
   readonly renderId: string;
@@ -185,7 +194,7 @@ export function validatePresentationRenderPlan(
     }
     const sourceRefs = new Set<string>();
     const zIndices = new Set<number>();
-    const geometries: Array<{ readonly path: string; readonly geometry: PresentationRenderPlanGeometry }> = [];
+    const geometries: Array<{ readonly path: string; readonly geometry: PresentationRenderPlanGeometry; readonly decoration: boolean }> = [];
     page.elements.forEach((element, elementIndex) => {
       const elementPath = `${path}.elements[${elementIndex}]`;
       if (isRecord(element) && isIntegerInRange(element.zIndex, 0, 10_000)) {
@@ -193,7 +202,8 @@ export function validatePresentationRenderPlan(
         zIndices.add(element.zIndex);
       }
       const parsed = validateElement(element, elementPath, pageNumber as number, planMinFont, sourceRefs, renderIds, options, diagnostics);
-      if (parsed && canvas) geometries.push({ path: elementPath, geometry: parsed });
+      if (parsed && canvas) geometries.push({ path: elementPath, geometry: parsed,
+        decoration: isRecord(element) && isRecord(element.source) && element.source.kind === 'generated' && String(element.source.key).startsWith('decoration-') });
     });
     if (canvas) {
       geometries.forEach(item => {
@@ -236,13 +246,19 @@ function validateElement(
   else if (renderIds.has(value.renderId)) diagnostics.push(issue('duplicate_render_id', `${path}.renderId`, 'renderId must be unique across the plan'));
   else renderIds.add(value.renderId);
   validateSource(value.source, `${path}.source`, pageNumber, pageSourceRefs, options, diagnostics);
-  if (!['text', 'table', 'chart'].includes(String(value.type))) diagnostics.push(issue('unsupported_element_type', `${path}.type`, 'element type is unsupported'));
+  if (!['text', 'table', 'chart', 'shape'].includes(String(value.type))) diagnostics.push(issue('unsupported_element_type', `${path}.type`, 'element type is unsupported'));
   const geometry = validateGeometry(value.geometry, `${path}.geometry`, diagnostics);
   const style = validateStyle(value.style, `${path}.style`, value.type, diagnostics);
   validateContent(value.content, String(value.type), `${path}.content`, diagnostics);
+  const decorationKinds: Record<string, string> = { 'decoration-line': 'line', 'decoration-node': 'ellipse', 'decoration-frame': 'roundRect' };
+  if (isRecord(value.source) && value.source.kind === 'generated' && String(value.source.key).startsWith('decoration-') &&
+    (value.type !== 'shape' || !isRecord(value.content) || value.content.shapeKind !== decorationKinds[String(value.source.key)])) {
+    diagnostics.push(issue('invalid_source_ref', `${path}.source`, 'decoration source must use its matching shape primitive'));
+  }
   if (style) {
     const isPageNumber = isRecord(value.source) && value.source.kind === 'generated' && value.source.key === 'page-number';
-    if (!isPageNumber && style.fontSize < Math.max(minimumFontSize, options.minimumFontSize ?? DEFAULT_MINIMUM_FONT_SIZE)) {
+    const decoration = isRecord(value.source) && value.source.kind === 'generated' && String(value.source.key).startsWith('decoration-');
+    if (!isPageNumber && !decoration && style.fontSize < Math.max(minimumFontSize, options.minimumFontSize ?? DEFAULT_MINIMUM_FONT_SIZE)) {
       diagnostics.push(issue('font_below_minimum', `${path}.style.fontSize`, 'fontSize is below the validated minimum'));
     }
   }
@@ -273,7 +289,7 @@ function validateSource(
     }
   } else if (value.kind === 'generated') {
     checkKeys(value, ['kind', 'key'], path, diagnostics);
-    if (value.key !== 'closing-label' && value.key !== 'page-number') diagnostics.push(issue('invalid_source_ref', `${path}.key`, 'generated source key is unsupported'));
+    if (value.key !== 'closing-label' && value.key !== 'page-number' && value.key !== 'decoration-line' && value.key !== 'decoration-node' && value.key !== 'decoration-frame') diagnostics.push(issue('invalid_source_ref', `${path}.key`, 'generated source key is unsupported'));
   } else diagnostics.push(issue('invalid_source_ref', `${path}.kind`, 'source kind is unsupported'));
 }
 
@@ -305,11 +321,15 @@ function validateGeometry(value: unknown, path: string, diagnostics: Presentatio
 
 function validateStyle(value: unknown, path: string, elementType: unknown, diagnostics: PresentationRenderPlanDiagnostic[]): PresentationRenderPlanStyle | undefined {
   if (!isRecord(value)) { diagnostics.push(issue('invalid_render_plan', path, 'style must be an object')); return undefined; }
-  checkKeys(value, ['fontFamily', 'fontSize', 'bold', 'color', 'fill', 'alignment', 'verticalAlignment', 'tableHeaderFill', 'tableHeaderColor', 'tableBodyFill', 'borderColor', 'chartColors', 'mutedColor', 'showLegend', 'showValues'], path, diagnostics,
-    ['fill', 'tableHeaderFill', 'tableHeaderColor', 'tableBodyFill', 'borderColor', 'chartColors', 'mutedColor', 'showLegend', 'showValues']);
+  checkKeys(value, ['fontFamily', 'fontSize', 'bold', 'fontWeight', 'lineSpacingMultiple', 'charSpacing', 'color', 'fill', 'borderWidth', 'alignment', 'verticalAlignment', 'tableHeaderFill', 'tableHeaderColor', 'tableBodyFill', 'borderColor', 'chartColors', 'mutedColor', 'showLegend', 'showValues'], path, diagnostics,
+    ['fontWeight', 'lineSpacingMultiple', 'charSpacing', 'fill', 'borderWidth', 'tableHeaderFill', 'tableHeaderColor', 'tableBodyFill', 'borderColor', 'chartColors', 'mutedColor', 'showLegend', 'showValues']);
   if (typeof value.fontFamily !== 'string' || value.fontFamily.trim().length === 0 || value.fontFamily.length > 128) diagnostics.push(issue('invalid_render_plan', `${path}.fontFamily`, 'fontFamily is invalid'));
   if (!isPositiveFinite(value.fontSize, 300)) diagnostics.push(issue('invalid_render_plan', `${path}.fontSize`, 'fontSize must be positive and bounded'));
   if (typeof value.bold !== 'boolean') diagnostics.push(issue('invalid_render_plan', `${path}.bold`, 'bold must be boolean'));
+  if (value.fontWeight !== undefined && (!isIntegerInRange(value.fontWeight, 300, 900))) diagnostics.push(issue('invalid_render_plan', `${path}.fontWeight`, 'fontWeight must be an integer from 300 to 900'));
+  if (value.lineSpacingMultiple !== undefined && (!isFiniteInRange(value.lineSpacingMultiple, 1, 2))) diagnostics.push(issue('invalid_render_plan', `${path}.lineSpacingMultiple`, 'lineSpacingMultiple must be between 1 and 2'));
+  if (value.charSpacing !== undefined && (!isFiniteInRange(value.charSpacing, -2, 8))) diagnostics.push(issue('invalid_render_plan', `${path}.charSpacing`, 'charSpacing is out of range'));
+  if (value.borderWidth !== undefined && (!isFiniteInRange(value.borderWidth, 0, 8))) diagnostics.push(issue('invalid_render_plan', `${path}.borderWidth`, 'borderWidth is out of range'));
   for (const key of ['color', 'fill', 'tableHeaderFill', 'tableHeaderColor', 'tableBodyFill', 'borderColor', 'mutedColor'] as const) {
     if (value[key] !== undefined && !isColor(value[key])) diagnostics.push(issue('invalid_render_plan', `${path}.${key}`, `${key} must be a six digit hex color`));
   }
@@ -351,11 +371,14 @@ function validateContent(value: unknown, elementType: string, path: string, diag
       checkKeys(point, ['label', 'value'], pointPath, diagnostics);
       if (!boundedText(point.label) || typeof point.value !== 'number' || !Number.isFinite(point.value)) diagnostics.push(issue('invalid_render_plan', pointPath, 'chart point is invalid'));
     });
+  } else if (elementType === 'shape') {
+    checkKeys(value, ['type', 'shapeKind'], path, diagnostics);
+    if (!['line', 'ellipse', 'roundRect'].includes(String(value.shapeKind))) diagnostics.push(issue('invalid_render_plan', `${path}.shapeKind`, 'shapeKind is unsupported'));
   } else diagnostics.push(issue('unsupported_element_type', path, 'content type is unsupported'));
 }
 
 function validateOverlaps(
-  elements: readonly { readonly path: string; readonly geometry: PresentationRenderPlanGeometry }[],
+  elements: readonly { readonly path: string; readonly geometry: PresentationRenderPlanGeometry; readonly decoration: boolean }[],
   path: string,
   threshold: number,
   diagnostics: PresentationRenderPlanDiagnostic[]
@@ -365,6 +388,7 @@ function validateOverlaps(
     return;
   }
   for (let left = 0; left < elements.length; left += 1) for (let right = left + 1; right < elements.length; right += 1) {
+    if (elements[left].decoration || elements[right].decoration) continue;
     const a = elements[left].geometry;
     const b = elements[right].geometry;
     const intersectionWidth = Math.max(0, Math.min(a.x + a.width, b.x + b.width) - Math.max(a.x, b.x));
@@ -394,6 +418,10 @@ function isColor(value: unknown): value is string {
 
 function isPositiveFinite(value: unknown, maximum: number): value is number {
   return typeof value === 'number' && Number.isFinite(value) && value > 0 && value <= maximum;
+}
+
+function isFiniteInRange(value: unknown, minimum: number, maximum: number): value is number {
+  return typeof value === 'number' && Number.isFinite(value) && value >= minimum && value <= maximum;
 }
 
 function isNonNegativeFinite(value: unknown, maximum: number): value is number {

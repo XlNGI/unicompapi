@@ -28,6 +28,14 @@ export interface ResolvedPresentationPageStyle {
   readonly chartColors: readonly string[];
   readonly emphasis: PresentationDesignEmphasis;
   readonly contentRoles: PresentationDesignContentRoles;
+  readonly displayWeight: number;
+  readonly bodyWeight: number;
+  readonly displayScale: number;
+  readonly bodyScale: number;
+  readonly lineSpacing: number;
+  readonly charSpacing: number;
+  readonly surfaceTreatment: NonNullable<PresentationDesignIRPage['visualTreatment']>['surface'];
+  readonly accentTreatment: NonNullable<PresentationDesignIRPage['visualTreatment']>['accent'];
 }
 
 type ToneRecipe = { readonly hero: number; readonly closing: number; readonly statement: number;
@@ -52,13 +60,14 @@ export function resolvePresentationPageStyle(input: {
   if (!recipe || !presentationColorDirections.includes(design.colorDirection) || !presentationPageRoles.includes(page.pageRole))
     throw new TypeError('invalid_presentation_style_intent');
   const neutral = design.colorDirection === 'monochrome' || design.colorDirection === 'neutral';
+  const palette = design.visualSystem?.palette ?? tokens;
   const paint = (value: string) => neutral ? grayscale(color(value)) : color(value);
-  const base = paint(tokens.background);
-  const surface = paint(tokens.surface);
-  const text = paint(tokens.text);
-  const accent = paint(tokens.accent);
-  const secondary = paint(tokens.secondaryAccent);
-  const muted = paint(tokens.muted);
+  const base = paint(palette.background);
+  const surface = paint(palette.surface);
+  const text = paint(palette.text);
+  const accent = paint(palette.accent);
+  const secondary = paint(palette.secondaryAccent);
+  const muted = paint(palette.muted);
   const backgroundColor = page.pageRole === 'hero'
     ? recipe.strongHero ? accent : mix(base, accent, recipe.hero)
     : page.pageRole === 'closing' ? mix(base, accent, recipe.closing)
@@ -76,6 +85,9 @@ export function resolvePresentationPageStyle(input: {
   if (fontFamily.length > 128 || /[\u0000-\u001f:/\\]/u.test(fontFamily)) throw new TypeError('invalid_presentation_style_font');
   const contentRoles = Object.freeze(Object.fromEntries(Object.entries(page.contentRoles).map(([role, refs]) =>
     [role, Object.freeze([...refs])])) as unknown as PresentationDesignContentRoles);
+  const typography = design.visualSystem?.typography;
+  const surfaceTreatment = page.visualTreatment?.surface ?? (page.pageRole === 'metric' || page.pageRole === 'comparison' || page.pageRole === 'evidence' ? 'card' : 'flat');
+  const accentTreatment = page.visualTreatment?.accent ?? (page.pageRole === 'hero' || page.pageRole === 'section' || page.pageRole === 'statement' ? 'rule' : 'none');
   const chartColors = neutral ? [mix(backgroundColor, text, 0.90), mix(backgroundColor, text, 0.65), mix(backgroundColor, text, 0.42)]
     : [accent, secondary, muted];
   return Object.freeze({
@@ -89,7 +101,11 @@ export function resolvePresentationPageStyle(input: {
     surfaceColor: surface, cardFill, emphasisFill,
     tableHeaderFill, tableHeaderColor: readableForeground(tableHeaderFill, text),
     tableBodyFill: surface, borderColor: mix(surface, muted, 0.65),
-    chartColors: Object.freeze(chartColors), emphasis: Object.freeze({ ...page.emphasis }), contentRoles
+    chartColors: Object.freeze(chartColors), emphasis: Object.freeze({ ...page.emphasis }), contentRoles,
+    displayWeight: typography?.displayWeight ?? 700, bodyWeight: typography?.bodyWeight ?? 400,
+    displayScale: typography?.displayScale ?? 1, bodyScale: typography?.bodyScale ?? 1,
+    lineSpacing: typography?.lineSpacing ?? 1.2, charSpacing: typography?.charSpacing ?? 0,
+    surfaceTreatment, accentTreatment
   });
 }
 
@@ -112,7 +128,7 @@ export function compilePresentationElementStyle(input: {
   const fill = !generated && contentType === 'text' && !title
     ? metric || (emphasized && strong && primary) || (page.pageRole === 'statement' && emphasized)
       ? page.emphasisFill
-      : (evidence && primary) || (page.pageRole === 'comparison' && primary) ? page.cardFill : undefined
+      : ((evidence && primary) || (page.pageRole === 'comparison' && primary)) && page.surfaceTreatment === 'card' ? page.cardFill : undefined
     : undefined;
   const preferredTextColor = generated ? page.mutedColor : emphasized || metric ? page.accentColor
     : title ? page.headingColor : input.hierarchy === 'supporting' ? page.mutedColor : page.textColor;
@@ -122,11 +138,16 @@ export function compilePresentationElementStyle(input: {
     // Font metrics and geometry belong to the solver, never the paint compiler.
     fontSize: input.fontSize,
     bold: !generated && (title || primary || metric || (emphasized && strong)),
+    fontWeight: generated ? page.bodyWeight : (title || primary || metric ? page.displayWeight : page.bodyWeight),
+    lineSpacingMultiple: page.lineSpacing,
+    charSpacing: page.charSpacing,
     color: foreground,
-    ...(fill ? { fill } : {}), alignment: input.alignment, verticalAlignment: input.verticalAlignment,
+    ...(fill ? { fill } : {}),
+    ...(page.surfaceTreatment === 'outlined' && !generated && !title ? { borderColor: page.accentColor, borderWidth: 1 } : {}),
+    alignment: input.alignment, verticalAlignment: input.verticalAlignment,
     ...(contentType === 'table' ? { color: readableForeground(page.tableBodyFill, page.textColor),
       tableHeaderFill: page.tableHeaderFill, tableHeaderColor: page.tableHeaderColor,
-      tableBodyFill: page.tableBodyFill, borderColor: page.borderColor } : {}),
+      tableBodyFill: page.tableBodyFill, borderColor: page.borderColor, borderWidth: 0.6 } : {}),
     ...(contentType === 'chart' ? { chartColors: page.chartColors,
       mutedColor: readableForeground(page.backgroundColor, page.mutedColor), showLegend: false, showValues: true } : {})
   });

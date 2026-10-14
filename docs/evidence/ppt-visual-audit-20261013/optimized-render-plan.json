@@ -1,0 +1,915 @@
+{
+  "schemaVersion": 1,
+  "inputIdentity": {
+    "contentDigest": "ce31bfd72d4fcb5b424a6e8207c7ca0458f1aa082f14d3b762b067191bcb8eb3",
+    "contentLineageId": "content",
+    "contentRevision": 1,
+    "designDigest": "9c696f4e22c6fadbbb7fbe38cfc8e66f3571c01475ab76322f53f98c2d8ef3b2",
+    "layoutDigest": "a951527f7296ee622302accd6b1292fa8ac4124f48a0aafb348849717022db68",
+    "layoutId": "layout-b09c7d54e7dd3d63683312b9913f78ac"
+  },
+  "canvas": {
+    "height": 7.5,
+    "width": 13.333
+  },
+  "minimumFontSize": 14,
+  "pages": [
+    {
+      "pageNumber": 1,
+      "pageRole": "hero",
+      "backgroundColor": "134249",
+      "elements": [
+        {
+          "renderId": "element-ca6f0be01d5f88df912bc75e32d70efe",
+          "source": {
+            "kind": "content",
+            "ref": "content:a24"
+          },
+          "type": "text",
+          "geometry": {
+            "height": 3.277,
+            "width": 10.1117,
+            "x": 1.6106,
+            "y": 1.9015
+          },
+          "style": {
+            "alignment": "center",
+            "bold": true,
+            "charSpacing": 0.15,
+            "color": "35D6C8",
+            "fontFamily": "Microsoft YaHei",
+            "fontSize": 38,
+            "fontWeight": 800,
+            "lineSpacingMultiple": 1.24,
+            "verticalAlignment": "middle"
+          },
+          "content": {
+            "type": "text",
+            "text": "测试演示文稿：质量闭环"
+          },
+          "zIndex": 0
+        },
+        {
+          "renderId": "element-8c9513023deebe3fc6b44912dafe8908",
+          "source": {
+            "key": "page-number",
+            "kind": "generated"
+          },
+          "type": "text",
+          "geometry": {
+            "height": 0.18,
+            "width": 0.45,
+            "x": 11.483,
+            "y": 6.5325
+          },
+          "style": {
+            "alignment": "right",
+            "bold": false,
+            "charSpacing": 0.15,
+            "color": "B7C9DC",
+            "fontFamily": "Microsoft YaHei",
+            "fontSize": 10,
+            "fontWeight": 400,
+            "lineSpacingMultiple": 1.24,
+            "verticalAlignment": "middle"
+          },
+          "content": {
+            "type": "text",
+            "text": "1"
+          },
+          "zIndex": 1
+        }
+      ]
+    },
+    {
+      "pageNumber": 2,
+      "pageRole": "content",
+      "backgroundColor": "07111F",
+      "elements": [
+        {
+          "renderId": "element-b369e3dbfbad4b1bfa95716a900377c4",
+          "source": {
+            "kind": "content",
+            "ref": "content:a4"
+          },
+          "type": "text",
+          "geometry": {
+            "height": 1.6411,
+            "width": 11.4664,
+            "x": 0.9333,
+            "y": 0.8526
+          },
+          "style": {
+            "alignment": "center",
+            "bold": true,
+            "charSpacing": 0.15,
+            "color": "35D6C8",
+            "fontFamily": "Microsoft YaHei",
+            "fontSize": 37,
+            "fontWeight": 800,
+            "lineSpacingMultiple": 1.24,
+            "verticalAlignment": "middle"
+          },
+          "content": {
+            "type": "text",
+            "text": "测试目标"
+          },
+          "zIndex": 0
+        },
+        {
+          "renderId": "element-3082917807527c071b15d2cf5ad3312c",
+          "source": {
+            "kind": "content",
+            "ref": "content:a2"
+          },
+          "type": "text",
+          "geometry": {
+            "height": 2.8136,
+            "width": 11.4664,
+            "x": 0.9333,
+            "y": 3.4213
+          },
+          "style": {
+            "alignment": "left",
+            "bold": false,
+            "charSpacing": 0.15,
+            "color": "F5FAFF",
+            "fontFamily": "Microsoft YaHei",
+            "fontSize": 21,
+            "fontWeight": 400,
+            "lineSpacingMultiple": 1.24,
+            "verticalAlignment": "top"
+          },
+          "content": {
+            "type": "text",
+            "text": "验证生成链路稳定、可复核、可交付"
+          },
+          "zIndex": 1
+        },
+        {
+          "renderId": "element-ea89ca1a810ceee2a939587624e48115",
+          "source": {
+            "key": "page-number",
+            "kind": "generated"
+          },
+          "type": "text",
+          "geometry": {
+            "height": 0.18,
+            "width": 0.45,
+            "x": 11.9497,
+            "y": 6.795
+          },
+          "style": {
+            "alignment": "right",
+            "bold": false,
+            "charSpacing": 0.15,
+            "color": "B7C9DC",
+            "fontFamily": "Microsoft YaHei",
+            "fontSize": 10,
+            "fontWeight": 400,
+            "lineSpacingMultiple": 1.24,
+            "verticalAlignment": "middle"
+          },
+          "content": {
+            "type": "text",
+            "text": "2"
+          },
+          "zIndex": 2
+        }
+      ]
+    },
+    {
+      "pageNumber": 3,
+      "pageRole": "comparison",
+      "backgroundColor": "1A1729",
+      "elements": [
+        {
+          "renderId": "element-12b7539ac0afccef434d571cacf25272",
+          "source": {
+            "kind": "content",
+            "ref": "content:a10"
+          },
+          "type": "text",
+          "geometry": {
+            "height": 0.7185,
+            "width": 11.4664,
+            "x": 0.9333,
+            "y": 0.525
+          },
+          "style": {
+            "alignment": "left",
+            "bold": true,
+            "charSpacing": 0.15,
+            "color": "35D6C8",
+            "fontFamily": "Microsoft YaHei",
+            "fontSize": 37,
+            "fontWeight": 800,
+            "lineSpacingMultiple": 1.24,
+            "verticalAlignment": "middle"
+          },
+          "content": {
+            "type": "text",
+            "text": "测试范围"
+          },
+          "zIndex": 0
+        },
+        {
+          "renderId": "element-fc853a51f1d14f6aad2179c8e3d16d06",
+          "source": {
+            "kind": "content",
+            "ref": "content:a6"
+          },
+          "type": "text",
+          "geometry": {
+            "height": 0.8077,
+            "width": 5.5932,
+            "x": 0.9333,
+            "y": 1.5235
+          },
+          "style": {
+            "alignment": "left",
+            "bold": false,
+            "charSpacing": 0.15,
+            "color": "F5FAFF",
+            "fontFamily": "Microsoft YaHei",
+            "fontSize": 21,
+            "fontWeight": 400,
+            "lineSpacingMultiple": 1.24,
+            "verticalAlignment": "top"
+          },
+          "content": {
+            "type": "text",
+            "text": "覆盖内容规划、Design IR、布局、渲染和登记"
+          },
+          "zIndex": 1
+        },
+        {
+          "renderId": "element-0f785b0b2269368acf547b06a53d6f1a",
+          "source": {
+            "kind": "content",
+            "ref": "content:a8"
+          },
+          "type": "text",
+          "geometry": {
+            "height": 0.8077,
+            "width": 5.5932,
+            "x": 6.8065,
+            "y": 1.5235
+          },
+          "style": {
+            "alignment": "left",
+            "bold": false,
+            "charSpacing": 0.15,
+            "color": "B7C9DC",
+            "fontFamily": "Microsoft YaHei",
+            "fontSize": 17,
+            "fontWeight": 400,
+            "lineSpacingMultiple": 1.24,
+            "verticalAlignment": "top"
+          },
+          "content": {
+            "type": "text",
+            "text": "不覆盖真实 Provider 收费请求和 macOS 延期目标"
+          },
+          "zIndex": 2
+        },
+        {
+          "renderId": "element-219e0bfd34a04c262d7d0d3ff1bf7c93",
+          "source": {
+            "key": "page-number",
+            "kind": "generated"
+          },
+          "type": "text",
+          "geometry": {
+            "height": 0.18,
+            "width": 0.45,
+            "x": 11.9497,
+            "y": 6.795
+          },
+          "style": {
+            "alignment": "right",
+            "bold": false,
+            "charSpacing": 0.15,
+            "color": "B7C9DC",
+            "fontFamily": "Microsoft YaHei",
+            "fontSize": 10,
+            "fontWeight": 400,
+            "lineSpacingMultiple": 1.24,
+            "verticalAlignment": "middle"
+          },
+          "content": {
+            "type": "text",
+            "text": "3"
+          },
+          "zIndex": 3
+        }
+      ]
+    },
+    {
+      "pageNumber": 4,
+      "pageRole": "process",
+      "backgroundColor": "07111F",
+      "elements": [
+        {
+          "renderId": "element-a98fc26efeff15031e34cc388ecd61db",
+          "source": {
+            "key": "decoration-node",
+            "kind": "generated"
+          },
+          "type": "shape",
+          "geometry": {
+            "height": 0.2,
+            "width": 0.2,
+            "x": 2.1616,
+            "y": 1.2835
+          },
+          "style": {
+            "alignment": "center",
+            "bold": false,
+            "color": "35D6C8",
+            "fontFamily": "Microsoft YaHei",
+            "fontSize": 1,
+            "verticalAlignment": "middle"
+          },
+          "content": {
+            "type": "shape",
+            "shapeKind": "ellipse"
+          },
+          "zIndex": 0
+        },
+        {
+          "renderId": "element-9ec0a0834e6420141aeefd3adcc391ca",
+          "source": {
+            "key": "decoration-node",
+            "kind": "generated"
+          },
+          "type": "shape",
+          "geometry": {
+            "height": 0.2,
+            "width": 0.2,
+            "x": 5.0982,
+            "y": 1.2835
+          },
+          "style": {
+            "alignment": "center",
+            "bold": false,
+            "color": "35D6C8",
+            "fontFamily": "Microsoft YaHei",
+            "fontSize": 1,
+            "verticalAlignment": "middle"
+          },
+          "content": {
+            "type": "shape",
+            "shapeKind": "ellipse"
+          },
+          "zIndex": 1
+        },
+        {
+          "renderId": "element-7e700468bd2de568db24daf913cd98f5",
+          "source": {
+            "key": "decoration-node",
+            "kind": "generated"
+          },
+          "type": "shape",
+          "geometry": {
+            "height": 0.2,
+            "width": 0.2,
+            "x": 8.0348,
+            "y": 1.2835
+          },
+          "style": {
+            "alignment": "center",
+            "bold": false,
+            "color": "35D6C8",
+            "fontFamily": "Microsoft YaHei",
+            "fontSize": 1,
+            "verticalAlignment": "middle"
+          },
+          "content": {
+            "type": "shape",
+            "shapeKind": "ellipse"
+          },
+          "zIndex": 2
+        },
+        {
+          "renderId": "element-f2811416e71bf3a2cac4bfb33b124fa5",
+          "source": {
+            "key": "decoration-node",
+            "kind": "generated"
+          },
+          "type": "shape",
+          "geometry": {
+            "height": 0.2,
+            "width": 0.2,
+            "x": 10.971400000000001,
+            "y": 1.2835
+          },
+          "style": {
+            "alignment": "center",
+            "bold": false,
+            "color": "35D6C8",
+            "fontFamily": "Microsoft YaHei",
+            "fontSize": 1,
+            "verticalAlignment": "middle"
+          },
+          "content": {
+            "type": "shape",
+            "shapeKind": "ellipse"
+          },
+          "zIndex": 3
+        },
+        {
+          "renderId": "element-5cf21623f38b816067bf82097530e8b0",
+          "source": {
+            "key": "decoration-line",
+            "kind": "generated"
+          },
+          "type": "shape",
+          "geometry": {
+            "height": 0.025,
+            "width": 2.7365999999999997,
+            "x": 2.3616,
+            "y": 1.3705
+          },
+          "style": {
+            "alignment": "center",
+            "bold": false,
+            "color": "35D6C8",
+            "fontFamily": "Microsoft YaHei",
+            "fontSize": 1,
+            "verticalAlignment": "middle"
+          },
+          "content": {
+            "type": "shape",
+            "shapeKind": "line"
+          },
+          "zIndex": 4
+        },
+        {
+          "renderId": "element-153701679834ba03e9127ac7e704afc8",
+          "source": {
+            "key": "decoration-line",
+            "kind": "generated"
+          },
+          "type": "shape",
+          "geometry": {
+            "height": 0.025,
+            "width": 2.7366,
+            "x": 5.2982,
+            "y": 1.3705
+          },
+          "style": {
+            "alignment": "center",
+            "bold": false,
+            "color": "35D6C8",
+            "fontFamily": "Microsoft YaHei",
+            "fontSize": 1,
+            "verticalAlignment": "middle"
+          },
+          "content": {
+            "type": "shape",
+            "shapeKind": "line"
+          },
+          "zIndex": 5
+        },
+        {
+          "renderId": "element-f4a424b0270e205014fe5d26b3442c5d",
+          "source": {
+            "key": "decoration-line",
+            "kind": "generated"
+          },
+          "type": "shape",
+          "geometry": {
+            "height": 0.025,
+            "width": 2.7366,
+            "x": 8.2348,
+            "y": 1.3705
+          },
+          "style": {
+            "alignment": "center",
+            "bold": false,
+            "color": "35D6C8",
+            "fontFamily": "Microsoft YaHei",
+            "fontSize": 1,
+            "verticalAlignment": "middle"
+          },
+          "content": {
+            "type": "shape",
+            "shapeKind": "line"
+          },
+          "zIndex": 6
+        },
+        {
+          "renderId": "element-f427c41391f3b2fe336e758b4602254e",
+          "source": {
+            "kind": "content",
+            "ref": "content:a17"
+          },
+          "type": "text",
+          "geometry": {
+            "height": 0.7185,
+            "width": 11.4664,
+            "x": 0.9333,
+            "y": 0.525
+          },
+          "style": {
+            "alignment": "center",
+            "bold": true,
+            "charSpacing": 0.15,
+            "color": "35D6C8",
+            "fontFamily": "Microsoft YaHei",
+            "fontSize": 37,
+            "fontWeight": 800,
+            "lineSpacingMultiple": 1.24,
+            "verticalAlignment": "middle"
+          },
+          "content": {
+            "type": "text",
+            "text": "测试流程"
+          },
+          "zIndex": 7
+        },
+        {
+          "renderId": "element-2df71e84fa84c0df84fe0ca52aa3b0fe",
+          "source": {
+            "kind": "content",
+            "ref": "content:a13"
+          },
+          "type": "text",
+          "geometry": {
+            "height": 0.8077,
+            "width": 2.6566,
+            "x": 0.9333,
+            "y": 1.5235
+          },
+          "style": {
+            "alignment": "left",
+            "bold": false,
+            "charSpacing": 0.15,
+            "color": "F5FAFF",
+            "fontFamily": "Microsoft YaHei",
+            "fontSize": 21,
+            "fontWeight": 400,
+            "lineSpacingMultiple": 1.24,
+            "verticalAlignment": "top"
+          },
+          "content": {
+            "type": "text",
+            "text": "第一步：准备同等内容与约束"
+          },
+          "zIndex": 8
+        },
+        {
+          "renderId": "element-c19921fb4813ac95123a93a42dd93060",
+          "source": {
+            "kind": "content",
+            "ref": "content:a14"
+          },
+          "type": "text",
+          "geometry": {
+            "height": 1.181,
+            "width": 2.6566,
+            "x": 3.8699,
+            "y": 1.5235
+          },
+          "style": {
+            "alignment": "left",
+            "bold": false,
+            "charSpacing": 0.15,
+            "color": "F5FAFF",
+            "fontFamily": "Microsoft YaHei",
+            "fontSize": 21,
+            "fontWeight": 400,
+            "lineSpacingMultiple": 1.24,
+            "verticalAlignment": "top"
+          },
+          "content": {
+            "type": "text",
+            "text": "第二步：生成 Art Direction 与 Design IR"
+          },
+          "zIndex": 9
+        },
+        {
+          "renderId": "element-f2dd490b6c0b06e6ea603bf69f4b57de",
+          "source": {
+            "kind": "content",
+            "ref": "content:a15"
+          },
+          "type": "text",
+          "geometry": {
+            "height": 0.8077,
+            "width": 2.6566,
+            "x": 6.8065,
+            "y": 1.5235
+          },
+          "style": {
+            "alignment": "left",
+            "bold": false,
+            "charSpacing": 0.15,
+            "color": "F5FAFF",
+            "fontFamily": "Microsoft YaHei",
+            "fontSize": 21,
+            "fontWeight": 400,
+            "lineSpacingMultiple": 1.24,
+            "verticalAlignment": "top"
+          },
+          "content": {
+            "type": "text",
+            "text": "第三步：执行布局、渲染和结构检查"
+          },
+          "zIndex": 10
+        },
+        {
+          "renderId": "element-87857bcc3ab80c19c0f32fdd48430eca",
+          "source": {
+            "kind": "content",
+            "ref": "content:a16"
+          },
+          "type": "text",
+          "geometry": {
+            "height": 0.8077,
+            "width": 2.6566,
+            "x": 9.7431,
+            "y": 1.5235
+          },
+          "style": {
+            "alignment": "left",
+            "bold": false,
+            "charSpacing": 0.15,
+            "color": "F5FAFF",
+            "fontFamily": "Microsoft YaHei",
+            "fontSize": 21,
+            "fontWeight": 400,
+            "lineSpacingMultiple": 1.24,
+            "verticalAlignment": "top"
+          },
+          "content": {
+            "type": "text",
+            "text": "第四步：保存截图与可复核证据"
+          },
+          "zIndex": 11
+        },
+        {
+          "renderId": "element-c984bce1aae3c6018482e85822f62569",
+          "source": {
+            "key": "page-number",
+            "kind": "generated"
+          },
+          "type": "text",
+          "geometry": {
+            "height": 0.18,
+            "width": 0.45,
+            "x": 11.9497,
+            "y": 6.795
+          },
+          "style": {
+            "alignment": "right",
+            "bold": false,
+            "charSpacing": 0.15,
+            "color": "B7C9DC",
+            "fontFamily": "Microsoft YaHei",
+            "fontSize": 10,
+            "fontWeight": 400,
+            "lineSpacingMultiple": 1.24,
+            "verticalAlignment": "middle"
+          },
+          "content": {
+            "type": "text",
+            "text": "4"
+          },
+          "zIndex": 12
+        }
+      ]
+    },
+    {
+      "pageNumber": 5,
+      "pageRole": "metric",
+      "backgroundColor": "13394E",
+      "elements": [
+        {
+          "renderId": "element-7731d75f7f45101711147d710ff4a33e",
+          "source": {
+            "kind": "content",
+            "ref": "content:a23"
+          },
+          "type": "text",
+          "geometry": {
+            "height": 0.7185,
+            "width": 11.4664,
+            "x": 0.9333,
+            "y": 0.525
+          },
+          "style": {
+            "alignment": "left",
+            "bold": true,
+            "charSpacing": 0.15,
+            "color": "35D6C8",
+            "fontFamily": "Microsoft YaHei",
+            "fontSize": 37,
+            "fontWeight": 800,
+            "lineSpacingMultiple": 1.24,
+            "verticalAlignment": "middle"
+          },
+          "content": {
+            "type": "text",
+            "text": "预期结果"
+          },
+          "zIndex": 0
+        },
+        {
+          "renderId": "element-e2beb732308768bdb148ecda51edda07",
+          "source": {
+            "kind": "content",
+            "ref": "content:a20"
+          },
+          "type": "text",
+          "geometry": {
+            "height": 0.4343,
+            "width": 3.6355,
+            "x": 0.9333,
+            "y": 1.5235
+          },
+          "style": {
+            "alignment": "left",
+            "bold": false,
+            "borderColor": "35D6C8",
+            "borderWidth": 1,
+            "charSpacing": 0.15,
+            "color": "F5FAFF",
+            "fontFamily": "Microsoft YaHei",
+            "fontSize": 21,
+            "fontWeight": 400,
+            "lineSpacingMultiple": 1.24,
+            "verticalAlignment": "top"
+          },
+          "content": {
+            "type": "text",
+            "text": "每页内容完整且无越界"
+          },
+          "zIndex": 1
+        },
+        {
+          "renderId": "element-bf3c71f64716729a035044ad3024fb77",
+          "source": {
+            "kind": "content",
+            "ref": "content:a21"
+          },
+          "type": "text",
+          "geometry": {
+            "height": 0.4343,
+            "width": 3.6355,
+            "x": 4.8488,
+            "y": 1.5235
+          },
+          "style": {
+            "alignment": "left",
+            "bold": false,
+            "borderColor": "35D6C8",
+            "borderWidth": 1,
+            "charSpacing": 0.15,
+            "color": "F5FAFF",
+            "fontFamily": "Microsoft YaHei",
+            "fontSize": 21,
+            "fontWeight": 400,
+            "lineSpacingMultiple": 1.24,
+            "verticalAlignment": "top"
+          },
+          "content": {
+            "type": "text",
+            "text": "流程页按语义顺序呈现"
+          },
+          "zIndex": 2
+        },
+        {
+          "renderId": "element-8583b31fbcb59c930c326ffd1f311c2d",
+          "source": {
+            "kind": "content",
+            "ref": "content:a22"
+          },
+          "type": "text",
+          "geometry": {
+            "height": 0.4343,
+            "width": 3.6355,
+            "x": 8.7642,
+            "y": 1.5235
+          },
+          "style": {
+            "alignment": "left",
+            "bold": false,
+            "borderColor": "35D6C8",
+            "borderWidth": 1,
+            "charSpacing": 0.15,
+            "color": "F5FAFF",
+            "fontFamily": "Microsoft YaHei",
+            "fontSize": 21,
+            "fontWeight": 400,
+            "lineSpacingMultiple": 1.24,
+            "verticalAlignment": "top"
+          },
+          "content": {
+            "type": "text",
+            "text": "视觉风格跨页一致并可解释"
+          },
+          "zIndex": 3
+        },
+        {
+          "renderId": "element-8cbb2d33a978a002d3a44eb5eb307704",
+          "source": {
+            "key": "page-number",
+            "kind": "generated"
+          },
+          "type": "text",
+          "geometry": {
+            "height": 0.18,
+            "width": 0.45,
+            "x": 11.9497,
+            "y": 6.795
+          },
+          "style": {
+            "alignment": "right",
+            "bold": false,
+            "charSpacing": 0.15,
+            "color": "B7C9DC",
+            "fontFamily": "Microsoft YaHei",
+            "fontSize": 10,
+            "fontWeight": 400,
+            "lineSpacingMultiple": 1.24,
+            "verticalAlignment": "middle"
+          },
+          "content": {
+            "type": "text",
+            "text": "5"
+          },
+          "zIndex": 4
+        }
+      ]
+    },
+    {
+      "pageNumber": 6,
+      "pageRole": "closing",
+      "backgroundColor": "0C2530",
+      "elements": [
+        {
+          "renderId": "element-68541c4d449d72e30685f3f815d2098e",
+          "source": {
+            "kind": "content",
+            "ref": "content:a24"
+          },
+          "type": "text",
+          "geometry": {
+            "height": 2.7991,
+            "width": 8.6371,
+            "x": 2.3479,
+            "y": 2.1405
+          },
+          "style": {
+            "alignment": "center",
+            "bold": true,
+            "charSpacing": 0.15,
+            "color": "35D6C8",
+            "fontFamily": "Microsoft YaHei",
+            "fontSize": 38,
+            "fontWeight": 800,
+            "lineSpacingMultiple": 1.24,
+            "verticalAlignment": "middle"
+          },
+          "content": {
+            "type": "text",
+            "text": "测试演示文稿：质量闭环"
+          },
+          "zIndex": 0
+        },
+        {
+          "renderId": "element-425450df398ae7e012b54e0739e326c8",
+          "source": {
+            "key": "page-number",
+            "kind": "generated"
+          },
+          "type": "text",
+          "geometry": {
+            "height": 0.18,
+            "width": 0.45,
+            "x": 11.483,
+            "y": 6.5325
+          },
+          "style": {
+            "alignment": "right",
+            "bold": false,
+            "charSpacing": 0.15,
+            "color": "B7C9DC",
+            "fontFamily": "Microsoft YaHei",
+            "fontSize": 10,
+            "fontWeight": 400,
+            "lineSpacingMultiple": 1.24,
+            "verticalAlignment": "middle"
+          },
+          "content": {
+            "type": "text",
+            "text": "6"
+          },
+          "zIndex": 1
+        }
+      ]
+    }
+  ]
+}

@@ -1,0 +1,74 @@
+{
+  "schemaVersion": 1,
+  "date": "2026-10-14",
+  "basis": "compiled production Runner with local Office/PDF QA",
+  "providerRequests": 0,
+  "planner": "deterministic semantic fixture (not a live LLM)",
+  "multimodalReview": "not_available",
+  "targetPages": [
+    4
+  ],
+  "pages": 6,
+  "canonicalContentPreserved": true,
+  "productionPlanReadback": true,
+  "untouchedPartsPreserved": [
+    "_rels/.rels",
+    "docProps/app.xml",
+    "docProps/core.xml",
+    "ppt/_rels/presentation.xml.rels",
+    "ppt/theme/theme1.xml",
+    "ppt/presentation.xml",
+    "ppt/presProps.xml",
+    "ppt/tableStyles.xml",
+    "ppt/viewProps.xml",
+    "ppt/slideLayouts/slideLayout1.xml",
+    "ppt/slideLayouts/_rels/slideLayout1.xml.rels",
+    "ppt/slides/slide1.xml",
+    "ppt/slides/_rels/slide1.xml.rels",
+    "ppt/notesSlides/notesSlide1.xml",
+    "ppt/notesSlides/_rels/notesSlide1.xml.rels",
+    "ppt/slides/slide2.xml",
+    "ppt/slides/_rels/slide2.xml.rels",
+    "ppt/notesSlides/notesSlide2.xml",
+    "ppt/notesSlides/_rels/notesSlide2.xml.rels",
+    "ppt/slides/slide3.xml",
+    "ppt/slides/_rels/slide3.xml.rels",
+    "ppt/notesSlides/notesSlide3.xml",
+    "ppt/notesSlides/_rels/notesSlide3.xml.rels",
+    "ppt/notesSlides/notesSlide4.xml",
+    "ppt/notesSlides/_rels/notesSlide4.xml.rels",
+    "ppt/slides/slide5.xml",
+    "ppt/slides/_rels/slide5.xml.rels",
+    "ppt/notesSlides/notesSlide5.xml",
+    "ppt/notesSlides/_rels/notesSlide5.xml.rels",
+    "ppt/slides/slide6.xml",
+    "ppt/slides/_rels/slide6.xml.rels",
+    "ppt/notesSlides/notesSlide6.xml",
+    "ppt/notesSlides/_rels/notesSlide6.xml.rels",
+    "ppt/slideMasters/slideMaster1.xml",
+    "ppt/slideMasters/_rels/slideMaster1.xml.rels",
+    "ppt/notesMasters/notesMaster1.xml",
+    "ppt/notesMasters/_rels/notesMaster1.xml.rels"
+  ],
+  "parentSha256": "ed62d400883dc17bded166c6d8907809f45e2979a4d330b6248d770df763e363",
+  "revisedSha256": "65d4b831df64e380c1c81379b50add3f79905f47a57a5e3875f706615463857d",
+  "outcomes": {
+    "parent": "completed",
+    "revised": "completed"
+  },
+  "renderedQa": [
+    {
+      "previewCount": 6,
+      "diagnostics": []
+    },
+    {
+      "previewCount": 6,
+      "diagnostics": []
+    }
+  ],
+  "layoutAudit": {
+    "status": "passed",
+    "multimodalReview": "not_available",
+    "diagnostics": []
+  }
+}

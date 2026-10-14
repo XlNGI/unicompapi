@@ -39,6 +39,8 @@ import { canonicalizeLayoutJson } from '../../domain/entities/presentation-layou
 import { compilePresentationRenderPlan, buildPresentationDesignSnapshot } from './presentation-render-plan-compiler';
 import type { PresentationDesignCompilationSnapshot, PresentationDesignStatus } from './presentation-render-plan-compiler';
 import { renderPresentationRenderPlan } from './presentation-design-renderer';
+import { replaceRenderedPresentationSlides } from './presentation-scoped-slide-writer';
+import type { ProductionPresentationLayoutIR } from '../../domain/entities/presentation-layout-ir';
 import { applyOfficeDocumentPatchesToBuffer } from './office-document-tool-executor';
 import {
   presentationOutlineLimits,
@@ -82,6 +84,12 @@ export interface GenerateDocumentFileInput {
   readonly presentationTemplate?: PresentationTemplateId;
   /** Validated production Design IR. Invalid or absent IR uses the legacy template path. */
   readonly designIR?: ProductionPresentationDesignIR;
+  readonly visualRevision?: {
+    readonly sourceBuffer: Uint8Array;
+    readonly previousLayoutIR: ProductionPresentationLayoutIR;
+    readonly previousDesignIR: ProductionPresentationDesignIR;
+    readonly targetPageNumbers: readonly number[];
+  };
   readonly artDirectionStatus?: PresentationDesignStatus;
   readonly designIrStatus?: PresentationDesignStatus;
   readonly artDirectionDiagnostics?: readonly { readonly code: string }[];
@@ -164,7 +172,8 @@ async function buildDocumentOutput(
             input.artDirectionDiagnostics,
             contentSnapshot,
             input.onPlanPrepared,
-            input.compatibilityReason
+            input.compatibilityReason,
+            input.visualRevision
         );
   const revisedBuffer =
     (input.revisionSourceBuffer || input.revisionSourcePath) && (input.revisionPatch || input.revisionPatches)
@@ -837,7 +846,8 @@ async function buildPptBuffer(
   artDirectionDiagnostics?: GenerateDocumentFileInput['artDirectionDiagnostics'],
   contentSnapshot?: DocumentContentSnapshotV1,
   onPlanPrepared?: PresentationPlanPrepared,
-  compatibilityReason?: GenerateDocumentFileInput['compatibilityReason']
+  compatibilityReason?: GenerateDocumentFileInput['compatibilityReason'],
+  visualRevision?: GenerateDocumentFileInput['visualRevision']
 ): Promise<Buffer> {
   const pptx = new PptxGenJS();
   pptx.layout = 'LAYOUT_WIDE';
@@ -857,7 +867,8 @@ async function buildPptBuffer(
   try {
   const renderOutline = normalizePresentationOutline(outline);
   const canonicalContent = contentSnapshot ?? buildDocumentContentSnapshot({ outline });
-  const compilation = designIR === undefined ? undefined : compilePresentationRenderPlan(outline, designIR, template.tokens, { contentSnapshot: canonicalContent });
+  const compilation = designIR === undefined ? undefined : compilePresentationRenderPlan(outline, designIR, template.tokens, {
+    contentSnapshot: canonicalContent, ...(visualRevision ? { visualRevision } : {}) });
   if (compilation?.diagnostics.some(diagnostic => ['content_snapshot_conflict', 'invalid_content_snapshot'].includes(diagnostic.code))) {
     throw new TypeError('content_snapshot_conflict');
   }
@@ -874,11 +885,12 @@ async function buildPptBuffer(
 
   // A declared business organization is an execution requirement. A generic
   // template cannot certify that its comparison, sequence or support ran.
-  if (designIR?.pages.some(page => page.organization !== undefined) && fallbackReason !== undefined) {
+  if (designIR?.pages.some(page => page.organization !== undefined || page.visualTreatment !== undefined) && fallbackReason !== undefined) {
     throw new PresentationLayoutError('The declared content organization could not be rendered');
   }
 
   const designAware = fallbackReason === undefined && compilation?.plan !== undefined;
+  if (visualRevision && !designAware) throw new PresentationLayoutError('Visual revision cannot fall back to a template');
   const pages = designAware ? undefined : expandPresentationSections(renderOutline, template, images);
   const actualPageCount = designAware ? compilation!.plan!.pages.length : 1 + pages!.length + (renderOutline.sections.length > 0 ? 1 : 0);
   if (actualPageCount > presentationOutlineLimits.maxEstimatedPages) {
@@ -900,7 +912,7 @@ async function buildPptBuffer(
     ...(designAware && compilation?.layoutIR ? { layoutIR: compilation.layoutIR } : {}),
     ...(designAware && compilation?.plan ? { renderPlan: compilation.plan } : {}), snapshot }));
   if (designAware) {
-    renderPresentationRenderPlan(pptx, compilation.plan!);
+    renderPresentationRenderPlan(pptx, compilation.plan!, visualRevision?.targetPageNumbers);
   } else {
       renderPresentationCover(pptx, outline, template);
       pages!.forEach((page, index) => renderPresentationPage(pptx, page, template, index + 2));
@@ -910,7 +922,9 @@ async function buildPptBuffer(
 
   try { await onDesignCompiled?.(snapshot); }
   catch { /* Development observability cannot affect file generation. */ }
-  return (await pptx.write({ outputType: 'nodebuffer' })) as Buffer;
+  const output = (await pptx.write({ outputType: 'nodebuffer' })) as Buffer;
+  return visualRevision ? replaceRenderedPresentationSlides({ sourceBuffer: visualRevision.sourceBuffer,
+    renderedBuffer: output, targetPageNumbers: [...visualRevision.targetPageNumbers].sort((a, b) => a - b) }) : output;
   } catch (error) {
     await reportLayout('failed');
     throw error;

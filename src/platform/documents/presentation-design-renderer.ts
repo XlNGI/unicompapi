@@ -2,8 +2,9 @@ import PptxGenJS from 'pptxgenjs';
 import type { PresentationRenderPlan, PresentationRenderPlanElement } from '../../domain/entities/presentation-render-plan';
 
 /** Writes an already validated Render Plan without choosing page geometry or visual hierarchy. */
-export function renderPresentationRenderPlan(pptx: PptxGenJS, plan: PresentationRenderPlan): void {
+export function renderPresentationRenderPlan(pptx: PptxGenJS, plan: PresentationRenderPlan, targetPageNumbers?: readonly number[]): void {
   for (const page of plan.pages) {
+    if (targetPageNumbers && !targetPageNumbers.includes(page.pageNumber)) continue;
     const slide = pptx.addSlide();
     slide.background = { color: page.backgroundColor };
     for (const element of [...page.elements].sort((left, right) => left.zIndex - right.zIndex)) renderElement(slide, element);
@@ -19,9 +20,12 @@ function renderElement(slide: PptxGenJS.Slide, element: PresentationRenderPlanEl
       objectName, x, y, w, h,
       fontFace: style.fontFamily,
       fontSize: style.fontSize,
-      bold: style.bold,
+      bold: style.fontWeight === undefined ? style.bold : style.fontWeight >= 600,
+      ...(style.lineSpacingMultiple === undefined ? {} : { lineSpacingMultiple: style.lineSpacingMultiple }),
+      ...(style.charSpacing === undefined ? {} : { charSpacing: style.charSpacing }),
       color: style.color,
       ...(style.fill ? { fill: { color: style.fill } } : {}),
+      ...(style.borderWidth && style.borderColor ? { line: { color: style.borderColor, width: style.borderWidth } } : {}),
       align: style.alignment,
       valign: style.verticalAlignment,
       margin: 0,
@@ -43,7 +47,7 @@ function renderElement(slide: PptxGenJS.Slide, element: PresentationRenderPlanEl
       fontFace: style.fontFamily,
       fontSize: style.fontSize,
       color: style.color,
-      border: { pt: 0.6, color: style.borderColor ?? style.color },
+      border: { pt: style.borderWidth ?? 0.6, color: style.borderColor ?? style.color },
       margin: 0.06,
       valign: style.verticalAlignment,
       autoPage: false,
@@ -70,6 +74,16 @@ function renderElement(slide: PptxGenJS.Slide, element: PresentationRenderPlanEl
       catAxisLabelColor: style.mutedColor ?? style.color,
       valAxisLabelColor: style.mutedColor ?? style.color,
       chartColors: [...(style.chartColors ?? [style.color])]
+    });
+    return;
+  }
+  if (content.type === 'shape') {
+    slide.addShape(content.shapeKind, {
+      objectName, x, y, w, h,
+      ...(content.shapeKind === 'line' ? { line: { color: style.borderColor ?? style.color, width: style.borderWidth ?? 1 } } : {
+        fill: { color: style.fill ?? style.color, ...(content.shapeKind === 'roundRect' && !style.fill ? { transparency: 100 } : {}) },
+        line: { color: style.borderColor ?? style.color, width: style.borderWidth ?? 1 }
+      })
     });
     return;
   }
