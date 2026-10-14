@@ -196,7 +196,7 @@ function validatePreparedPlan(value: PreparedPresentationDesignPlan): PreparedPr
     (renderPlan && digest(renderPlan) !== digest(value.renderPlan))) throw new TypeError('design_attempt_render_mismatch');
   const snapshot = object(value.snapshot);
   exact(snapshot, ['designPath', 'fallbackReason', 'designIR', 'artDirectionStatus', 'designIrStatus', 'layoutStatus',
-    'renderPlanStatus', 'repairCount', 'repairs', 'diagnostics', 'strategies', 'pages']);
+    'renderPlanStatus', 'repairCount', 'repairs', 'diagnostics', 'strategies', 'pages', 'visualAudit']);
   if (!['design-aware', 'legacy-fallback'].includes(String(snapshot.designPath)) ||
     !['validated', 'invalid', 'missing'].includes(String(snapshot.artDirectionStatus)) ||
     !['validated', 'invalid', 'missing'].includes(String(snapshot.designIrStatus)) ||
@@ -205,6 +205,12 @@ function validatePreparedPlan(value: PreparedPresentationDesignPlan): PreparedPr
     !boundedArray(snapshot.repairs, 4) || !boundedArray(snapshot.diagnostics, 40) ||
     !boundedArray(snapshot.strategies, 40) || !boundedArray(snapshot.pages, 40) || !snapshot.pages.length) {
     throw new TypeError('design_attempt_snapshot_invalid');
+  }
+  if (snapshot.visualAudit !== undefined) {
+    const visualAudit = object(snapshot.visualAudit);
+    exact(visualAudit, ['status', 'multimodalReview', 'diagnostics']);
+    if (!['passed', 'warning'].includes(String(visualAudit.status)) || visualAudit.multimodalReview !== 'not_available' ||
+      !boundedArray(visualAudit.diagnostics, 128)) throw new TypeError('design_attempt_visual_audit_invalid');
   }
   if (snapshot.designPath === 'design-aware' && (!designIR || !layoutIR || !renderPlan)) throw new TypeError('design_attempt_plan_missing');
   if (snapshot.designPath === 'legacy-fallback' && (typeof snapshot.fallbackReason !== 'string' || !/^[a-z][a-z0-9_]{0,79}$/u.test(snapshot.fallbackReason))) {

@@ -14,6 +14,7 @@ export * from './agent-context-assembler';
 export * from './conversation-web-research-service';
 export * from './latest-snapshot-autosave';
 export * from './presentation-page-count';
+export * from './presentation-design-revision';
 export * from './document-task-runtime-service';
 export * from './document-generation-runtime-bridge';
 export * from './generate-pptx-tool';
