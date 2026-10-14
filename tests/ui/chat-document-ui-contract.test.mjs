@@ -162,7 +162,8 @@ test('production trace starts collapsed around a visible real status and preserv
   assert.match(progress, /<ol className="uc-chat-production-trace" aria-label="完整生产链路">/);
   assert.match(progress, /displayEvents\.map\(\(\{ event, key \}\) =>/);
   assert.match(progress, /<details className="uc-chat-document-progress__details">/);
-  assert.doesNotMatch(progress, /<details[^>]*\bopen(?:=|\s|>)/);
+  assert.doesNotMatch(progress, /<details className="uc-chat-document-progress__details"[^>]*\bopen(?:=|\s|>)/);
+  assert.match(progress, /<details className="uc-chat-document-progress__records" open=\{developerMode \|\| undefined\}>/);
   assert.match(progress, /<span className="uc-chat-document-progress__summary" role="status" aria-live="polite">/);
   assert.match(progress, /LuChevronRight/);
   assert.match(progress, /data-status=\{status\}/);

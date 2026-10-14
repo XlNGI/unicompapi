@@ -4,6 +4,7 @@ import { DocumentProgress } from '../../src/pages/chat/DocumentProgress';
 import { mergeProductionEvents, projectProductionMessages } from '../../src/pages/chat/productionTimeline';
 import type { ConversationDto, MessageDto } from '../../src/shared/chat-context-ipc';
 import type { ProductionTraceEventDto } from '../../src/shared/conversation-production-ipc';
+import { productionProgressDuration, summarizeProductionProgress } from '../../src/pages/chat/productionProgressSummary';
 
 const time = '2026-09-22T08:00:00.000Z';
 function event(sequence: number, extra: Partial<ProductionTraceEventDto> = {}): ProductionTraceEventDto {
@@ -27,10 +28,10 @@ describe('production timeline projection', () => {
     const merged = mergeProductionEvents([original], [replay, event(8, { ...canonical, runEventId: 'event-two', runSequence: 7 })]);
     expect(merged.map(item => item.sequence)).toEqual([2, 8]);
     const html = renderToStaticMarkup(<DocumentProgress detail="执行中" events={[original, replay]} />);
-    expect(html.match(/<li /g)).toHaveLength(1);
+    expect(html.match(/<li [^>]*data-event-code=/g)).toHaveLength(1);
     expect(html).not.toContain('run-one');
     const developer = renderToStaticMarkup(<DocumentProgress detail="执行中" developerMode events={[original, replay]} />);
-    expect(developer.match(/<li /g)).toHaveLength(1);
+    expect(developer.match(/<li [^>]*data-event-code=/g)).toHaveLength(1);
     expect(developer).toContain('<dt>runId</dt><dd>run-one</dd>');
     expect(developer).toContain('<dt>runEventId</dt><dd>event-one</dd>');
     expect(developer).toContain('<dt>runSequence</dt><dd>4</dd>');
@@ -41,7 +42,7 @@ describe('production timeline projection', () => {
       event(1, { code: 'model_response', status: 'progress', runId: 'run-one', runEventId: 'event-one', runSequence: 1 }),
       event(2, { code: 'model_response', status: 'progress', traceId: 'other-trace', runId: 'run-two', runEventId: 'event-two', runSequence: 1 })
     ]} />);
-    expect(html.match(/<li /g)).toHaveLength(2);
+    expect(html.match(/<li [^>]*data-event-code=/g)).toHaveLength(2);
   });
 
   it('merges a racing history read and live events once in durable sequence order', () => {
@@ -120,7 +121,7 @@ describe('production timeline projection', () => {
       event(3, { code: 'model_response', status: 'progress', facts: { contentCharacters: 42 } }),
       event(4, { code: 'document_render', status: 'failed' })
     ]} request="制作年度报告" />);
-    expect(html.match(/<li /g)).toHaveLength(4);
+    expect(html.match(/<li [^>]*data-event-code=/g)).toHaveLength(4);
     expect(html).toContain('制作年度报告');
     expect(html).toContain('本地 → 模型');
     expect(html).toContain('模型 → 本地');
@@ -165,7 +166,7 @@ describe('production timeline projection', () => {
     expect(html).toContain('已接收 20 字符');
     expect(html).not.toContain('已接收 8 字符');
     expect(html.match(/aria-label="生成正文"/g)).toHaveLength(1);
-    expect(html).toContain('</ol></details><section class="uc-chat-generated-body" aria-label="生成正文">');
+    expect(html).toContain('</ol></div></details></details><section class="uc-chat-generated-body" aria-label="生成正文">');
     expect(html.indexOf('aria-label="生成正文"')).toBeGreaterThan(html.indexOf('data-event-code="document_compile"'));
     expect(html).not.toContain('uc-chat-generated-body__heading');
   });
@@ -332,5 +333,118 @@ describe('production timeline projection', () => {
     expect(html).toContain('nodeId');
     expect(html).toContain('search');
     expect(html).toContain('1.50s');
+  });
+});
+
+describe('production progress overview', () => {
+  it('groups repeated checks and model rounds while retaining every detailed execution record', () => {
+    const events = [event(1, { code: 'request_received', status: 'completed' }),
+      ...Array.from({ length: 20 }, (_, i) => event(i + 2, { code: 'model_request', status: 'completed', facts: { purpose: 'content', count: 14339 } })),
+      event(22, { code: 'model_response', status: 'completed', facts: { purpose: 'content', contentCharacters: 14339 } }),
+      event(23, { code: 'document_compile', status: 'completed' }),
+      event(24, { code: 'document_register', status: 'completed' })];
+    const phases = summarizeProductionProgress(events, 'completed');
+    expect(phases.map(item => item.phase)).toEqual(['prepare', 'content', 'compose', 'verify']);
+    expect(phases.map(item => item.status)).toEqual(['completed', 'completed', 'completed', 'completed']);
+    expect(phases[1].detail).toBe('已接收 14,339 字符');
+    expect(phases.some(item => item.detail.includes('14339 项'))).toBe(false);
+    const html = renderToStaticMarkup(<DocumentProgress detail="完成" events={events} terminalStatus="completed" />);
+    expect(html.match(/data-phase=/g)).toHaveLength(4);
+    expect(html.match(/data-event-code=/g)).toHaveLength(24);
+    expect(html).toContain('详细执行记录');
+    expect(html).not.toContain(' open=""');
+  });
+
+  it('does not treat a sent request or successful permission check as completed content', () => {
+    const events = [event(1, { status: 'completed', facts: { purpose: 'content' } }),
+      event(2, { code: 'tool_authorization', status: 'completed', facts: { purpose: 'content' } }),
+      event(3, { code: 'plan_validation', status: 'completed', facts: { purpose: 'content' } })];
+    expect(summarizeProductionProgress(events)).toMatchObject([{ phase: 'content', status: 'progress' }]);
+  });
+
+  it('does not invent content generation or file creation from permission checks alone', () => {
+    const phases = summarizeProductionProgress([
+      event(1, { code: 'tool_authorization', status: 'completed', facts: { purpose: 'content' } }),
+      event(2, { code: 'tool_authorization', status: 'completed', facts: { tool: 'write_document' } })
+    ]);
+    expect(phases.map(item => item.phase)).toEqual(['prepare']);
+  });
+
+  it('does not imply a saved file when only file checks have occurred', () => {
+    const events = [event(1, { code: 'document_hash_check', status: 'completed' })];
+    expect(summarizeProductionProgress(events)).toMatchObject([{ title: '检查文件' }]);
+    expect(summarizeProductionProgress([...events, event(2, { code: 'document_register', status: 'completed' })]))
+      .toMatchObject([{ title: '检查与保存' }]);
+  });
+
+  it.each(['completed', 'failed', 'cancelled', 'interrupted'] as const)('stops stale activity for terminal %s without fabricating successful stages', terminal => {
+    const events = [event(1, { code: 'model_response', status: 'progress', facts: { purpose: 'content' } }),
+      event(2, { code: 'document_compile', status: 'started' })];
+    const phases = summarizeProductionProgress(events, terminal);
+    expect(phases.every(item => item.status !== 'progress' && item.status !== 'completed')).toBe(true);
+    expect(phases.at(-1)?.status).toBe(terminal === 'cancelled' ? 'cancelled' : terminal === 'failed' ? 'failed' : 'ended');
+    expect(phases.some(item => item.phase === 'verify')).toBe(false);
+  });
+
+  it('uses recorded rather than completed for an earlier stage with missing completion evidence', () => {
+    const phases = summarizeProductionProgress([event(1, { code: 'model_response', status: 'progress' }),
+      event(2, { code: 'document_compile', status: 'started' })]);
+    expect(phases.map(item => item.status)).toEqual(['recorded', 'progress']);
+  });
+
+  it('keeps a recovered failure and a later successful attempt factual', () => {
+    const events = [event(1, { code: 'document_render', status: 'failed' }),
+      event(2, { code: 'document_render', status: 'started' })];
+    expect(summarizeProductionProgress(events)).toMatchObject([{ phase: 'compose', status: 'progress' }]);
+    expect(summarizeProductionProgress([...events, event(3, { code: 'document_render', status: 'completed' })]))
+      .toMatchObject([{ phase: 'compose', status: 'completed' }]);
+  });
+
+  it('only shows reference processing and file checking when those events really occurred', () => {
+    expect(summarizeProductionProgress([])).toEqual([]);
+    const phases = summarizeProductionProgress([
+      event(1, { code: 'tool_call', facts: { tool: 'search' } }),
+      event(2, { code: 'document_hash_check', status: 'completed' })
+    ]);
+    expect(phases.map(item => item.phase)).toEqual(['sources', 'verify']);
+  });
+
+  it('honours a persisted terminal state and resets an old trace stop when another attempt starts', () => {
+    const events = [event(1, { code: 'task_complete', status: 'failed' }),
+      event(2, { code: 'request_received', status: 'completed' }),
+      event(3, { code: 'model_response', status: 'progress', facts: { purpose: 'content' } })];
+    expect(summarizeProductionProgress(events).at(-1)?.status).toBe('progress');
+    expect(summarizeProductionProgress(events, 'completed').at(-1)?.status).toBe('ended');
+  });
+
+  it('retains separate legacy trace and tool progress records during compaction', () => {
+    const events = [event(1, { code: 'tool_call', status: 'progress', facts: { tool: 'search' } }),
+      event(2, { code: 'tool_call', status: 'progress', facts: { tool: 'analyze' } }),
+      event(3, { code: 'tool_call', status: 'progress', facts: { tool: 'analyze' }, traceId: 'other' })];
+    const html = renderToStaticMarkup(<DocumentProgress detail="进行中" events={events} />);
+    expect(html.match(/data-event-code=/g)).toHaveLength(3);
+  });
+});
+
+describe('recorded production duration', () => {
+  const start = event(1, { code: 'request_received', status: 'completed' });
+  const end = event(2, { code: 'task_complete', status: 'completed', occurredAt: '2026-09-22T08:20:46.000Z' });
+
+  it('uses actual recorded start/end times for a finished execution', () => {
+    expect(productionProgressDuration([start, end])).toBe('20分46秒');
+    expect(productionProgressDuration([start, { ...end, code: 'document_register' }], 'completed')).toBe('20分46秒');
+  });
+
+  it('does not invent elapsed time for missing, truncated or active history', () => {
+    expect(productionProgressDuration([])).toBeUndefined();
+    expect(productionProgressDuration([end], 'completed')).toBeUndefined();
+    expect(productionProgressDuration([start, end], 'completed', true)).toBeUndefined();
+    expect(productionProgressDuration([start, { ...end, code: 'model_response', status: 'progress' }])).toBeUndefined();
+  });
+
+  it('rejects invalid, reversed and zero-length timestamps', () => {
+    for (const occurredAt of ['invalid', '2026-09-22T07:59:59.000Z', time]) {
+      expect(productionProgressDuration([start, { ...end, occurredAt }])).toBeUndefined();
+    }
   });
 });

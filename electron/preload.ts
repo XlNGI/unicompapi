@@ -1,4 +1,5 @@
 import { randomUUID } from 'node:crypto';
+import { textClipboard } from './text-clipboard';
 import {
   productionTraceIpcChannels, parseProductionTraceEvent,
   type ProductionTraceApi, type ProductionTraceIssueDto
@@ -1101,6 +1102,7 @@ const chatContexts: ChatContextApi = {
 };
 
 contextBridge.exposeInMainWorld('unicomp', {
+  clipboard: textClipboard,
   autosaveDiagnostics,
   parameterInputDiagnostics,
   chatContexts,

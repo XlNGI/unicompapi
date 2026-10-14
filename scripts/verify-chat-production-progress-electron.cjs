@@ -3,13 +3,17 @@ const { mkdtempSync } = require('node:fs');
 const { mkdir, writeFile, rm } = require('node:fs/promises');
 const path = require('node:path');
 const os = require('node:os');
-const { app, BrowserWindow } = require('electron');
+const { app, BrowserWindow, clipboard } = require('electron');
 
 const workspace = path.resolve(__dirname, '..');
 const r0136 = process.argv.includes('--r0136');
 const retainedResults = process.argv.includes('--retained-results');
 const r45 = process.argv.includes('--r45');
-const output = path.join(workspace, 'outputs', 'chat-production-progress', ...(r45 ? ['r45'] : retainedResults ? ['retained-results'] : r0136 ? ['r0136'] : []));
+const codexStyle = process.argv.includes('--codex-style');
+const composerBoundary = process.argv.includes('--composer-boundary');
+const copyMessages = process.argv.includes('--copy-messages');
+const progressSummary = codexStyle || process.argv.includes('--progress-summary');
+const output = path.join(workspace, 'outputs', 'chat-production-progress', ...(copyMessages ? ['copy-messages'] : composerBoundary ? ['composer-boundary'] : progressSummary ? [codexStyle ? 'codex-style' : 'summary'] : r45 ? ['r45'] : retainedResults ? ['retained-results'] : r0136 ? ['r0136'] : []));
 const temporary = mkdtempSync(path.join(os.tmpdir(), 'unicomp-chat-progress-'));
 const buildDirectory = path.join(temporary, 'build');
 app.setPath('userData', path.join(temporary, 'profile'));
@@ -37,7 +41,7 @@ async function snapshot() {
     text: document.body.innerText,
     progress: document.querySelectorAll('[aria-label="生产进度"]').length,
     summaries: Array.from(document.querySelectorAll('.uc-chat-document-progress__summary')).map(e => e.textContent),
-    details: document.querySelectorAll('.uc-chat-document-progress details').length,
+    details: document.querySelectorAll('.uc-chat-document-progress__details').length,
     disclosureStates: Array.from(document.querySelectorAll('.uc-chat-document-progress__details')).map(e => ({
       open: e.open, summaryVisible: e.querySelector('summary').getBoundingClientRect().height > 0,
       traceVisible: e.querySelector('.uc-chat-production-trace')?.checkVisibility({contentVisibilityAuto:true}) ?? false
@@ -93,7 +97,10 @@ async function verifyDisclosure() {
     details.querySelector('summary').click();
   })()`);
   await until('document.querySelector(".uc-chat-document-progress__details").open');
-  assert.equal(await js('document.querySelector(".uc-chat-production-trace").getBoundingClientRect().height > 0'), true);
+  assert.equal(await js('document.querySelector(".uc-chat-progress-phases").checkVisibility({contentVisibilityAuto:true})'), true);
+  assert.equal(await js('document.querySelector(".uc-chat-production-trace").checkVisibility({contentVisibilityAuto:true})'), false);
+  await js('document.querySelector(".uc-chat-document-progress__records > summary").click()');
+  await until('document.querySelector(".uc-chat-document-progress__records").open');
   await js('chatProgressHarness.emitTrace("model_response", "progress", {purpose:"content",contentCharacters:2200}, "assistant")');
   await until('document.querySelector(".uc-chat-production-trace").textContent.includes("2200")');
   assert.equal(await js('document.querySelector(".uc-chat-document-progress__details") === window.stableDisclosure && window.stableDisclosure.open'), true,
@@ -119,6 +126,283 @@ async function verifyDisclosure() {
   await until('document.querySelector(".uc-chat-production-trace").textContent.includes("2300")');
   assertCollapsed(await assertClean());
   checks.push('native execution-fact disclosure opens by click, Enter and Space, and retains open/closed reader choice across stream updates');
+}
+async function verifyProgressSummary() {
+  const layouts = [];
+  for (const [width, theme] of [[1280, 'light'], [800, 'light'], [540, 'dark'], [340, 'light']]) {
+    window.setSize(width, 820);
+    await js(`chatProgressHarness.mount('saved-completed', ${JSON.stringify(theme)})`);
+    await until('document.querySelector("[aria-label=生成正文]") && document.body.innerText.includes("合成模型")');
+    await js(`(() => {
+      chatProgressHarness.emitTrace('request_received', 'completed');
+      chatProgressHarness.emitTrace('model_response', 'completed', {purpose:'planning'});
+      for (let i = 0; i < 16; i++) {
+        chatProgressHarness.emitTrace('tool_authorization', 'completed', {purpose:'content'});
+        chatProgressHarness.emitTrace('model_request', 'started', {purpose:'content'});
+        chatProgressHarness.emitTrace('model_response', 'progress', {purpose:'content',contentCharacters:i*900});
+        chatProgressHarness.emitTrace('model_response', 'completed', {purpose:'content',contentCharacters:(i+1)*900});
+      }
+      chatProgressHarness.emitTrace('document_compile', 'started', {documentKind:'ppt'});
+      chatProgressHarness.emitTrace('document_compile', 'completed', {documentKind:'ppt',totalPages:10});
+      chatProgressHarness.emitTrace('document_render', 'completed', {totalPages:10});
+      chatProgressHarness.emitTrace('document_structure_check', 'completed', {totalPages:10});
+      chatProgressHarness.emitTrace('document_hash_check', 'completed', {bytes:1024});
+      chatProgressHarness.emitTrace('document_publish', 'completed');
+      chatProgressHarness.emitTrace('document_register', 'completed');
+      chatProgressHarness.emitTrace('task_complete', 'completed');
+    })()`);
+    await until('document.querySelectorAll(".uc-chat-progress-phases > li").length === 4');
+    assertCollapsed(await assertClean());
+    await js('document.querySelector(".uc-chat-document-progress__details > summary").click()');
+    await until('document.querySelector(".uc-chat-document-progress__details").open');
+    await js(`(() => {
+      const viewport = document.querySelector('.uc-chat-page__messages');
+      viewport.scrollTop = 0; viewport.dispatchEvent(new Event('scroll', {bubbles:true}));
+    })()`);
+    await delay(150);
+    const layout = await js(`(() => {
+      const panel = document.querySelector('.uc-chat-document-progress__details');
+      const phases = [...document.querySelectorAll('.uc-chat-progress-phases > li')];
+      const rect = panel.getBoundingClientRect();
+      const style = getComputedStyle(panel);
+      return {width:innerWidth,theme:${JSON.stringify(theme)},panelWidth:rect.width,panelHeight:rect.height,
+        actions:phases.map(e => e.querySelector('.uc-chat-progress-phases__content').textContent),statuses:phases.map(e => e.dataset.status),
+        borderWidth:style.borderTopWidth,background:style.backgroundColor,
+        maxRowHeight:Math.max(...phases.map(e => e.getBoundingClientRect().height)),
+        statusBadges:document.querySelectorAll('.uc-chat-progress-phases__status').length,
+        elapsed:document.querySelector('.uc-chat-document-progress__elapsed')?.textContent,
+        rawRows:document.querySelectorAll('.uc-chat-production-trace > li').length,
+        rawVisible:document.querySelector('.uc-chat-production-trace').checkVisibility({contentVisibilityAuto:true}),
+        overflow:document.documentElement.scrollWidth > innerWidth,
+        composerTop:document.querySelector('.uc-chat-page__composer').getBoundingClientRect().top,
+        panelBottom:rect.bottom};
+    })()`);
+    assert.deepEqual(layout.actions, ['已检查任务与执行条件','已接收生成内容','已制作文档','已检查并保存文件']);
+    assert.ok(layout.statuses.every(status => status === 'completed'));
+    assert.ok(layout.rawRows > 50 && !layout.rawVisible);
+    assert.ok(layout.panelWidth <= width && layout.panelHeight < 220 && !layout.overflow);
+    assert.equal(layout.borderWidth, '0px');
+    assert.equal(layout.background, 'rgba(0, 0, 0, 0)');
+    assert.ok(layout.maxRowHeight <= 26 && layout.statusBadges === 0);
+    assert.match(layout.elapsed, /用时 1分13秒/);
+    assert.ok(layout.panelBottom < layout.composerTop, 'overview is clear of the composer');
+    layouts.push(layout);
+    await capture(`summary-${width}-${theme}.png`);
+    if (width === 1280) {
+      const rect = await js(`(() => {const r=document.querySelector('.uc-chat-document-progress__details').getBoundingClientRect();
+        return {x:Math.floor(r.x),y:Math.floor(r.y),width:Math.ceil(r.width),height:Math.ceil(r.height)};})()`);
+      await writeFile(path.join(output, 'summary-detail.png'), (await window.webContents.capturePage(rect)).toPNG());
+    }
+    await js('document.querySelector(".uc-chat-document-progress__records > summary").click()');
+    await until('document.querySelector(".uc-chat-document-progress__records").open');
+    const records = await js(`(() => {
+      const viewport = document.querySelector('.uc-chat-document-progress__record-viewport');
+      viewport.focus(); viewport.scrollTop = viewport.scrollHeight;
+      const last = viewport.querySelector('li:last-child').getBoundingClientRect(), bounds = viewport.getBoundingClientRect();
+      return {height:bounds.height,scrollable:viewport.scrollHeight>viewport.clientHeight,
+        focused:document.activeElement===viewport,lastReachable:last.bottom<=bounds.bottom+1};
+    })()`);
+    assert.ok(records.height <= 328 && records.scrollable && records.focused && records.lastReachable);
+    if (width === 1280) {
+      window.webContents.debugger.attach('1.3');
+      await window.webContents.debugger.sendCommand('Emulation.setFocusEmulationEnabled', {enabled:true});
+      await js('document.querySelector(".uc-chat-document-progress__records > summary").focus()');
+      for (const [key, code, keyCode, text, open] of [['Enter','Enter',13,'\r',false], [' ','Space',32,' ',true]]) {
+        await window.webContents.debugger.sendCommand('Input.dispatchKeyEvent', {type:'keyDown',key,code,windowsVirtualKeyCode:keyCode,text,unmodifiedText:text});
+        await window.webContents.debugger.sendCommand('Input.dispatchKeyEvent', {type:'keyUp',key,code,windowsVirtualKeyCode:keyCode});
+        await until(`document.querySelector('.uc-chat-document-progress__records').open === ${open}`);
+      }
+      await js(`(() => {
+        document.activeElement.blur();
+        document.querySelector('.uc-chat-document-progress__record-viewport').scrollTop = 0;
+        document.querySelector('.uc-chat-page__messages').scrollTop = 0;
+      })()`);
+      await capture('execution-records.png');
+    }
+  }
+  window.setSize(1280, 820);
+  await js('chatProgressHarness.mount("saved-document", "light")');
+  await until('document.body.innerText.includes("合成模型")');
+  await js('chatProgressHarness.emitTrace("model_response", "progress", {purpose:"content",contentCharacters:11}, "assistant")');
+  await until('document.querySelector("[data-phase=content]")?.dataset.status === "progress"');
+  await js(`(() => {
+    document.querySelector('.uc-chat-document-progress__details > summary').click();
+    window.savedProgressPanel = document.querySelector('.uc-chat-document-progress__details');
+    window.savedBody = document.querySelector('[aria-label="生成正文"]');
+  })()`);
+  for (let i = 0; i < 25; i++) {
+    await js(`chatProgressHarness.emitTrace('model_response','progress',{purpose:'content',contentCharacters:${1000+i}},'assistant')`);
+  }
+  await until('document.querySelector("[data-phase=content]")?.textContent.includes("1,024")');
+  assert.ok(await js(`document.querySelector('.uc-chat-document-progress__details')===savedProgressPanel && savedProgressPanel.open &&
+    document.querySelector('[aria-label="生成正文"]')===savedBody && !document.querySelector('.uc-chat-document-progress__records').open`));
+  await js('chatProgressHarness.emitTrace("document_render", "failed", undefined, "assistant")');
+  await until('document.querySelector("[data-phase=compose]")?.dataset.status === "failed"');
+  assert.equal(await js('document.querySelectorAll(".uc-chat-progress-phases [data-status=progress]").length'), 0);
+  await js('chatProgressHarness.emitTrace("task_complete", "cancelled", {stopReason:"cancelled"}, "assistant")');
+  await until('document.querySelector("[aria-label=生产进度]")?.dataset.status === "cancelled"');
+  const clean = await assertClean();
+  assert.ok(clean.bodyOutsideTrace);
+  assert.deepEqual(errors, []);
+  assert.deepEqual(blockedRequests, []);
+  const report = {scope:'Real ChatPage/DocumentProgress in isolated Electron; synthetic IPC, HTTP(S) denied, no model calls',
+    presentation:'Borderless Codex-style activity log with small icons, muted single-line actions, recorded duration and expandable execution records',
+    layouts,streamUpdates:25,disclosureAndBodyRetained:true,recordsScrollableAndKeyboardFocusable:true,keyboardDisclosureVerified:true,
+    failedAndCancelledStatesVerified:true,errors,blockedRequests};
+  await writeFile(path.join(output, 'report.json'), JSON.stringify(report, null, 2));
+  console.log(JSON.stringify(report, null, 2));
+}
+async function verifyComposerBoundary() {
+  const layouts = [];
+  const configurations = [
+    ['codex-conversation', 1280, 820, 'light'], ['codex-document', 1280, 820, 'light'],
+    ['codex-conversation', 800, 600, 'light'], ['codex-document', 540, 768, 'dark'],
+    ['codex-conversation', 340, 768, 'light']
+  ];
+  for (const [scenario, width, height, theme] of configurations) {
+    window.setSize(width, height);
+    await js(`chatProgressHarness.mount(${JSON.stringify(scenario)}, ${JSON.stringify(theme)})`);
+    await until('document.querySelector(".uc-markdown-message table") && document.body.innerText.includes("合成模型")');
+    for (const multiline of [false, true]) {
+      if (multiline) {
+        await js('document.querySelector("textarea[aria-label=对话输入]").focus()');
+        await window.webContents.insertText(Array.from({length:12}, (_, i) => `草稿第 ${i+1} 行`).join('\n'));
+      }
+      await delay(200);
+      if (multiline) {
+        const following = await js(`(() => {
+          const p=document.querySelector('.uc-chat-page__messages');
+          return Math.abs(p.scrollTop-(p.scrollHeight-p.clientHeight))<=1;
+        })()`);
+        assert.ok(following, 'growing the composer retains following of the last reply');
+      }
+      for (const position of ['top', 'middle', 'bottom']) {
+        await js(`(() => {
+          const messages = document.querySelector('.uc-chat-page__messages');
+          messages.scrollTop = ${position === 'top' ? '0' : position === 'middle' ? '(messages.scrollHeight - messages.clientHeight)/2' : 'messages.scrollHeight'};
+          messages.dispatchEvent(new Event('scroll', {bubbles:true}));
+        })()`);
+        await delay(100);
+        const layout = await js(`(() => {
+          const pane=document.querySelector('.uc-chat-page__messages'), region=document.querySelector('.uc-chat-page__composer-region');
+          const composer=document.querySelector('.uc-chat-page__composer'), textarea=document.querySelector('textarea[aria-label="对话输入"]');
+          const p=pane.getBoundingClientRect(), c=composer.getBoundingClientRect(), r=region.getBoundingClientRect();
+          const hitSamples=[];
+          for(const x of [p.left+4, (p.left+p.right)/2, p.right-4]) {
+            for(const y of [r.top+2, c.top+4, Math.min(innerHeight-2,c.bottom+4), innerHeight-2]) {
+              const hit=document.elementFromPoint(x,y);
+              hitSamples.push({x,y,messageBelow:!!hit?.closest('.uc-chat-page__messages')});
+            }
+          }
+          const last=pane.querySelector('.uc-chat-page__message-item:last-child'), lastRect=last?.getBoundingClientRect();
+          return {scenario:${JSON.stringify(scenario)},width:innerWidth,height:innerHeight,theme:${JSON.stringify(theme)},
+            multiline:${multiline},position:${JSON.stringify(position)},messageBottom:p.bottom,regionTop:r.top,composerTop:c.top,
+            composerBottom:c.bottom,textareaHeight:textarea.getBoundingClientRect().height,scrollTop:pane.scrollTop,
+            maxScroll:pane.scrollHeight-pane.clientHeight,lastBottom:lastRect?.bottom,
+            overflow:document.documentElement.scrollWidth>innerWidth,hitSamples};
+        })()`);
+        assert.ok(layout.messageBottom <= layout.regionTop + 1, `message viewport must end above input region: ${JSON.stringify(layout)}`);
+        assert.ok(layout.composerBottom <= layout.height && !layout.overflow);
+        assert.ok(layout.hitSamples.every(sample => !sample.messageBelow), 'no message content is painted in or below the composer region');
+        if (multiline) assert.ok(layout.textareaHeight >= 100, 'real multiline draft must grow the composer');
+        if (position === 'bottom') {
+          assert.ok(Math.abs(layout.scrollTop-layout.maxScroll) <= 1);
+          assert.ok(layout.lastBottom <= layout.messageBottom + 1, 'last reply remains reachable above the input');
+        }
+        if (position === 'middle' && !multiline) {
+          await until('document.querySelector("button[aria-label=回到最新消息]")');
+          const jump = await js(`(() => {
+            const b=document.querySelector('button[aria-label="回到最新消息"]');
+            const r=b.getBoundingClientRect(), c=document.querySelector('.uc-chat-page__composer-region').getBoundingClientRect();
+            const visible=r.bottom<=c.top+1; b.click(); return {visible};
+          })()`);
+          assert.ok(jump.visible, 'jump-to-latest stays above the composer');
+          await until(`(() => {const p=document.querySelector('.uc-chat-page__messages');return Math.abs(p.scrollTop-(p.scrollHeight-p.clientHeight))<=1;})()`);
+          await js(`(() => {
+            const p=document.querySelector('.uc-chat-page__messages');
+            p.scrollTop=(p.scrollHeight-p.clientHeight)/2; p.dispatchEvent(new Event('scroll',{bubbles:true}));
+          })()`);
+        }
+        layouts.push(layout);
+        if (!multiline && position === 'middle' && width === 1280) await capture(`${scenario}-middle.png`);
+      }
+      if (multiline) await capture(`${scenario}-${width}-multiline.png`);
+    }
+  }
+  window.setSize(1280,820);
+  await js('chatProgressHarness.mount("saved-document", "light")');
+  await until('document.querySelector("[aria-label=生成正文]")');
+  await js('chatProgressHarness.emitTrace("model_response","progress",{purpose:"content",contentCharacters:100},"assistant")');
+  await until('document.querySelector(".uc-chat-document-progress__details")');
+  for(let i=0;i<20;i++) await js(`chatProgressHarness.emitTrace('model_response','progress',{purpose:'content',contentCharacters:${200+i}},'assistant')`);
+  const stream = await js(`(() => {
+    const p=document.querySelector('.uc-chat-page__messages').getBoundingClientRect();
+    const c=document.querySelector('.uc-chat-page__composer-region').getBoundingClientRect();
+    return {messageBottom:p.bottom,composerRegionTop:c.top,progress:document.querySelector('[data-phase=content]')?.dataset.status};
+  })()`);
+  assert.ok(stream.messageBottom<=stream.composerRegionTop+1 && stream.progress==='progress');
+  await assertClean();
+  assert.deepEqual(errors,[]);
+  assert.deepEqual(blockedRequests,[]);
+  const report={scope:'Real ChatPage in isolated Electron renderer; synthetic IPC, no provider or HTTP(S) calls',
+    layouts,stream,errors,blockedRequests,checks:['ordinary and document replies at top/middle/bottom',
+      'multiline drafts resize input row and retain following','message pane clipped above composer','last reply reachable',
+      'jump-to-latest stays above input and works','stream progress preserves boundary']};
+  await writeFile(path.join(output,'report.json'),JSON.stringify(report,null,2));
+  console.log(JSON.stringify({scope:report.scope,layoutCases:layouts.length,stream,errors,blockedRequests},null,2));
+}
+async function verifyMessageCopy() {
+  // Keep the user's supported clipboard formats in memory, never in logs or evidence.
+  const original = {text:clipboard.readText(),html:clipboard.readHTML(),rtf:clipboard.readRTF(),image:clipboard.readImage()};
+  const copied = [];
+  let productionPreload;
+  try {
+    const browser = await js(`(async()=>{try{await navigator.clipboard.writeText('isolated-browser-copy-probe');
+      return {ok:true,focused:document.hasFocus()};}catch(e){return {ok:false,name:e.name,focused:document.hasFocus()};}})()`);
+    for (const scenario of ['codex-conversation', 'codex-document', 'saved-completed']) {
+      await js(`chatProgressHarness.mount(${JSON.stringify(scenario)}, 'light')`);
+      await until('document.querySelector(".uc-chat-page__message-item--assistant button[aria-label=复制消息]")');
+      const expected = await js(`(() => {
+        const row=document.querySelector('.uc-chat-page__message-item--assistant');
+        const body=row.querySelector('[aria-label="生成正文"]') ?? row.querySelector('.uc-chat-page__message-content');
+        return {bodyText:body.innerText,first:body.querySelector('h1,h2,h3,p')?.textContent};
+      })()`);
+      await js(`(() => {
+        const b=document.querySelector('.uc-chat-page__message-item--assistant button[aria-label="复制消息"]');
+        b.scrollIntoView({block:'center'}); b.click();
+      })()`);
+      await until('document.querySelector(".uc-chat-page__message-item--assistant button[aria-label=已复制]")');
+      const text=clipboard.readText();
+      assert.ok(text.includes(expected.first), 'clipboard contains the displayed reply');
+      assert.doesNotMatch(text,/PRIVATE_REASONING|PRIVATE_OUTLINE|PRIVATE_PATH|"sections"|"blocks"/);
+      if(scenario==='saved-completed') assert.match(text,/# 年度经营报告\s+## 增长概览/);
+      copied.push({scenario,characters:text.length,containsReadableBody:true,noRawOutlineOrPrivateFields:true});
+      await capture(`${scenario}-copied.png`);
+      await delay(1700);
+      assert.ok(await js('Boolean(document.querySelector(".uc-chat-page__message-item--assistant button[aria-label=复制消息]"))'), 'copy feedback resets');
+    }
+    // Exercise the actual production preload, not only the shared native writer.
+    productionPreload = new BrowserWindow({show:false,width:400,height:300,
+      webPreferences:{preload:path.join(workspace,'dist-electron/electron/preload.js'),contextIsolation:true,nodeIntegration:false,sandbox:false}});
+    await writeFile(path.join(buildDirectory,'clipboard.html'),'<!doctype html><html><body>Clipboard preload verification</body></html>');
+    await productionPreload.loadFile(path.join(buildDirectory,'clipboard.html'));
+    await productionPreload.webContents.executeJavaScript(`window.unicomp.clipboard.writeText('生产 preload 剪贴板验证 ✅')`);
+    assert.equal(clipboard.readText(),'生产 preload 剪贴板验证 ✅');
+    const bounded = await productionPreload.webContents.executeJavaScript(`(async()=>{
+      try{await window.unicomp.clipboard.writeText({text:'invalid'});return false;}catch{return true;}})()`);
+    assert.ok(bounded);
+    assert.equal(clipboard.readText(),'生产 preload 剪贴板验证 ✅');
+    assert.deepEqual(errors,[]);
+    assert.deepEqual(blockedRequests,[]);
+    const report={scope:'Real ChatPage/Electron clipboard writer and production preload; synthetic conversation IPC, no provider calls',
+      browserProbe:browser,copied,productionPreloadWriteVerified:true,invalidInputRejected:true,
+      successFeedbackReset:true,clipboardRestored:true,errors,blockedRequests};
+    await writeFile(path.join(output,'report.json'),JSON.stringify(report,null,2));
+    console.log(JSON.stringify(report,null,2));
+  } finally {
+    if(productionPreload && !productionPreload.isDestroyed()) productionPreload.destroy();
+    clipboard.write(original);
+  }
 }
 async function verifyConversationLayout(scenario, width, height, theme, screenshot) {
   window.setSize(width, height);
@@ -350,8 +634,13 @@ async function run() {
   });
   // The isolated conversation host can be narrower than the full app's 800px minimum.
   await writeFile(path.join(buildDirectory, 'index.html'), '<!doctype html><html><head><meta charset="utf-8"><link rel="stylesheet" href="style.css"><style>html,body,#root{margin:0;width:100%;height:100%;min-width:0;min-height:0;overflow:hidden}#root>.uc-chat-page{height:100%}</style></head><body><div id="root" class="workspace workspace--chat"></div><script src="harness.js"></script></body></html>');
+  const copyPreload = path.join(buildDirectory,'copy-preload.cjs');
+  if(copyMessages) await writeFile(copyPreload, `const {contextBridge}=require('electron');
+    const {textClipboard}=require(${JSON.stringify(path.join(workspace,'dist-electron/electron/text-clipboard.js'))});
+    contextBridge.exposeInMainWorld('__unicompClipboardForVerification',textClipboard);`);
   window = new BrowserWindow({ show: false, width: 1280, height: 820,
-    webPreferences: { contextIsolation: true, nodeIntegration: false, backgroundThrottling: false, spellcheck: false, offscreen: true } });
+    webPreferences: { contextIsolation: true, nodeIntegration: false, backgroundThrottling: false, spellcheck: false, offscreen: true,
+      ...(copyMessages ? {preload:copyPreload,sandbox:false} : {}) } });
   window.webContents.session.webRequest.onBeforeRequest({ urls: ['http://*/*', 'https://*/*'] }, (request, callback) => {
     blockedRequests.push(new URL(request.url).origin);
     callback({ cancel: true });
@@ -364,6 +653,9 @@ async function run() {
   if (r0136) await js('chatProgressHarness.enableCanonicalTrace()');
   await until('window.chatProgressHarness?.ready && document.querySelector("[aria-label=生产进度]")');
   await until('document.body.innerText.includes("合成模型")');
+  if (copyMessages) return verifyMessageCopy();
+  if (composerBoundary) return verifyComposerBoundary();
+  if (progressSummary) return verifyProgressSummary();
   if (r45) return verifyR45Continuations();
   if (process.argv.includes('--stream-stability')) return verifyStreamStability();
   let value = await assertClean();

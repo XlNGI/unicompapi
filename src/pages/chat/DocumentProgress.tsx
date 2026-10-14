@@ -1,5 +1,6 @@
 import { useCallback, useMemo, useSyncExternalStore } from 'react';
-import { LuChevronRight, LuCircle, LuCircleAlert, LuCircleCheck, LuCirclePause } from 'react-icons/lu';
+import { LuChevronRight, LuCircle, LuCircleAlert, LuCircleCheck, LuCirclePause,
+  LuFileText, LuListChecks, LuSearch, LuShieldCheck, LuSparkles, LuSquareTerminal } from 'react-icons/lu';
 import type { ConversationTaskProgressSnapshot } from '../../shared/conversation-task-progress';
 import { productionTraceEventIdentity, type ProductionTraceEventDto } from '../../shared/conversation-production-ipc';
 import { MarkdownMessage } from '../../components/MarkdownMessage';
@@ -9,6 +10,8 @@ import { executionStopLabel, responseFailureFactsFromTrace } from '../../ui/chat
 import { retainedDocumentSummary } from '../../ui/chat-response-failure-notice';
 import type { MessageDto } from '../../shared/chat-context-ipc';
 import { getThreadItemStreamContent, subscribeThreadItemStream } from './threadItemStreamStore';
+import { productionProgressAction, productionProgressDuration, summarizeProductionProgress } from './productionProgressSummary';
+import { presentationDesignNotice } from './presentationDesignNotice';
 
 export interface DocumentProgressProps {
   readonly detail: string;
@@ -61,6 +64,7 @@ const eventTitles: Record<ProductionTraceEventDto['code'], string> = {
   document_register: '登记作品', document_publish: '发布文档', task_complete: '结束任务'
 };
 const statusLabels = { started: '已开始', progress: '进行中', completed: '已完成', failed: '失败', cancelled: '已取消' };
+const activityIcons = { prepare: LuShieldCheck, sources: LuSearch, content: LuSparkles, compose: LuFileText, verify: LuListChecks };
 const toolLabels = { read_sources: '读取授权资料', search: '检索资料', analyze: '分析资料', write_document: '写入文档',
   render: '渲染预览', check: '质量检查', publish: '登记作品', patch: '修订文档' };
 
@@ -80,8 +84,9 @@ function compactProgressEvents(events: readonly ProductionTraceEventDto[]): read
       seen.add(identity);
     }
     const previous = compacted[compacted.length - 1];
-    const sameProgressRun = previous && ((!previous.event.runId && !event.runId) ||
-      (previous.event.traceId === event.traceId && previous.event.runId === event.runId)) && previous.event.code === event.code &&
+    const sameProgressRun = previous && previous.event.traceId === event.traceId &&
+      previous.event.sourceMessageId === event.sourceMessageId && previous.event.runId === event.runId &&
+      previous.event.operationId === event.operationId && previous.event.facts?.tool === event.facts?.tool && previous.event.code === event.code &&
       previous.event.facts?.purpose === event.facts?.purpose &&
       (previous.event.status === 'progress' || event.status === 'progress');
     if (sameProgressRun) {
@@ -123,7 +128,7 @@ function eventDetails(event: ProductionTraceEventDto): string[] {
   if (facts.missingCount) details.push(`待补充 ${facts.missingCount} 项信息`);
   if (facts.tool) details.push(toolLabels[facts.tool]);
   if (facts.contentCharacters !== undefined) details.push(`已接收 ${facts.contentCharacters} 字符`);
-  if (facts.count !== undefined) details.push(`${facts.count} 项`);
+  if (facts.count !== undefined && facts.count > 0 && event.code !== 'model_request' && event.code !== 'model_response') details.push(`${facts.count} 项`);
   if (facts.sectionCount !== undefined) details.push(`${facts.sectionCount} 个内容部分`);
   if (facts.requestedPages !== undefined) {
     const basis = facts.pageCountBasis === 'content' ? '正文' : '总页数';
@@ -152,6 +157,9 @@ export function DocumentProgress({ detail, taskProgress = [], preferDetail = fal
   );
   const completedSteps = taskProgress.filter((event) => event.progressStatus === 'completed');
   const displayEvents = useMemo(() => compactProgressEvents(events), [events]);
+  const phases = useMemo(() => summarizeProductionProgress(displayEvents.map(({ event }) => event), terminalStatus), [displayEvents, terminalStatus]);
+  const elapsed = useMemo(() => productionProgressDuration(events, terminalStatus, incomplete), [events, terminalStatus, incomplete]);
+  const designNotice = useMemo(() => presentationDesignNotice(events), [events]);
   const lastEvent = displayEvents.at(-1)?.event;
   const failureFacts = useMemo(() => responseFailureFactsFromTrace(events), [events]);
   const stopSummary = failureFacts.stopReason ? failureFacts.registeredWork
@@ -187,59 +195,89 @@ export function DocumentProgress({ detail, taskProgress = [], preferDetail = fal
   ) : null;
   return (
     <section className="uc-chat-document-progress" aria-label="生产进度" data-status={status} data-developer-mode={developerMode ? 'true' : 'false'}>
+      {designNotice ? <p className="uc-chat-document-progress__design-notice" role="note">{designNotice}</p> : null}
       {hasSteps ? (
         <details className="uc-chat-document-progress__details">
           <summary>
             {summaryContent}
+            {elapsed ? <span className="uc-chat-document-progress__elapsed">· 用时 {elapsed}</span> : null}
             <LuChevronRight className="uc-chat-document-progress__chevron" aria-hidden="true" />
           </summary>
           {displayEvents.length > 0 ? (
-            <ol className="uc-chat-production-trace" aria-label="完整生产链路">
-              {displayEvents.map(({ event, key }) => {
-                const eventRequest = requestBySource ? requestBySource.get(event.sourceMessageId) : request;
-                const eventIndex = events.indexOf(event);
-                const prevEvent = eventIndex > 0 ? events[eventIndex - 1] : undefined;
-                const durationMs = prevEvent ? Math.max(0, new Date(event.occurredAt).getTime() - new Date(prevEvent.occurredAt).getTime()) : undefined;
-                const naturalDetails = eventDetails(event);
-                return (
-                <li key={key} data-status={event.status} data-event-code={event.code}>
-                  <div className="uc-chat-production-trace__heading">
-                    <span className="uc-chat-production-trace__direction">{eventDirection(event)}</span>
-                    <strong>{eventTitle(event)}</strong>
-                    <span className="uc-chat-production-trace__status">{statusLabels[event.status]}</span>
-                    {durationMs !== undefined && developerMode ? (
-                      <span className="uc-chat-production-trace__duration" title="与前一步间隔耗时">
-                        {durationMs < 1000 ? `${durationMs}ms` : `${(durationMs / 1000).toFixed(2)}s`}
-                      </span>
-                    ) : null}
-                    <time dateTime={event.occurredAt}>{new Date(event.occurredAt).toLocaleTimeString('zh-CN', { hour12: false })}</time>
-                  </div>
-                  {event.code === 'request_received' && eventRequest ? <p className="uc-chat-production-trace__request">{eventRequest}</p> : null}
-                  {naturalDetails.length ? <p className="uc-chat-production-trace__details">{naturalDetails.join(' · ')}</p> : null}
-                  {developerMode ? (
-                    <details className="uc-chat-production-trace__devtools">
-                      <summary>查看执行事实 (docId / 工具调用)</summary>
-                      <dl className="uc-chat-production-trace__facts-grid">
-                        <div><dt>docId</dt><dd>{event.conversationId}</dd></div>
-                        <div><dt>nodeId</dt><dd>{event.traceId}:{event.sequence}</dd></div>
-                        {event.runId ? <div><dt>runId</dt><dd>{event.runId}</dd></div> : null}
-                        {event.runEventId ? <div><dt>runEventId</dt><dd>{event.runEventId}</dd></div> : null}
-                        {event.runSequence ? <div><dt>runSequence</dt><dd>{event.runSequence}</dd></div> : null}
-                        {event.operationId ? <div><dt>operationId</dt><dd>{event.operationId}</dd></div> : null}
-                        {event.facts?.tool ? <div><dt>tool</dt><dd>{event.facts.tool}</dd></div> : null}
-                        {event.facts ? (
-                          <div className="uc-chat-production-trace__facts-raw">
-                            <dt>facts</dt>
-                            <dd><code>{JSON.stringify(event.facts, null, 2)}</code></dd>
+            <>
+              {!developerMode && phases.length > 0 ? (
+                <ol className="uc-chat-progress-phases" aria-label="执行概览">
+                  {phases.map((phase) => {
+                    const ActivityIcon = activityIcons[phase.phase];
+                    const action = productionProgressAction(phase);
+                    return (
+                      <li key={phase.phase} data-phase={phase.phase} data-status={phase.status} title={`${action} · ${phase.detail}`}>
+                        <ActivityIcon className="uc-chat-progress-phases__icon" aria-hidden="true" />
+                        <span className="uc-chat-progress-phases__content">{action}</span>
+                        {phase.metric ? <span className="uc-chat-progress-phases__meta">{phase.metric.replace(/^已接收 /, '')}</span> : null}
+                      </li>
+                    );
+                  })}
+                </ol>
+              ) : null}
+              <details className="uc-chat-document-progress__records" open={developerMode || undefined}>
+                <summary>
+                  <LuSquareTerminal className="uc-chat-production-trace__event-icon" aria-hidden="true" />
+                  详细执行记录
+                  <LuChevronRight className="uc-chat-document-progress__chevron" aria-hidden="true" />
+                </summary>
+                <div className="uc-chat-document-progress__record-viewport" tabIndex={0} role="region" aria-label="详细执行记录">
+                  <ol className="uc-chat-production-trace" aria-label="完整生产链路">
+                    {displayEvents.map(({ event, key }) => {
+                      const eventRequest = requestBySource ? requestBySource.get(event.sourceMessageId) : request;
+                      const eventIndex = events.indexOf(event);
+                      const prevEvent = eventIndex > 0 ? events[eventIndex - 1] : undefined;
+                      const durationMs = prevEvent ? Math.max(0, new Date(event.occurredAt).getTime() - new Date(prevEvent.occurredAt).getTime()) : undefined;
+                      const naturalDetails = eventDetails(event);
+                      return (
+                        <li key={key} data-status={event.status} data-event-code={event.code}>
+                          <div className="uc-chat-production-trace__heading" title={`${eventTitle(event)} · ${naturalDetails.join(' · ')} · ${statusLabels[event.status]}`}>
+                            <LuSquareTerminal className="uc-chat-production-trace__event-icon" aria-hidden="true" />
+                            <span className="uc-chat-production-trace__direction">{eventDirection(event)}</span>
+                            <strong>{eventTitle(event)}</strong>
+                            <span className="uc-chat-production-trace__status">{statusLabels[event.status]}</span>
+                            {!developerMode && naturalDetails.length ? <span className="uc-chat-production-trace__inline-details">{naturalDetails.join(' · ')}</span> : null}
+                            {durationMs !== undefined && developerMode ? (
+                              <span className="uc-chat-production-trace__duration" title="与前一步间隔耗时">
+                                {durationMs < 1000 ? `${durationMs}ms` : `${(durationMs / 1000).toFixed(2)}s`}
+                              </span>
+                            ) : null}
+                            <time dateTime={event.occurredAt}>{new Date(event.occurredAt).toLocaleTimeString('zh-CN', { hour12: false })}</time>
                           </div>
-                        ) : null}
-                      </dl>
-                    </details>
-                  ) : null}
-                </li>
-                );
-              })}
-            </ol>
+                          {event.code === 'request_received' && eventRequest ? <p className="uc-chat-production-trace__request">{eventRequest}</p> : null}
+                          {naturalDetails.length ? <p className="uc-chat-production-trace__details">{naturalDetails.join(' · ')}</p> : null}
+                          {developerMode ? (
+                            <details className="uc-chat-production-trace__devtools">
+                              <summary>查看执行事实 (docId / 工具调用)</summary>
+                              <dl className="uc-chat-production-trace__facts-grid">
+                                <div><dt>docId</dt><dd>{event.conversationId}</dd></div>
+                                <div><dt>nodeId</dt><dd>{event.traceId}:{event.sequence}</dd></div>
+                                {event.runId ? <div><dt>runId</dt><dd>{event.runId}</dd></div> : null}
+                                {event.runEventId ? <div><dt>runEventId</dt><dd>{event.runEventId}</dd></div> : null}
+                                {event.runSequence ? <div><dt>runSequence</dt><dd>{event.runSequence}</dd></div> : null}
+                                {event.operationId ? <div><dt>operationId</dt><dd>{event.operationId}</dd></div> : null}
+                                {event.facts?.tool ? <div><dt>tool</dt><dd>{event.facts.tool}</dd></div> : null}
+                                {event.facts ? (
+                                  <div className="uc-chat-production-trace__facts-raw">
+                                    <dt>facts</dt>
+                                    <dd><code>{JSON.stringify(event.facts, null, 2)}</code></dd>
+                                  </div>
+                                ) : null}
+                              </dl>
+                            </details>
+                          ) : null}
+                        </li>
+                      );
+                    })}
+                  </ol>
+                </div>
+              </details>
+            </>
           ) : (
             <ul className="uc-chat-document-progress__step-list" aria-label="已完成步骤">
               {completedSteps.map((step) => <li key={step.sequence}>{progressSummary(step)}</li>)}
