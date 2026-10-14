@@ -16,6 +16,18 @@ import { NodeProjectStorage, toProjectRelativePath } from '../storage';
 import { resolveFileReferencePathSafely } from '../files/file-paths';
 import { readPptxDocument, type PptxPhysicalPage } from './pptx-page-reader';
 import { readRegisteredPresentationProductionPlan } from './presentation-production-plan-reader';
+import type { PresentationProductionPlan } from './presentation-production-plan';
+import { canonicalizeLayoutJson } from '../../domain/entities/presentation-layout-ir';
+
+export function buildProductionPresentationRevisionMap(pages: readonly PptxPhysicalPage[], plan: PresentationProductionPlan, checksumSha256: string): PresentationRevisionMap {
+  if (!plan.layoutIR || plan.layoutIR.compatibility.origin !== 'solver' || pages.length !== plan.layoutIR.pages.length) throw scopeError();
+  const sections = plan.contentSnapshot.sections.map((section, sectionIndex) => {
+    const owned = plan.layoutIR!.pages.filter(page => page.source.kind === 'content' && page.source.sectionId === section.sectionId);
+    if (owned.length !== 1 || !pages.some(page => page.pageNumber === owned[0].pageNumber && page.contentText.includes(section.heading))) throw scopeError();
+    return { sectionIndex, heading: section.heading, pages: owned.map(page => page.pageNumber) };
+  });
+  return { checksumSha256, totalPages: pages.length, sections };
+}
 
 export function buildPresentationRevisionMap(pages: readonly PptxPhysicalPage[], outline: DocumentOutline, checksumSha256: string): PresentationRevisionMap {
   if (outline.kind !== 'ppt') throw scopeError();
@@ -39,10 +51,14 @@ export class RegisteredPresentationReader {
 
   /** Explicit private-plan readback; ordinary physical reads do not parse compiler evidence. */
   async readWithProductionPlan(workId: WorkId, outline?: DocumentOutline) {
-    const source = await this.read(workId, outline);
+    const source = await this.read(workId);
     const productionPlan = await readRegisteredPresentationProductionPlan({ ...this.options,
       work: source.work, file: source.file, buffer: source.buffer });
-    return { ...source, ...(productionPlan ? { productionPlan } : {}) };
+    if (productionPlan && outline && JSON.stringify(canonicalizeLayoutJson(outline)) !== JSON.stringify(canonicalizeLayoutJson(productionPlan.plan.outline))) throw scopeError();
+    const map = productionPlan?.plan.layoutIR?.compatibility.origin === 'solver'
+      ? buildProductionPresentationRevisionMap(source.pages, productionPlan.plan, source.file.checksumSha256!)
+      : outline ? buildPresentationRevisionMap(source.pages, outline, source.file.checksumSha256!) : undefined;
+    return { ...source, map, ...(productionPlan ? { productionPlan } : {}) };
   }
 
   async read(workId: WorkId, outline?: DocumentOutline) {
@@ -131,7 +147,7 @@ export function createPresentationWorkflowScope(options: { rootDirectory: string
         if (!sourceOutline) throw scopeError();
         // Physical pages verify the file; a matching private plan owns semantic
         // section identity. Saved message JSON remains only a legacy fallback.
-        const map = buildPresentationRevisionMap(actual.pages, sourceOutline, actual.file.checksumSha256!);
+        const map = actual.map ?? buildPresentationRevisionMap(actual.pages, sourceOutline, actual.file.checksumSha256!);
         const target = { unit: plan.targetHint.unit as 'page' | 'section', ordinal: plan.targetHint.ordinal };
         const resolved = mappedPresentationTarget(map!, target);
         return { workId: result.workId, checksumSha256: map!.checksumSha256, ...target,

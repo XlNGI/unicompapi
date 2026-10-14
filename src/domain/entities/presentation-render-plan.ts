@@ -14,7 +14,7 @@ export interface PresentationRenderPlanGeometry {
 export type PresentationRenderSourceReference =
   | { readonly kind: 'outline'; readonly ref: string }
   | { readonly kind: 'content'; readonly ref: string }
-  | { readonly kind: 'generated'; readonly key: 'closing-label' | 'page-number' | 'decoration-line' | 'decoration-node' };
+  | { readonly kind: 'generated'; readonly key: 'closing-label' | 'page-number' | 'decoration-line' | 'decoration-node' | 'decoration-frame' };
 
 /** Host provenance of the sole Layout IR from which this writer input was projected. */
 export interface PresentationRenderInputIdentity {
@@ -250,6 +250,11 @@ function validateElement(
   const geometry = validateGeometry(value.geometry, `${path}.geometry`, diagnostics);
   const style = validateStyle(value.style, `${path}.style`, value.type, diagnostics);
   validateContent(value.content, String(value.type), `${path}.content`, diagnostics);
+  const decorationKinds: Record<string, string> = { 'decoration-line': 'line', 'decoration-node': 'ellipse', 'decoration-frame': 'roundRect' };
+  if (isRecord(value.source) && value.source.kind === 'generated' && String(value.source.key).startsWith('decoration-') &&
+    (value.type !== 'shape' || !isRecord(value.content) || value.content.shapeKind !== decorationKinds[String(value.source.key)])) {
+    diagnostics.push(issue('invalid_source_ref', `${path}.source`, 'decoration source must use its matching shape primitive'));
+  }
   if (style) {
     const isPageNumber = isRecord(value.source) && value.source.kind === 'generated' && value.source.key === 'page-number';
     const decoration = isRecord(value.source) && value.source.kind === 'generated' && String(value.source.key).startsWith('decoration-');
@@ -284,7 +289,7 @@ function validateSource(
     }
   } else if (value.kind === 'generated') {
     checkKeys(value, ['kind', 'key'], path, diagnostics);
-    if (value.key !== 'closing-label' && value.key !== 'page-number' && value.key !== 'decoration-line' && value.key !== 'decoration-node') diagnostics.push(issue('invalid_source_ref', `${path}.key`, 'generated source key is unsupported'));
+    if (value.key !== 'closing-label' && value.key !== 'page-number' && value.key !== 'decoration-line' && value.key !== 'decoration-node' && value.key !== 'decoration-frame') diagnostics.push(issue('invalid_source_ref', `${path}.key`, 'generated source key is unsupported'));
   } else diagnostics.push(issue('invalid_source_ref', `${path}.kind`, 'source kind is unsupported'));
 }
 

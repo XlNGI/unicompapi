@@ -14,7 +14,8 @@ import { buildDocumentContentSnapshot, parseDocumentContentSnapshot, documentCon
   documentContentReferenceIndex, type DocumentContentSnapshotV1, type DocumentContentResolvedRef } from '../../domain/entities/document-content-snapshot';
 import type { ProductionPresentationLayoutIR } from '../../domain/entities/presentation-layout-ir';
 import { canonicalizeLayoutJson } from '../../domain/entities/presentation-layout-ir';
-import { buildProductionPresentationLayoutIR, derivePresentationRenderPlanFromLayoutIR } from './presentation-layout-ir-adapter';
+import { buildProductionPresentationLayoutIR, derivePresentationRenderPlanFromLayoutIR,
+  parseVerifiedProductionPresentationLayoutIR, computePresentationLayoutDigest } from './presentation-layout-ir-adapter';
 import { buildPresentationLayoutConstraintModel } from './presentation-page-features';
 import { solvePresentationLayoutWithRepair, type PresentationLayoutPageResult, type PresentationLayoutRepairAction } from './presentation-layout-engine';
 import type { PresentationTemplateTokens } from './presentation-template';
@@ -85,7 +86,9 @@ export function compilePresentationRenderPlan(
   outline: DocumentOutline,
   candidate: unknown,
   tokens: PresentationTemplateTokens,
-  options: { readonly contentSnapshot?: DocumentContentSnapshotV1 } = {}
+  options: { readonly contentSnapshot?: DocumentContentSnapshotV1;
+    readonly visualRevision?: { readonly previousLayoutIR: ProductionPresentationLayoutIR;
+      readonly previousDesignIR: ProductionPresentationDesignIR; readonly targetPageNumbers: readonly number[] } } = {}
 ): PresentationDesignCompilation {
   if (outline.kind !== 'ppt') return failed('invalid_outline', 'skipped', 'skipped');
   let contentSnapshot: DocumentContentSnapshotV1;
@@ -127,6 +130,10 @@ export function compilePresentationRenderPlan(
     return failed(error instanceof TypeError && error.message.startsWith('content_organization_')
       ? 'invalid_content_organization' : 'invalid_layout_constraints', 'failed', 'skipped', designIR);
   }
+  if (designIR.pages.some((page, index) => (page.visualTreatment?.component === 'nodes' || page.visualTreatment?.component === 'track') &&
+    (page.pageRole !== 'process' || model.features[index].contentOrganization?.layout !== 'sequence'))) {
+    return failed('unsupported_visual_component', 'failed', 'skipped', designIR);
+  }
   const layout = solvePresentationLayoutWithRepair(model.features, model.constraints);
   if (layout.status !== 'success') {
     const diagnostics = layout.diagnostics.map(item => ({ code: item.code, pageNumber: item.pageNumber }));
@@ -152,9 +159,21 @@ export function compilePresentationRenderPlan(
       minimumFontSize: layout.constraints.themeTokens.typography.minimumFontSize,
       validSourceRefsByPage
     });
-    const layoutIR = buildProductionPresentationLayoutIR({ renderPlan: solved, content: contentSnapshot, design: designIR,
+    let layoutIR = buildProductionPresentationLayoutIR({ renderPlan: solved, content: contentSnapshot, design: designIR,
       repairs: layout.repairs, diagnostics: layout.diagnostics,
       organizations: layout.pages.flatMap(page => page.contentOrganization ? [{ pageNumber: page.pageNumber, organization: page.contentOrganization }] : []) });
+    if (options.visualRevision) {
+      const { previousLayoutIR, previousDesignIR, targetPageNumbers } = options.visualRevision;
+      const prior = parseVerifiedProductionPresentationLayoutIR(previousLayoutIR, { content: contentSnapshot, design: previousDesignIR });
+      const targets = new Set(targetPageNumbers);
+      if (!targets.size || targets.size !== targetPageNumbers.length || [...targets].some(page => !Number.isSafeInteger(page) || page < 1 || page > designIR.pages.length) ||
+        (targets.size !== designIR.pages.length && JSON.stringify(designIR.globalDesign) !== JSON.stringify(previousDesignIR.globalDesign)) ||
+        designIR.pages.some(page => !targets.has(page.pageNumber) && JSON.stringify(canonicalizeLayoutJson(page)) !==
+          JSON.stringify(canonicalizeLayoutJson(previousDesignIR.pages[page.pageNumber - 1])))) throw new TypeError('layout_visual_revision_scope_invalid');
+      layoutIR = { ...layoutIR, pages: layoutIR.pages.map(page => targets.has(page.pageNumber) ? page : prior.pages[page.pageNumber - 1]) };
+      layoutIR = { ...layoutIR, identity: { ...layoutIR.identity, layoutDigest: computePresentationLayoutDigest(layoutIR) } };
+      layoutIR = parseVerifiedProductionPresentationLayoutIR(layoutIR, { content: contentSnapshot, design: designIR });
+    }
     const plan = derivePresentationRenderPlanFromLayoutIR(layoutIR, contentSnapshot);
     const visualAudit = auditPresentationRenderPlan(plan);
     return {
@@ -283,7 +302,10 @@ function buildRenderPlan(
         zIndex: placement.zIndex
       };
     });
-    const decorations = buildSequenceDecorations(layout, pageStyle, designPage.visualTreatment?.component);
+    const decorations = [
+      ...buildSequenceDecorations(layout, pageStyle, designPage.visualTreatment?.component),
+      ...buildPageDecorations(layout, pageStyle, designPage, constraints.canvas)
+    ].map((element, zIndex) => ({ ...element, zIndex }));
     return { pageNumber: layout.pageNumber, pageRole: designPage.pageRole, backgroundColor: pageStyle.backgroundColor,
       elements: [...decorations, ...elements.map(element => ({ ...element, zIndex: element.zIndex + decorations.length }))] };
   });
@@ -295,6 +317,37 @@ function buildRenderPlan(
   };
 }
 
+/** Explicit accents/frame are primitives around solved content, never alternate page templates. */
+function buildPageDecorations(layout: PresentationLayoutPageResult, pageStyle: ReturnType<typeof resolvePresentationPageStyle>,
+  designPage: PresentationDesignIRPage, canvas: PresentationRenderPlan['canvas']): PresentationRenderPlanElement[] {
+  const treatment = designPage.visualTreatment;
+  if (!treatment) return [];
+  const content = layout.placements.filter(item => item.sourceRef !== 'generated.page-number');
+  const focus = content.find(item => item.sourceRef === designPage.emphasis.target) ?? content.find(item => item.role === 'title') ?? content[0];
+  if (!focus) return [];
+  const style = { fontFamily: pageStyle.fontFamily, fontSize: 1, bold: false, color: pageStyle.accentColor,
+    alignment: 'left' as const, verticalAlignment: 'middle' as const };
+  const result: PresentationRenderPlanElement[] = [];
+  if (treatment.accent !== 'none') {
+    const box = focus.geometry;
+    const rule = treatment.accent === 'rule'
+      ? { x: box.x, y: Math.min(canvas.height - 0.025, box.y + box.height + 0.04), width: Math.min(0.9, box.width), height: 0.025 }
+      : { x: Math.max(0, box.x - 0.10), y: box.y, width: 0.025, height: box.height };
+    result.push({ renderId: `p${layout.pageNumber}-dec-accent`, source: { kind: 'generated', key: 'decoration-line' },
+      type: 'shape', geometry: rule, style, content: { type: 'shape', shapeKind: 'line' }, zIndex: 0 });
+  }
+  if (treatment.component === 'frame') {
+    const x = Math.max(0, Math.min(...content.map(item => item.geometry.x)) - 0.12);
+    const y = Math.max(0, Math.min(...content.map(item => item.geometry.y)) - 0.12);
+    const right = Math.min(canvas.width, Math.max(...content.map(item => item.geometry.x + item.geometry.width)) + 0.12);
+    const bottom = Math.min(canvas.height, Math.max(...content.map(item => item.geometry.y + item.geometry.height)) + 0.12);
+    result.push({ renderId: `p${layout.pageNumber}-dec-frame`, source: { kind: 'generated', key: 'decoration-frame' }, type: 'shape',
+      geometry: { x, y, width: right - x, height: bottom - y }, style,
+      content: { type: 'shape', shapeKind: 'roundRect' }, zIndex: result.length });
+  }
+  return result;
+}
+
 /** Process pages get explicit, persisted track/node primitives when the semantic organization is a sequence. */
 function buildSequenceDecorations(
   layout: PresentationLayoutPageResult,
@@ -302,24 +355,35 @@ function buildSequenceDecorations(
   component: 'none' | 'nodes' | 'track' | 'frame' | undefined
 ): PresentationRenderPlanElement[] {
   if (layout.pageRole !== 'process' || layout.composition !== 'sequence' || layout.contentOrganization?.layout !== 'sequence' || component === 'none' || component === 'frame') return [];
-  const steps = layout.placements.filter(item => item.sourceRef !== 'generated.page-number' && item.hierarchy !== 'primary')
-    .sort((left, right) => left.geometry.x - right.geometry.x);
+  const steps = layout.contentOrganization.groups.filter(group => group.role === 'step').flatMap(group => {
+    const members = layout.placements.filter(item => group.sourceRefs.includes(item.sourceRef));
+    if (!members.length) return [];
+    const x = Math.min(...members.map(item => item.geometry.x)), y = Math.min(...members.map(item => item.geometry.y));
+    return [{ x, y, width: Math.max(...members.map(item => item.geometry.x + item.geometry.width)) - x,
+      height: Math.max(...members.map(item => item.geometry.y + item.geometry.height)) - y }];
+  });
   if (steps.length < 2 || steps.length > 14) return [];
-  const y = Math.max(0.28, Math.min(...steps.map(step => step.geometry.y)) - 0.24);
-  const centers = steps.map(step => step.geometry.x + step.geometry.width / 2);
+  const vertical = Math.max(...steps.map(step => step.y)) - Math.min(...steps.map(step => step.y)) >
+    Math.max(...steps.map(step => step.x)) - Math.min(...steps.map(step => step.x));
+  steps.sort((left, right) => vertical ? left.y - right.y : left.x - right.x);
+  const edge = vertical ? Math.max(0.12, Math.min(...steps.map(step => step.x)) - 0.24)
+    : Math.max(0.28, Math.min(...steps.map(step => step.y)) - 0.24);
+  const centers = steps.map(step => vertical ? step.y + step.height / 2 : step.x + step.width / 2);
   const style = {
     fontFamily: pageStyle.fontFamily, fontSize: 1, bold: false, color: pageStyle.accentColor,
     alignment: 'center' as const, verticalAlignment: 'middle' as const
   };
   const elements: PresentationRenderPlanElement[] = [];
   if (component === undefined || component === 'nodes' || component === 'track') centers.forEach((center, index) => elements.push({ renderId: `p${layout.pageNumber}-dec-node-${index + 1}`,
-    source: { kind: 'generated', key: 'decoration-node' }, type: 'shape', geometry: { x: center - 0.10, y, width: 0.20, height: 0.20 }, style,
+    source: { kind: 'generated', key: 'decoration-node' }, type: 'shape', geometry: { x: vertical ? edge : center - 0.10,
+      y: vertical ? center - 0.10 : edge, width: 0.20, height: 0.20 }, style,
     content: { type: 'shape', shapeKind: 'ellipse' }, zIndex: index }));
   if (component === 'nodes') return elements;
   centers.slice(0, -1).forEach((center, index) => {
     const next = centers[index + 1]!;
     elements.push({ renderId: `p${layout.pageNumber}-dec-line-${index + 1}`, source: { kind: 'generated', key: 'decoration-line' }, type: 'shape',
-      geometry: { x: center + 0.10, y: y + 0.087, width: Math.max(0.02, next - center - 0.20), height: 0.025 }, style,
+      geometry: { x: vertical ? edge + 0.087 : center + 0.10, y: vertical ? center + 0.10 : edge + 0.087,
+        width: vertical ? 0.025 : Math.max(0.02, next - center - 0.20), height: vertical ? Math.max(0.02, next - center - 0.20) : 0.025 }, style,
       content: { type: 'shape', shapeKind: 'line' }, zIndex: centers.length + index });
   });
   return elements;

@@ -461,7 +461,7 @@ export function buildPresentationDesignIRJsonSchema(): Record<string, unknown> {
     visualTone: enumeration(presentationDesignTones), visualRhythm: enumeration(presentationDesignRhythms),
     density: enumeration(presentationDesignDensities), whitespace: enumeration(presentationDesignWhitespaces),
     typographyDirection: enumeration(presentationTypographyDirections), colorDirection: enumeration(presentationColorDirections),
-    visualSystem: { type: 'object', additionalProperties: false, required: [], properties: {
+    visualSystem: { type: 'object', additionalProperties: false, minProperties: 1, required: [], properties: {
       palette: { type: 'object', additionalProperties: false,
         required: ['background', 'surface', 'text', 'muted', 'accent', 'secondaryAccent'],
         properties: Object.fromEntries(['background', 'surface', 'text', 'muted', 'accent', 'secondaryAccent']

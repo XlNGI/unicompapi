@@ -1,4 +1,7 @@
 import { describe, expect, it } from 'vitest';
+import PptxGenJS from 'pptxgenjs';
+import JSZip from 'jszip';
+import { renderPresentationRenderPlan } from '../../src/platform/documents/presentation-design-renderer';
 import { parsePresentationDesignIR } from '../../src/domain/entities/presentation-design-contract';
 import { compilePresentationRenderPlan } from '../../src/platform/documents/presentation-render-plan-compiler';
 import { resolvePresentationTemplate } from '../../src/platform/documents/presentation-template';
@@ -52,7 +55,7 @@ describe('presentation visual design system', () => {
     const nodesOnly = parsePresentationDesignIR({
       ...base,
       pages: base.pages.map(page => page.pageRole === 'process'
-        ? { ...page, visualTreatment: { surface: 'flat', accent: 'edge', component: 'nodes' } }
+        ? { ...page, visualTreatment: { surface: 'flat', accent: 'none', component: 'nodes' } }
         : page)
     }, { outline: stylePagesOutline });
     const compiled = compilePresentationRenderPlan(stylePagesOutline, nodesOnly, resolvePresentationTemplate('business_minimal').tokens);
@@ -61,5 +64,36 @@ describe('presentation visual design system', () => {
       expect.arrayContaining([{ type: 'shape', shapeKind: 'ellipse' }])
     );
     expect(process?.elements.some(element => element.content.type === 'shape' && element.content.shapeKind === 'line')).toBe(false);
+  });
+
+  it.each(['rule', 'edge'] as const)('executes explicit %s accents and a frame without losing facts', async accent => {
+    const base = stylePagesDesign();
+    const design = parsePresentationDesignIR({ ...base, pages: base.pages.map(page => page.pageNumber === 2
+      ? { ...page, visualTreatment: { surface: 'flat', accent, component: 'frame' } } : page) }, { outline: stylePagesOutline });
+    const compiled = compilePresentationRenderPlan(stylePagesOutline, design, resolvePresentationTemplate('business_minimal').tokens);
+    expect(compiled.plan, JSON.stringify(compiled.diagnostics)).toBeDefined();
+    const shapes = compiled.plan!.pages[1].elements.filter(element => element.type === 'shape');
+    expect(shapes.map(element => element.content)).toEqual(expect.arrayContaining([
+      { type: 'shape', shapeKind: 'line' }, { type: 'shape', shapeKind: 'roundRect' }
+    ]));
+    const rule = shapes.find(element => element.source.kind === 'generated' && element.source.key === 'decoration-line')!;
+    expect(accent === 'rule' ? rule.geometry.width > rule.geometry.height : rule.geometry.height > rule.geometry.width).toBe(true);
+    const pptx = new PptxGenJS();
+    pptx.layout = 'LAYOUT_WIDE';
+    renderPresentationRenderPlan(pptx, compiled.plan!);
+    const zip = await JSZip.loadAsync(await pptx.write({ outputType: 'nodebuffer' }) as Buffer);
+    const xml = await zip.file('ppt/slides/slide2.xml')!.async('string');
+    expect(xml).toContain('prst="roundRect"');
+    expect(xml).toMatch(/<a:alpha\s+val="0"/u);
+    expect(xml).toContain(stylePagesOutline.sections[0].heading);
+  });
+
+  it('refuses a declared track on content without a sequence instead of silently omitting it', () => {
+    const base = stylePagesDesign();
+    const design = parsePresentationDesignIR({ ...base, pages: base.pages.map(page => page.pageNumber === 2
+      ? { ...page, visualTreatment: { surface: 'flat', accent: 'none', component: 'track' } } : page) }, { outline: stylePagesOutline });
+    const compiled = compilePresentationRenderPlan(stylePagesOutline, design, resolvePresentationTemplate('business_minimal').tokens);
+    expect(compiled.plan).toBeUndefined();
+    expect(compiled.diagnostics.map(item => item.code)).toContain('unsupported_visual_component');
   });
 });

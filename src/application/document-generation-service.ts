@@ -45,7 +45,7 @@ import {
 } from './presentation-page-count';
 import type { PresentationRevisionMap } from './presentation-revision-map';
 import type { PresentationArtDirectionPlanner, PresentationArtDirectionRequest } from './presentation-art-direction';
-import { applyPresentationVisualRevision, parsePresentationVisualRevisionRequest } from './presentation-design-revision';
+import { applyPresentationVisualRevision, parsePresentationVisualRevisionRequest, type PresentationVisualRevision } from './presentation-design-revision';
 import type { ProductionPresentationDesignIR } from '../domain/entities/presentation-design-contract';
 import { ExecutionBudgetError, type HostExecutionBudget } from './execution-budget';
 
@@ -253,6 +253,8 @@ export interface DocumentGenerationExecutionInput {
   readonly outline: DocumentOutline;
   readonly documentIR?: DocumentIR;
   readonly designIR?: ProductionPresentationDesignIR;
+  /** Host-validated, facts-preserving visual revision of a registered parent. */
+  readonly presentationVisualRevision?: PresentationVisualRevision;
   /** User semantic requirements only; never contains Runtime execution metadata. */
   readonly userRequirement?: string;
   readonly requestArtDirection?: PresentationArtDirectionPlanner;
@@ -951,15 +953,17 @@ export class DocumentGenerationApplicationService {
         previousOutline !== undefined &&
         this.dependencies.revisionAgent !== undefined &&
         isExplicitClearRevisionRequest(requestText);
-      let outline = useDeterministicClearRevision
+      let visualRevision = input.kind === 'ppt' && input.parentWorkId !== undefined && previousOutline && requestText
+        ? parsePresentationVisualRevisionRequest(requestText, previousOutline.sections.length + 2) : undefined;
+      let outline = useDeterministicClearRevision || (visualRevision && previousOutline)
         ? previousOutline
         : this.compileDraft(content, input.kind, operation, attachmentRefs);
-      let visualRevision: ReturnType<typeof parsePresentationVisualRevisionRequest>;
       let visualRevisionDesignIR: ProductionPresentationDesignIR | undefined;
       if (input.kind === 'ppt' && input.parentWorkId !== undefined && previousOutline && requestText) {
         visualRevision = parsePresentationVisualRevisionRequest(requestText, previousOutline.sections.length + 2);
         if (visualRevision) {
           const productionPlan = await this.dependencies.loadPresentationProductionPlan?.(input.parentWorkId);
+          if (!productionPlan?.designIR) throw new DocumentGenerationApplicationError('revision_scope_violation', 'Visual revision requires the registered production design');
           if (productionPlan?.designIR) {
             visualRevisionDesignIR = applyPresentationVisualRevision({ outline: previousOutline, designIR: productionPlan.designIR, revision: visualRevision });
             outline = previousOutline;
@@ -1071,7 +1075,7 @@ export class DocumentGenerationApplicationService {
             revisionPatches = revision.patches;
             revisionApplied = true;
           }
-          if (revisionTarget !== undefined) {
+          if (revisionTarget !== undefined && visualRevisionDesignIR === undefined) {
             const heading = previousOutline.sections[
               revisionSectionIndex(previousOutline.kind, revisionTarget, presentationMap)
             ]?.heading;
@@ -1146,6 +1150,7 @@ export class DocumentGenerationApplicationService {
       outline,
       ...(documentIR !== undefined ? { documentIR } : {}),
       ...(visualRevisionDesignIR ? { designIR: visualRevisionDesignIR } : {}),
+      ...(visualRevisionDesignIR && visualRevision ? { presentationVisualRevision: visualRevision } : {}),
       ...(input.kind === 'ppt' && input.parentWorkId === undefined && operation === 'create'
         ? { userRequirement: collectArtDirectionRequestText(conversation, input.messageId) ?? requestText ?? '',
             ...(this.dependencies.artDirectionPlanner ? { requestArtDirection: (request: PresentationArtDirectionRequest) =>

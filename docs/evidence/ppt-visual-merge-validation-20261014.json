@@ -1,0 +1,41 @@
+{
+  "schemaVersion": 1,
+  "date": "2026-10-14",
+  "base": "4e0aee495e0b740a905a9dfaef097ae1e4eb0ada",
+  "selectedPptCommit": "5d90d0e2ff4dd9d16a6030eb31322738791d44ad",
+  "integrationBranch": "feature/ppt-visual-develop-integration",
+  "unrelatedSourceCommitsExcluded": 19,
+  "checks": {
+    "typecheck": "passed",
+    "eslint": "passed",
+    "productionBuild": "passed",
+    "diffCheck": "passed",
+    "nodeUi": { "passed": 396, "failed": 0, "skipped": 0 },
+    "finalVitest": { "mode": "serial", "files": 340, "passed": 3454, "failed": 0, "skipped": 0 }
+  },
+  "initialVitest": {
+    "passed": 3445,
+    "failed": 2,
+    "skipped": 7,
+    "failures": ["module_cache_during_test_change", "isolated_worktree_ffmpeg_missing"],
+    "resolution": "Source frozen, media dependency linked locally, targeted and entire suite rerun successfully. No tests removed or existing timeouts increased."
+  },
+  "nativeOfficeQa": {
+    "report": "ppt-visual-integration-20261014/validation.json",
+    "parentPages": 6,
+    "revisedPages": 6,
+    "targetPages": [4],
+    "preservedOriginalParts": 37,
+    "contentSnapshotPreserved": true,
+    "productionPlanReadback": "passed",
+    "renderedErrors": 0,
+    "workRegistration": "passed"
+  },
+  "boundaries": {
+    "providerRequests": 0,
+    "artDirectionSource": "deterministic semantic fixture",
+    "multimodalReview": "not_available",
+    "macosHardware": "not_run",
+    "subjectiveVisualReview": "screenshots provided for human review"
+  }
+}

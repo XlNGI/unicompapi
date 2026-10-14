@@ -183,7 +183,7 @@ export function registerDocumentGenerationIpcHandlers(options: {
         },
         projectId: session.projectId,
         resolvePresentationMap: async (workId, outline) => {
-          const source = await new RegisteredPresentationReader({ rootDirectory: session.rootDirectory, projectId: session.projectId }).read(workId, outline);
+          const source = await new RegisteredPresentationReader({ rootDirectory: session.rootDirectory, projectId: session.projectId }).readWithProductionPlan(workId, outline);
           return source.map!;
         },
         loadPresentationProductionPlan: async workId => {

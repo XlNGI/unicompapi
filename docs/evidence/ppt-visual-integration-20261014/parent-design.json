@@ -1,0 +1,287 @@
+{
+  "schemaVersion": 2,
+  "globalDesign": {
+    "visualTone": "technical",
+    "visualRhythm": "progressive",
+    "density": "balanced",
+    "whitespace": "generous",
+    "typographyDirection": "display-led",
+    "colorDirection": "restrained",
+    "visualSystem": {
+      "palette": {
+        "background": "07111F",
+        "surface": "102A43",
+        "text": "F5FAFF",
+        "muted": "B7C9DC",
+        "accent": "35D6C8",
+        "secondaryAccent": "FE5EA8"
+      },
+      "typography": {
+        "displayScale": 1.06,
+        "bodyScale": 0.98,
+        "displayWeight": 800,
+        "bodyWeight": 400,
+        "lineSpacing": 1.24,
+        "charSpacing": 0.15
+      }
+    }
+  },
+  "pages": [
+    {
+      "pageNumber": 1,
+      "pageRole": "hero",
+      "pageIntent": "hero page",
+      "hierarchy": {
+        "primary": [
+          "outline.title"
+        ],
+        "secondary": [],
+        "supporting": []
+      },
+      "composition": {
+        "principle": "single-focus",
+        "focalArea": "center",
+        "balance": "asymmetric-right",
+        "flow": "left-to-right"
+      },
+      "density": "sparse",
+      "whitespace": "generous",
+      "emphasis": {
+        "target": "outline.title",
+        "strength": "dominant"
+      },
+      "contentRoles": {
+        "title": [
+          "outline.title"
+        ],
+        "body": [],
+        "metric": [],
+        "evidence": [],
+        "image": [],
+        "chart": []
+      },
+      "visualStrategy": "single statement with generous whitespace",
+      "visualTreatment": {
+        "surface": "flat",
+        "accent": "rule"
+      }
+    },
+    {
+      "pageNumber": 2,
+      "pageRole": "content",
+      "pageIntent": "content page",
+      "hierarchy": {
+        "primary": [
+          "outline.sections[0].heading"
+        ],
+        "secondary": [
+          "outline.sections[0].blocks[0]"
+        ],
+        "supporting": []
+      },
+      "composition": {
+        "principle": "comparison",
+        "focalArea": "center",
+        "balance": "symmetric",
+        "flow": "comparison"
+      },
+      "density": "balanced",
+      "whitespace": "balanced",
+      "emphasis": {
+        "target": "outline.sections[0].heading",
+        "strength": "moderate"
+      },
+      "contentRoles": {
+        "title": [
+          "outline.sections[0].heading"
+        ],
+        "body": [
+          "outline.sections[0].blocks[0]"
+        ],
+        "metric": [],
+        "evidence": [],
+        "image": [],
+        "chart": []
+      },
+      "visualStrategy": "content led composition",
+      "visualTreatment": {
+        "surface": "card",
+        "accent": "edge"
+      }
+    },
+    {
+      "pageNumber": 3,
+      "pageRole": "comparison",
+      "pageIntent": "comparison page",
+      "hierarchy": {
+        "primary": [
+          "outline.sections[1].heading"
+        ],
+        "secondary": [
+          "outline.sections[1].blocks[0]"
+        ],
+        "supporting": [
+          "outline.sections[1].blocks[1]"
+        ]
+      },
+      "composition": {
+        "principle": "comparison",
+        "focalArea": "left",
+        "balance": "symmetric",
+        "flow": "comparison"
+      },
+      "density": "balanced",
+      "whitespace": "balanced",
+      "emphasis": {
+        "target": "outline.sections[1].heading",
+        "strength": "moderate"
+      },
+      "contentRoles": {
+        "title": [
+          "outline.sections[1].heading"
+        ],
+        "body": [
+          "outline.sections[1].blocks[0]",
+          "outline.sections[1].blocks[1]"
+        ],
+        "metric": [],
+        "evidence": [],
+        "image": [],
+        "chart": []
+      },
+      "visualStrategy": "comparison led composition"
+    },
+    {
+      "pageNumber": 4,
+      "pageRole": "process",
+      "pageIntent": "process page",
+      "hierarchy": {
+        "primary": [
+          "outline.sections[2].heading"
+        ],
+        "secondary": [
+          "outline.sections[2].blocks[0].items[0]",
+          "outline.sections[2].blocks[0].items[1]",
+          "outline.sections[2].blocks[0].items[2]",
+          "outline.sections[2].blocks[0].items[3]"
+        ],
+        "supporting": []
+      },
+      "composition": {
+        "principle": "timeline",
+        "focalArea": "center",
+        "balance": "symmetric",
+        "flow": "left-to-right"
+      },
+      "density": "balanced",
+      "whitespace": "balanced",
+      "emphasis": {
+        "target": "outline.sections[2].heading",
+        "strength": "moderate"
+      },
+      "contentRoles": {
+        "title": [
+          "outline.sections[2].heading"
+        ],
+        "body": [
+          "outline.sections[2].blocks[0].items[0]",
+          "outline.sections[2].blocks[0].items[1]",
+          "outline.sections[2].blocks[0].items[2]",
+          "outline.sections[2].blocks[0].items[3]"
+        ],
+        "metric": [],
+        "evidence": [],
+        "image": [],
+        "chart": []
+      },
+      "visualStrategy": "Four ordered steps with a horizontal process track and one visual entry point.",
+      "visualTreatment": {
+        "surface": "card",
+        "accent": "edge",
+        "component": "track"
+      }
+    },
+    {
+      "pageNumber": 5,
+      "pageRole": "metric",
+      "pageIntent": "metric page",
+      "hierarchy": {
+        "primary": [
+          "outline.sections[3].heading"
+        ],
+        "secondary": [
+          "outline.sections[3].blocks[0]"
+        ],
+        "supporting": []
+      },
+      "composition": {
+        "principle": "asymmetric",
+        "focalArea": "left",
+        "balance": "asymmetric-right",
+        "flow": "left-to-right"
+      },
+      "density": "balanced",
+      "whitespace": "balanced",
+      "emphasis": {
+        "target": "outline.sections[3].heading",
+        "strength": "moderate"
+      },
+      "contentRoles": {
+        "title": [
+          "outline.sections[3].heading"
+        ],
+        "body": [
+          "outline.sections[3].blocks[0]"
+        ],
+        "metric": [],
+        "evidence": [],
+        "image": [],
+        "chart": []
+      },
+      "visualStrategy": "metric led composition",
+      "visualTreatment": {
+        "surface": "outlined",
+        "accent": "rule"
+      }
+    },
+    {
+      "pageNumber": 6,
+      "pageRole": "closing",
+      "pageIntent": "closing page",
+      "hierarchy": {
+        "primary": [
+          "outline.title"
+        ],
+        "secondary": [],
+        "supporting": []
+      },
+      "composition": {
+        "principle": "centered",
+        "focalArea": "center",
+        "balance": "asymmetric-right",
+        "flow": "left-to-right"
+      },
+      "density": "sparse",
+      "whitespace": "generous",
+      "emphasis": {
+        "target": "outline.title",
+        "strength": "moderate"
+      },
+      "contentRoles": {
+        "title": [
+          "outline.title"
+        ],
+        "body": [],
+        "metric": [],
+        "evidence": [],
+        "image": [],
+        "chart": []
+      },
+      "visualStrategy": "closing led composition",
+      "visualTreatment": {
+        "surface": "flat",
+        "accent": "rule"
+      }
+    }
+  ]
+}

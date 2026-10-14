@@ -2,6 +2,12 @@
 
 日期：2026-10-13。范围：现有 Office Agent PPT 生成路径、`Design IR v2`、布局求解器、Render Plan/Layout IR、PptxGenJS writer 和本地 Office/PDF QA。未调用 Provider，未读取凭证。
 
+2026-10-14 合并复核补充：原提交 `5d90d0e` 的局部视觉修订会携带文本 patch 的章节字段，导致视觉输出被父文件格式覆盖；旧测试只覆盖 IR helper，未证明登记作品修改成功。此次在 `origin/develop@4e0aee4` 的隔离功能分支中修复并新增真实 Application → Runner → 父 Work → 指定页渲染 → 新 Work/生产计划读回回归。只挑选 PPT 提交，不带入原功能分支其余 19 个模型合同和聊天维护提交。
+
+视觉修订现在保留父内容快照和非目标 Layout IR，仅写目标页面，并将目标页及其关系依赖合入原 PPTX。发布前再次核对父文件 Hash；失败时停止，不能回退旧模板掩盖失败。读回页面映射以已验证 Layout IR 的 sectionId 为准，不依赖视觉排序后第一段文字是标题的假设。`rule/edge/frame` 已有实际渲染，流程节点按 step 业务组生成，不把注释/行动项当作步骤；内容 elementId 不再包含几何坐标。明确命令以整句匹配，否定、混合正文修改、章节目标、越界或局部颜色要求不会扩大为全篇视觉修改。
+
+编译后的生产 Node/Office QA 验证已真实登记父/子作品，均 6 页且 completed，未修改的 37 个原包文件逐项一致，新作品可读回匹配的生产计划。报告、IR、PPTX 和页面截图见 [2026-10-14 合并验收证据](../evidence/ppt-visual-integration-20261014/validation.json)。此案例的 Art Direction 是确定性语义夹具；未调用真实 LLM，不能把它当作真实模型的设计能力或主观审美验收。完整自动门禁结果以 PLANS 顶部和本轮机器记录为准。
+
 ## 真实链路
 
 1. 用户请求由 `collectArtDirectionRequestText` 保留在应用层，`DocumentGenerationRunner` 在 PPT create 且没有 revision 时调用 `planPresentationArtDirection`（`src/platform/documents/document-generation-runner.ts`、`src/application/presentation-art-direction.ts:26`）。应用层通过 `buildPresentationArtDirectionInput` 只投影标题、页角色、内容引用、用户视觉要求和品牌约束；模型返回严格的 `PresentationDesignIRV2`，随后 `parsePresentationDesignIR` 做页序、引用、枚举和组织关系校验。

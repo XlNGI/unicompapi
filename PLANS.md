@@ -1,5 +1,13 @@
 # UniComp 开发计划
 
+### PPT 视觉优化合并复核（2026-10-14；隔离 develop 基线完整自动门禁通过）
+
+负责人要求本地合并 `develop` 并上传。以 `origin/develop@4e0aee4` 创建隔离 `feature/ppt-visual-develop-integration`，只挑选 PPT 提交 `5d90d0e`，不带入原功能分支其余 19 个模型合同、Thread/聊天维护提交；原工作区未提交改动保留。本轮修复局部视觉修订被旧 XML 文本 patch 覆盖、生产页面映射依赖标题首段、装饰字段未执行和内容 elementId 被几何改变的问题。视觉修改从验证后的父生产计划保留内容/身份，只写目标页；非目标 Layout IR 和原包文件保留，发布前重验父 Hash。不支持的已声明组件明确失败，否定/混合/越界/局部颜色命令不扩大为全篇。
+
+最终冻结源码验证：Vitest 串行全量 340 文件、3454/3454，0 失败/跳过；Node/UI 396/396，typecheck、全仓 lint、生产 build 和 diff 检查通过。首轮全量有 2 个失败（测试期间补入断言造成模块缓存版本差异、隔离工作树缺 FFmpeg）及 7 个环境跳过；新进程专项复核和补齐被忽略的媒体工具链接后，最终全量全部通过，未删除测试或放宽既有时限。依赖及 `.tools` 链接仅在本地，不进入 Git 或发布物。
+
+编译后的真实生产 Runner + LibreOffice/Poppler/PDF 文本检查：6 页父版和第 4 页视觉修订版均正式登记且 completed，两轮渲染 diagnostics=[]，父内容快照保持，37 个非目标原包文件逐项一致；新 Work 的生产计划重新读取校验通过。前后 PPTX/PNG/Design IR 和机器证据一并纳入功能分支，见 [合并验证](docs/evidence/ppt-visual-merge-validation-20261014.json) 与 [视觉修订证据](docs/evidence/ppt-visual-integration-20261014/validation.json)。Art Direction 使用确定性语义夹具，外部 Provider 请求 0，无真实 LLM、多模态审美或 macOS 实机验收；保持这些未实现/未验边界。按已获授权保留功能分支并推送，实际合并/远端状态以 Git 提交及引用为准。
+
 ### 生成历史功能恢复验证（2026-10-12；自动验证通过，已批准合并）
 
 后续负责人明确授权“合并到develop”。执行前重新 fetch，确认远程 develop 仍为 `d863d3f`，无新增提交；按已验证范围提交恢复分支、合入并推送 develop，保留原功能分支及恢复分支。下方“等待决定”“未提交”等描述为自动验收结束时的状态，实际交付结果以 Git 提交及远程引用为准。

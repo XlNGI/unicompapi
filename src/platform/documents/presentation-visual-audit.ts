@@ -30,13 +30,13 @@ export function auditPresentationRenderPlan(plan: PresentationRenderPlan): Prese
   const diagnostics: PresentationVisualAuditDiagnostic[] = [];
   const fontFamilies = new Set<string>();
   for (const page of plan.pages) {
-    const occupied = page.elements.reduce((sum, element) => sum + element.geometry.width * element.geometry.height, 0);
+    const occupied = page.elements.filter(element => element.type !== 'shape').reduce((sum, element) => sum + element.geometry.width * element.geometry.height, 0);
     const ratio = occupied / (plan.canvas.width * plan.canvas.height);
     if (ratio > 0.86) diagnostics.push({ code: 'visual_crowded_page', severity: 'warning', pageNumber: page.pageNumber,
       message: 'Element occupancy leaves little safe whitespace' });
     else if (ratio < 0.12 && page.elements.length > 1) diagnostics.push({ code: 'visual_excessive_whitespace', severity: 'warning', pageNumber: page.pageNumber,
       message: 'Element occupancy is unusually sparse for a multi-element page' });
-    const textElements = page.elements.filter(element => element.type === 'text');
+    const textElements = page.elements.filter(element => element.type === 'text' && !(element.source.kind === 'generated' && element.source.key === 'page-number'));
     const fontSizes = textElements.map(element => element.style.fontSize);
     if (fontSizes.length >= 3 && Math.max(...fontSizes) - Math.min(...fontSizes) < 4) {
       diagnostics.push({ code: 'visual_hierarchy_flat', severity: 'warning', pageNumber: page.pageNumber,
@@ -44,7 +44,7 @@ export function auditPresentationRenderPlan(plan: PresentationRenderPlan): Prese
     }
     for (const element of page.elements) {
       fontFamilies.add(element.style.fontFamily);
-      if (element.type === 'text' && contrastRatio(page.backgroundColor, element.style.color) < (element.style.fontSize >= 24 ? 3 : 4.5)) {
+      if (element.type === 'text' && contrastRatio(element.style.fill ?? page.backgroundColor, element.style.color) < (element.style.fontSize >= 24 ? 3 : 4.5)) {
         diagnostics.push({ code: 'visual_low_contrast', severity: 'warning', pageNumber: page.pageNumber,
           message: 'Text color has insufficient deterministic contrast against the page background' });
       }

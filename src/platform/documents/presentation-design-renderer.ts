@@ -2,8 +2,9 @@ import PptxGenJS from 'pptxgenjs';
 import type { PresentationRenderPlan, PresentationRenderPlanElement } from '../../domain/entities/presentation-render-plan';
 
 /** Writes an already validated Render Plan without choosing page geometry or visual hierarchy. */
-export function renderPresentationRenderPlan(pptx: PptxGenJS, plan: PresentationRenderPlan): void {
+export function renderPresentationRenderPlan(pptx: PptxGenJS, plan: PresentationRenderPlan, targetPageNumbers?: readonly number[]): void {
   for (const page of plan.pages) {
+    if (targetPageNumbers && !targetPageNumbers.includes(page.pageNumber)) continue;
     const slide = pptx.addSlide();
     slide.background = { color: page.backgroundColor };
     for (const element of [...page.elements].sort((left, right) => left.zIndex - right.zIndex)) renderElement(slide, element);
@@ -80,7 +81,7 @@ function renderElement(slide: PptxGenJS.Slide, element: PresentationRenderPlanEl
     slide.addShape(content.shapeKind, {
       objectName, x, y, w, h,
       ...(content.shapeKind === 'line' ? { line: { color: style.borderColor ?? style.color, width: style.borderWidth ?? 1 } } : {
-        fill: { color: style.fill ?? style.color },
+        fill: { color: style.fill ?? style.color, ...(content.shapeKind === 'roundRect' && !style.fill ? { transparency: 100 } : {}) },
         line: { color: style.borderColor ?? style.color, width: style.borderWidth ?? 1 }
       })
     });

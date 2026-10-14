@@ -30,4 +30,9 @@ describe('bounded PPT visual revision', () => {
     expect(next.pages[2].hierarchy).toEqual(design.pages[2].hierarchy);
     expect(next.pages[2].contentRoles).toEqual(design.pages[2].contentRoles);
   });
+
+  it.each(['不要让第三页更简洁一点', '第三页不要更简洁', '把第三章更简洁一点',
+    '第三页更简洁一点，并把收入改成十亿', '第99页更简洁一点', '第三页的颜色更克制一些'])('does not widen or override this request: %s', request => {
+    expect(parsePresentationVisualRevisionRequest(request, 7)).toBeUndefined();
+  });
 });

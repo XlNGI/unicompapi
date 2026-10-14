@@ -70,7 +70,8 @@ async function generate(name, designIR) {
   return target;
 }
 
-(async () => {
+module.exports = { outline, optimizedDesign };
+if (require.main === module) (async () => {
   await fs.mkdir(root, { recursive: true });
   const designIR = optimizedDesign();
   const baseline = await generate('baseline', undefined);
