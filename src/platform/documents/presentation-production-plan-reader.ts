@@ -4,7 +4,7 @@ import { DocumentGenerationApplicationError } from '../../application/document-g
 import { canonicalizeLayoutJson } from '../../domain/entities/presentation-layout-ir';
 import { JsonExecutionRepository, JsonFileReferenceRepository, JsonTaskRepository, JsonWorkRepository } from '../repositories/json-repositories';
 import { NodeProjectStorage, toProjectRelativePath, type JsonStorageLoadResult, type ProjectRelativePath } from '../storage';
-import { parsePresentationDesignAttempt, presentationAttemptPath, type PresentationCandidateQaReceipt, type PresentationDesignAttempt } from './presentation-design-attempts';
+import { MAX_PRESENTATION_CANDIDATE_ATTEMPT, parsePresentationDesignAttempt, presentationAttemptPath, type PresentationCandidateQaReceipt, type PresentationDesignAttempt } from './presentation-design-attempts';
 import type { PresentationProductionPlan } from './presentation-production-plan';
 
 /** Private Host evidence attached to an already registered and verified artifact. */
@@ -44,7 +44,7 @@ export async function readRegisteredPresentationProductionPlan(input: {
     const attempts: PresentationDesignAttempt[] = [];
     const matches: PresentationDesignAttempt[] = [];
     let hasEvidence = false;
-    for (let index = 0; index <= 2; index += 1) {
+    for (let index = 0; index <= MAX_PRESENTATION_CANDIDATE_ATTEMPT; index += 1) {
       const [rawAttempt, rawReceipt] = await Promise.all([
         primaryEvidence(storage, presentationAttemptPath(input.work.sourceExecutionId, index)),
         primaryEvidence(storage, presentationAttemptPath(input.work.sourceExecutionId, index, true))
@@ -108,7 +108,7 @@ function parseReceipt(value: unknown): PresentationCandidateQaReceipt {
   const raw = value as Record<string, unknown>;
   const allowed = ['schemaVersion', 'kind', 'attempt', 'attemptHash', 'artifactHash', 'qaOutcome', 'publication', 'diagnosisCodes', 'createdAt'];
   if (Object.keys(raw).some(key => !allowed.includes(key)) || raw.schemaVersion !== 1 || raw.kind !== 'candidate_qa_receipt' ||
-    !Number.isSafeInteger(raw.attempt) || Number(raw.attempt) < 0 || Number(raw.attempt) > 2 || !hash(raw.attemptHash) ||
+    !Number.isSafeInteger(raw.attempt) || Number(raw.attempt) < 0 || Number(raw.attempt) > MAX_PRESENTATION_CANDIDATE_ATTEMPT || !hash(raw.attemptHash) ||
     (raw.artifactHash !== undefined && !hash(raw.artifactHash)) || !['passed', 'failed', 'cancelled'].includes(String(raw.qaOutcome)) ||
     (raw.qaOutcome === 'passed' && !hash(raw.artifactHash)) || raw.publication !== 'not_authorized' ||
     !Array.isArray(raw.diagnosisCodes) || raw.diagnosisCodes.length > 40 ||

@@ -290,6 +290,7 @@ export interface DocumentGenerationExecutionInput {
 }
 
 export interface DocumentGenerationExecutionResult {
+  readonly presentationDesign?: { readonly path: 'design-aware' | 'legacy-fallback'; readonly fallbackReason?: string };
   readonly taskId: TaskId;
   readonly executionId: ExecutionId;
   readonly workId: WorkId;

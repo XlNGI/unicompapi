@@ -8,6 +8,8 @@ import type { PresentationProductionPlan } from './presentation-production-plan'
 
 /** Private Host boundary; never copied into progress events or Provider inputs. */
 export type PreparedPresentationDesignPlan = PresentationProductionPlan;
+/** Initial candidate + two model corrections + one local template fallback. */
+export const MAX_PRESENTATION_CANDIDATE_ATTEMPT = 3;
 
 export interface PresentationDesignAttempt {
   readonly schemaVersion: 1;
@@ -53,13 +55,15 @@ export function parsePresentationDesignAttempt(value: unknown): PresentationDesi
     'designVersion', 'layoutVersion', 'renderVersion', 'contentHash', 'designHash', 'layoutHash', 'renderHash',
     'parentAttempt', 'targetSectionIds', 'targetPageIds', 'targetSystemPages', 'diagnosisCodes', 'createdAt', 'plan', 'attemptHash']);
   if (raw.schemaVersion !== 1 || !id(raw.executionId) || !id(raw.sourceDraftId) ||
-    !integer(raw.draftRevision, 0, 1_000_000) || !integer(raw.attempt, 0, 2) || !integer(raw.contentVersion, 1, 1_000_000) ||
+    !integer(raw.draftRevision, 0, 1_000_000) || !integer(raw.attempt, 0, MAX_PRESENTATION_CANDIDATE_ATTEMPT) || !integer(raw.contentVersion, 1, 1_000_000) ||
     !hash(raw.contentHash) || !hash(raw.attemptHash) || typeof raw.createdAt !== 'string' || !Number.isFinite(Date.parse(raw.createdAt))) {
     throw new TypeError('design_attempt_invalid');
   }
   const planRaw = object(raw.plan);
   exact(planRaw, ['contentSnapshot', 'outline', 'designIR', 'layoutIR', 'renderPlan', 'snapshot']);
   const plan = validatePreparedPlan(planRaw as unknown as PreparedPresentationDesignPlan);
+  if (raw.attempt === MAX_PRESENTATION_CANDIDATE_ATTEMPT && (plan.designIR !== undefined || plan.layoutIR !== undefined || plan.renderPlan !== undefined ||
+    plan.snapshot.designExecution !== undefined || plan.snapshot.designPath !== 'legacy-fallback' || plan.snapshot.fallbackReason !== 'design_render_failed')) throw new TypeError('design_attempt_fallback_invalid');
   const version = Number(raw.attempt) + 1;
   const validateVersion = (name: 'design' | 'layout' | 'render', payload: unknown, digestValue?: string) => {
     if (payload === undefined ? raw[`${name}Version`] !== undefined || raw[`${name}Hash`] !== undefined
@@ -107,7 +111,7 @@ export async function persistPreparedPresentationAttempt(input: {
   readonly diagnosisCodes?: readonly string[];
   readonly now: string;
 }): Promise<PresentationDesignAttempt> {
-  if (!Number.isSafeInteger(input.attempt) || input.attempt < 0 || input.attempt > 2 ||
+  if (!Number.isSafeInteger(input.attempt) || input.attempt < 0 || input.attempt > MAX_PRESENTATION_CANDIDATE_ATTEMPT ||
     !Number.isSafeInteger(input.draftRevision) || input.draftRevision < 0 ||
     !input.executionId || input.executionId.length > 256 || !input.sourceDraftId || input.sourceDraftId.length > 256 ||
     !Number.isFinite(Date.parse(input.now))) throw new TypeError('design_attempt_invalid');
@@ -146,7 +150,7 @@ export async function persistPreparedPresentationAttempt(input: {
     plan: { contentSnapshot, outline, ...(designIR ? { designIR } : {}), ...(layoutIR ? { layoutIR } : {}),
       ...(renderPlan ? { renderPlan } : {}), snapshot }
   };
-  const result: PresentationDesignAttempt = { ...record, attemptHash: digest(record) };
+  const result = parsePresentationDesignAttempt({ ...record, attemptHash: digest(record) });
   await input.storage.mutateJsonAtomically(presentationAttemptPath(input.executionId, input.attempt), previous => {
     if (previous !== undefined && digest(previous) !== digest(result)) throw new TypeError('design_attempt_conflict');
     return result;

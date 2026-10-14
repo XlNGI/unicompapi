@@ -147,7 +147,7 @@ describe('production design remains authoritative through a forced layout repair
     await data.result;
     expect(data.writes).toHaveLength(2);
     expect(data.snapshots.map(snapshot => [snapshot.designPath, snapshot.fallbackReason])).toEqual([
-      ['legacy-fallback', 'missing_design_ir'], ['legacy-fallback', 'missing_design_ir']
+      ['legacy-fallback', 'art_direction_unavailable'], ['legacy-fallback', 'art_direction_unavailable']
     ]);
     expect(data.preparedRecords).toHaveLength(2);
     expect(data.preparedRecords[1].plan.contentSnapshot.sections.map(section => section.sectionId)).toEqual(

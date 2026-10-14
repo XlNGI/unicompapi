@@ -19,7 +19,7 @@ const outline: DocumentOutline = { kind: 'ppt', title: 'Synthetic product brief'
   blocks: [{ type: 'bullets', items: ['Throughput improved by 42%', 'Cost reduced by 18%'] }]
 }] };
 
-async function run(response: unknown, cancel = false) {
+async function run(response: unknown, cancel = false, strict = false) {
   const rootDirectory = await mkdtemp(path.join(os.tmpdir(), 'unicomp-art-production-'));
   roots.push(rootDirectory);
   const controller = new AbortController();
@@ -27,6 +27,7 @@ async function run(response: unknown, cancel = false) {
   const writes: GenerateDocumentFileInput[] = [];
   const snapshots: PresentationDesignCompilationSnapshot[] = [];
   const runner = new DocumentGenerationRunner({ rootDirectory, projectId: toProjectId('design-production'),
+    allowLegacyArtDirectionFallback: !strict,
     generateTemporaryFile: async input => { writes.push(input); return generateTemporaryDocumentFile({ ...input,
       onDesignCompiled: async snapshot => { snapshots.push(snapshot); await input.onDesignCompiled?.(snapshot); } }); } });
   const result = runner.run({ kind: 'ppt', title: outline.title, outline,
@@ -56,7 +57,7 @@ describe('Art Direction to real PPTX production wiring', () => {
   });
 
   it('an invalid autonomous design is refused before writing or Work publication', async () => {
-    const data = await run('{truncated');
+    const data = await run('{truncated', false, true);
     await expect(data.result).rejects.toMatchObject({ code: 'invalid_plan' });
     expect(data.writes).toEqual([]);
     expect(data.snapshots).toEqual([]);

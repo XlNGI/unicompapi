@@ -33,6 +33,7 @@ async function run(options: { repeat?: boolean; cancel?: boolean; cover?: boolea
   });
   let renderCount = 0;
   const runner = new DocumentGenerationRunner({ rootDirectory: root, projectId,
+    allowLegacyArtDirectionFallback: !options.repeat,
     generateTemporaryFile: async input => { writes.push(input); return generateTemporaryDocumentFile(input); },
     renderPreview: async () => ({ previewCount: 3, diagnostics: ++renderCount === 1 || options.repeat
       ? [{ code: 'text_overflow', severity: 'error', scope: options.cover ? 'page:1' : 'page:2', message: 'Synthetic overflow for bounded correction' }] : [] }) });

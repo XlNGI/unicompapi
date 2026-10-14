@@ -83,7 +83,8 @@ describe('immutable private design attempt evidence', () => {
   });
 
   it.each([
-    { name: 'attempt index', mutation: { attempt: 3 }, error: 'design_attempt_invalid' },
+    { name: 'attempt index', mutation: { attempt: 4 }, error: 'design_attempt_invalid' },
+    { name: 'model design in template-only slot', mutation: { attempt: 3 }, error: 'design_attempt_fallback_invalid' },
     { name: 'attempt digest', mutation: { attemptHash: 'f'.repeat(64) }, error: 'design_attempt_integrity_mismatch' },
     { name: 'content version', mutation: { contentVersion: 2 }, error: 'design_attempt_identity_mismatch' },
     { name: 'layout digest', mutation: { layoutHash: 'e'.repeat(64) }, error: 'design_attempt_identity_mismatch' },

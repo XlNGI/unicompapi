@@ -727,9 +727,10 @@ describe('production NewAPI generation to verified-file read continuation', () =
       planningTargetIsBlocking: false }, diagnostics: [{ code: 'page_plan_incomplete' }] });
     const generatedMessage = data.requests[2].messages.filter(message => message.role === 'tool').at(-1)!;
     const generatedWire = JSON.parse(generatedMessage.content);
-    expect(generatedWire).toMatchObject({ status: 'success', observation: { generated: true,
+    expect(generatedWire).toMatchObject({ status: 'success', observation: { generated: true, designMode: 'template-fallback',
       pageCount: actualPages, pageCountAssessment: assessment },
-      diagnostics: [{ code: 'page_count_deviation', severity: 'warning', message: 'page_count_deviation' }] });
+      diagnostics: [{ code: 'page_count_deviation', severity: 'warning', message: 'page_count_deviation' },
+        { code: 'presentation_template_fallback', severity: 'warning' }] });
     expect(generatedWire.artifactRefs).toEqual([{ kind: 'work' }]);
     const finalWire = data.requests[3];
     expect(finalWire.tool_choice).toBe('none');

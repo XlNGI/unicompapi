@@ -199,11 +199,18 @@ function success(result: DocumentGenerationExecutionResult, cancelRequested: boo
             ? presentationDocumentPageLimits.systemGeneratedPages : 0) } : {})
       } : {}),
       generated: true,
+      ...(authorizedAfter && result.presentationDesign ? { designMode: result.presentationDesign.path === 'design-aware' ? 'autonomous' : 'template-fallback',
+        ...(result.presentationDesign.fallbackReason ? { fallbackReason: result.presentationDesign.fallbackReason } : {}) } : {}),
       ...(cancelRequested ? { cancelRequested: true } : {}),
       ...(!authorizedAfter ? { authorizationRevoked: true } : {})
     },
-    ...(result.pageCountAssessment && !result.pageCountAssessment.satisfied && !result.pageCountAssessment.blocking
-      ? { diagnostics: [{ code: 'page_count_deviation', severity: 'warning' as const, message: 'page_count_deviation' }] } : {}),
+    ...((result.pageCountAssessment && !result.pageCountAssessment.satisfied && !result.pageCountAssessment.blocking ||
+      authorizedAfter && result.presentationDesign?.path === 'legacy-fallback') ? { diagnostics: [
+      ...(result.pageCountAssessment && !result.pageCountAssessment.satisfied && !result.pageCountAssessment.blocking
+        ? [{ code: 'page_count_deviation', severity: 'warning' as const, message: 'page_count_deviation' }] : []),
+      ...(authorizedAfter && result.presentationDesign?.path === 'legacy-fallback'
+        ? [{ code: 'presentation_template_fallback', severity: 'warning' as const, message: '自主设计未能完成，已使用基础模板兜底并检查保存。不要将此文件描述为自主设计成功。' }] : [])
+    ] } : {}),
     artifactRefs: [{ kind: 'work', ref: result.workId }]
   };
 }

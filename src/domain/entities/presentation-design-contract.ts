@@ -161,6 +161,14 @@ export interface PresentationDesignIRV2 {
 export type ProductionPresentationDesignIR = PresentationDesignIRV2;
 export type PresentationDesignIR2 = PresentationDesignIRV2;
 
+/** Host delivery facts; never part of the model-authored Design IR. */
+export const presentationDesignFallbackReasons = ['art_direction_timeout', 'art_direction_unavailable', 'art_direction_invalid', 'design_layout_failed', 'design_render_failed'] as const;
+export type PresentationDesignFallbackReason = (typeof presentationDesignFallbackReasons)[number];
+export interface PresentationDesignDelivery {
+  readonly path: 'design-aware' | 'legacy-fallback';
+  readonly fallbackReason?: string;
+}
+
 /** Input contract for a provider Art Direction request. */
 export interface PresentationArtDirectionInput {
   readonly userRequirement: string;

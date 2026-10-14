@@ -38,6 +38,7 @@ import type { PresentationPlanPrepared } from './presentation-production-plan';
 import { canonicalizeLayoutJson } from '../../domain/entities/presentation-layout-ir';
 import { compilePresentationRenderPlan, buildPresentationDesignSnapshot } from './presentation-render-plan-compiler';
 import { loadPresentationRenderAssets } from './presentation-render-assets';
+import { presentationDesignFallbackReasons, type PresentationDesignFallbackReason } from '../../domain/entities/presentation-design-contract';
 import type { PresentationDesignCompilationSnapshot, PresentationDesignStatus } from './presentation-render-plan-compiler';
 import { renderPresentationRenderPlan } from './presentation-design-renderer';
 import { applyOfficeDocumentPatchesToBuffer } from './office-document-tool-executor';
@@ -71,6 +72,8 @@ export interface GeneratedTemporaryDocumentFile {
 }
 
 export interface GenerateDocumentFileInput {
+  /** Host-only fallback decision after bounded design failure; never a model parameter. */
+  readonly designFallbackReason?: PresentationDesignFallbackReason;
   readonly onProgress?: DocumentGenerationProgressCallback;
   readonly kind: DocumentWorkspaceKind;
   readonly outline: DocumentOutline;
@@ -165,7 +168,8 @@ async function buildDocumentOutput(
             input.artDirectionDiagnostics,
             contentSnapshot,
             input.onPlanPrepared,
-            input.compatibilityReason
+            input.compatibilityReason,
+            input.designFallbackReason
         );
   const revisedBuffer =
     (input.revisionSourceBuffer || input.revisionSourcePath) && (input.revisionPatch || input.revisionPatches)
@@ -838,7 +842,8 @@ async function buildPptBuffer(
   artDirectionDiagnostics?: GenerateDocumentFileInput['artDirectionDiagnostics'],
   contentSnapshot?: DocumentContentSnapshotV1,
   onPlanPrepared?: PresentationPlanPrepared,
-  compatibilityReason?: GenerateDocumentFileInput['compatibilityReason']
+  compatibilityReason?: GenerateDocumentFileInput['compatibilityReason'],
+  designFallbackReason?: PresentationDesignFallbackReason
 ): Promise<Buffer> {
   const pptx = new PptxGenJS();
   pptx.layout = 'LAYOUT_WIDE';
@@ -858,6 +863,7 @@ async function buildPptBuffer(
   try {
   const renderOutline = normalizePresentationOutline(outline);
   const canonicalContent = contentSnapshot ?? buildDocumentContentSnapshot({ outline });
+  if (designFallbackReason !== undefined && (designIR !== undefined || !presentationDesignFallbackReasons.includes(designFallbackReason))) throw new TypeError('invalid_design_fallback');
   const authored = designIR?.pages.some(page => page.designTree !== undefined) === true;
   const assets = authored ? await loadPresentationRenderAssets(images) : [];
   const compilation = designIR === undefined ? undefined : compilePresentationRenderPlan(outline, designIR, template.tokens, { contentSnapshot: canonicalContent, assets });
@@ -868,6 +874,7 @@ async function buildPptBuffer(
     outline.sections.some(section => section.scene?.elements.length));
   let fallbackReason = fallbackReasonFor(compilation, designIR !== undefined || artDirectionStatus === 'invalid', artDirectionStatus);
   if (designIR === undefined && compatibilityReason) fallbackReason = compatibilityReason;
+  if (designFallbackReason) fallbackReason = designFallbackReason;
   if (fallbackReason === undefined && renderOutline.sections.length !== outline.sections.length) fallbackReason = 'outline_normalization';
   if (fallbackReason === undefined && containsSceneContent) fallbackReason = 'unsupported_scene_content';
   if (fallbackReason === undefined && images.length > 0 && !authored) fallbackReason = 'external_images_require_legacy_path';

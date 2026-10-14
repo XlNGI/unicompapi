@@ -65,6 +65,7 @@ export class PlatformDocumentGenerationExecutor
             ? result.file.locator.relativePath.split('/').pop() ?? result.work.name
             : result.work.name,
         sizeBytes: result.file.sizeBytes ?? 0,
+        ...(result.presentationDesign ? { presentationDesign: result.presentationDesign } : {}),
         ...(result.validatedOutline ? { validatedOutline: result.validatedOutline } : {}),
         ...(result.pageCountAssessment ? { pageCountAssessment: result.pageCountAssessment } : {})
       };
