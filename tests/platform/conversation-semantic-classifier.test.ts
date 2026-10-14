@@ -170,7 +170,8 @@ describe('controlled PPT Art Direction provider call', () => {
     expect(parseArtDirection(output, { outline: artDirectionOutline })).toEqual(direction);
     expect(f.requests).toHaveLength(1);
     const body = JSON.parse(new TextDecoder().decode(f.requests[0].body));
-    expect(body.max_tokens).toBe(1024 + input.outline.pageCount * 768);
+    expect(body.max_tokens).toBe(Math.min(32768, 1536 + input.outline.pageCount * 1536));
+    expect(body.messages[1].content).toContain('Author designTree');
     expect(body.tools).toBeUndefined();
     expect(body.messages).toHaveLength(2);
     expect(body.messages[0].content).toContain('Art Direction');

@@ -206,7 +206,7 @@ describe('semantic groups and relationships reach the real PPTX geometry', () =>
       const runner = new DocumentGenerationRunner({ rootDirectory, projectId });
       const execution = runner.run({ kind: 'ppt', title: organizationPagesOutline.title, outline: organizationPagesOutline,
         sourceDraftId: `proposed-invalid-${invalid}`, draftRevision: 1, contentFingerprint: digest(organizationPagesOutline),
-        userRequirement: '按已声明的页面分组组织全部内容，不允许丢失、重复或跨页借用事实。', requestArtDirection: planner });
+        userRequirement: '按已声明的页面分组组织全部内容，不允许丢失、重复或跨页借用事实。', designIR: proposed, requestArtDirection: planner });
       if (invalid === 'missing_source') await expect(execution).rejects.toMatchObject({ code: 'document_layout_overflow' });
       else await expect(execution).rejects.toMatchObject({ code: 'invalid_plan' });
       expect(planner).toHaveBeenCalledTimes(1);
@@ -232,7 +232,7 @@ describe('semantic groups and relationships reach the real PPTX geometry', () =>
     const result = await runner.run({ kind: 'ppt', title: organizationPagesOutline.title, outline: organizationPagesOutline,
       sourceDraftId: 'organization-repair-draft', draftRevision: 1, contentFingerprint: digest(organizationPagesOutline),
       userRequirement: '修正对比页的结构溢出，保持已确认分组、全部事实及其他页面不变。',
-      requestArtDirection: planner, requestLlmRepair: repairPlanner });
+      designIR: organizationPagesDesign(), requestArtDirection: planner, requestLlmRepair: repairPlanner });
     expect(result.execution.state).toBe('completed'); expect(records).toHaveLength(2);
     expect(planner).toHaveBeenCalledTimes(1); expect(repairPlanner).toHaveBeenCalledTimes(1);
     expect(records.every(record => record.snapshot.designPath === 'design-aware')).toBe(true);

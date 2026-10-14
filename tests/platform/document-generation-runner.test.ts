@@ -1061,6 +1061,7 @@ describe('document generation runner', () => {
       const requestArtDirection = vi.fn(async () => { throw new Error('semantic_response_incomplete'); });
       const isFallback = operationId === 'presentation-design-fallback';
       const runner = new DocumentGenerationRunner({ rootDirectory, projectId,
+        allowLegacyArtDirectionFallback: isFallback,
         generateTemporaryFile: generate, publishFile: publish, now: () => '2026-10-12T10:00:00.000Z' });
       try {
         await expect(runner.run({ kind: isFallback ? 'ppt' : 'word', title: '取消门禁', executionBudget: budget,

@@ -28,7 +28,7 @@ async function fixture() {
   const result = await new DocumentGenerationRunner({ rootDirectory, projectId }).run({ kind: 'ppt',
     outline: fixedDesignOutline, title: fixedDesignOutline.title, contentFingerprint: digest(fixedDesignOutline),
     sourceDraftId: 'registered-plan-draft', draftRevision: 2,
-    requestArtDirection: async () => fixedDesignDirections().editorial });
+    designIR: fixedDesignDirections().editorial, requestArtDirection: async () => fixedDesignDirections().editorial });
   const reader = new RegisteredPresentationReader({ rootDirectory, projectId });
   const attemptPath = presentationAttemptPath(result.execution.id, 0);
   const receiptPath = presentationAttemptPath(result.execution.id, 0, true);
