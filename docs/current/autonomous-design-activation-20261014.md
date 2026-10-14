@@ -1,6 +1,10 @@
 # 自主设计接入实际启动工作区与模板兜底
 
-日期：2026-10-14。当前分支：`feature/chat-progress-summary`。本轮属于既有能力维护扩展，以负责人最新决定、AGENTS.md、PLANS 顶部维护事实与当前源码为准。状态：当前工作区实施与构建验收完成，实际应用窗口重新启动待用户操作。
+日期：2026-10-14。实施分支：`feature/chat-progress-summary`。本轮属于既有能力维护扩展，以负责人最新决定、AGENTS.md、PLANS 顶部维护事实与当前源码为准。状态：实施、构建验收与代码交付完成，实际应用窗口重新启动待用户操作。
+
+## Git 交付追加
+
+负责人后续明确授权完成后合入 develop 并上传分支，覆盖下文整合时尚未提交/推送的历史状态。当前实际启动目录的全部已验收改动已按聊天界面、PPT 兜底和实施证据拆分提交，并以 `75e2755` 无冲突非快进合入 develop；合并树与已验收功能分支一致。develop、feature/chat-progress-summary、feature/llm-autonomous-design 已原子推送成功，远程 ref 逐一核验通过；原自主设计分支及工作树保留。交付后只追加记录，不修改业务源码、不补发收费请求。提交映射、远程核验快照和保留边界见 [Git 交付收据](../evidence/autonomous-design-delivery-20261014.json)。
 
 ## 最新授权与整合
 
