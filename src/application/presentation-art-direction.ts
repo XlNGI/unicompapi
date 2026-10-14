@@ -7,6 +7,7 @@ import type { DocumentOutline } from '../domain/entities/document-generation';
 import { documentContentSnapshotToOutline, parseDocumentContentSnapshot } from '../domain/entities/document-content-snapshot';
 import { canonicalizeLayoutJson } from '../domain/entities/presentation-layout-ir';
 import type { HostExecutionBudget } from './execution-budget';
+import { flattenPresentationDesignTree } from '../domain/entities/presentation-design-tree';
 
 /** Only this projected semantic contract crosses the Provider boundary. */
 export interface PresentationArtDirectionRequest {
@@ -17,6 +18,7 @@ export interface PresentationArtDirectionRequest {
 export type PresentationArtDirectionPlanner = (request: PresentationArtDirectionRequest) => Promise<unknown>;
 
 export interface PresentationArtDirectionResult {
+  readonly correctionCount?: number;
   readonly input?: PresentationArtDirectionInput;
   readonly designIR?: ProductionPresentationDesignIR;
   readonly diagnostics: readonly { readonly code: string }[];
@@ -29,6 +31,9 @@ export async function planPresentationArtDirection(options: {
   readonly userRequirement: string;
   readonly visualRequirements?: readonly string[];
   readonly brandingConstraints?: readonly string[];
+  readonly availableAssets?: PresentationArtDirectionInput['availableAssets'];
+  readonly designFeedback?: PresentationArtDirectionInput['designFeedback'];
+  readonly requireDesignTree?: boolean;
   readonly request?: PresentationArtDirectionPlanner;
   readonly signal: AbortSignal;
   readonly timeoutMs?: number;
@@ -80,11 +85,27 @@ export async function planPresentationArtDirection(options: {
     ]);
     options.signal.throwIfAborted();
     const designIR = parseArtDirection(raw, { outline });
+    if (options.requireDesignTree && designIR.pages.some(page => !page.designTree)) return { input, diagnostics: [{ code: 'design_tree_missing' }] };
+    {
+      const assets = new Set((options.availableAssets ?? []).map(asset => asset.assetKey));
+      if (designIR.pages.some(page => page.designTree && flattenPresentationDesignTree(page.designTree).some(node => node.assetKey && !assets.has(node.assetKey)))) {
+        return { input, diagnostics: [{ code: 'design_asset_unavailable' }] };
+      }
+    }
+    if (options.designFeedback) {
+      const previous = options.designFeedback.previousDesign;
+      const targets = new Set(options.designFeedback.targetPages);
+      if (JSON.stringify(canonicalizeLayoutJson(previous.globalDesign)) !== JSON.stringify(canonicalizeLayoutJson(designIR.globalDesign)) ||
+        previous.pages.some((page, index) => !targets.has(page.pageNumber) && JSON.stringify(canonicalizeLayoutJson(page)) !== JSON.stringify(canonicalizeLayoutJson(designIR.pages[index])))) {
+        return { input, diagnostics: [{ code: 'design_repair_scope_violation' }] };
+      }
+    }
     return { input, designIR, diagnostics: [] };
   } catch (error) {
     options.signal.throwIfAborted();
     return { input, diagnostics: error instanceof PresentationDesignIRParseError
-      ? [...(error.diagnostics.some(diagnostic => /(?:^|\.)organization(?:\.|$|\[)/u.test(diagnostic.path))
+      ? [...(error.diagnostics.some(diagnostic => /(?:^|\.)designTree(?:\.|$|\[)/u.test(diagnostic.path))
+          ? [{ code: 'invalid_design_tree' }] : []), ...(error.diagnostics.some(diagnostic => /(?:^|\.)organization(?:\.|$|\[)/u.test(diagnostic.path))
           ? [{ code: 'invalid_content_organization' }] : []), ...error.diagnostics.slice(0, 39).map(({ code }) => ({ code }))]
       : [{ code: safeArtDirectionFailure(error, timedOut) }] };
   } finally {

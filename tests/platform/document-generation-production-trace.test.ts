@@ -70,7 +70,7 @@ describe('document production trace integration', () => {
     ]);
     expect(events.find(event => event.operationId === 'document-layout' && event.status === 'completed')?.facts?.totalPages).toBe(3);
     expect(events.find(event => event.operationId === 'presentation-layout-summary' && event.status === 'completed')?.facts)
-      .toMatchObject({ designPath: 'legacy-fallback', fallbackReason: 'missing_design_ir', artDirectionStatus: 'missing', layoutStatus: 'skipped' });
+      .toMatchObject({ designPath: 'legacy-fallback', fallbackReason: 'art_direction_unavailable', artDirectionStatus: 'missing', layoutStatus: 'skipped' });
     expect(events.find(event => event.operationId === 'presentation-layout-diagnostic-1' && event.status === 'completed')?.facts?.diagnosticCode)
       .toBe('art_direction_unavailable');
     expect(events.find(event => event.operationId === 'presentation-layout-page-2' && event.status === 'completed')?.facts?.pageIntentDigest)

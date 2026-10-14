@@ -134,9 +134,11 @@ test('chat page uses project conversations and composer-first streaming workflow
   assert.match(source, /className="uc-chat-page__message-bubble"/);
   assert.match(styles, /\.uc-chat-page__message-item--user > \.uc-chat-page__message-bubble \{[\s\S]*padding: 8px 12px;[\s\S]*background: var\(--uc-color-surface-subtle\);/);
   assert.match(styles, /\.uc-chat-page__composer \{[\s\S]*background: var\(--uc-color-surface-raised\);[\s\S]*box-shadow: var\(--uc-shadow-md\);/);
-  assert.match(styles, /\.uc-chat-page__composer-region \{[\s\S]*position: absolute;[\s\S]*bottom: 0;[\s\S]*left: 50%;[\s\S]*transform: translateX\(-50%\);[\s\S]*background: transparent;[\s\S]*pointer-events: none;/);
-  assert.match(styles, /\.uc-chat-page__messages \{[\s\S]*scroll-padding-bottom: var\(--uc-chat-composer-clearance, 180px\);/);
-  assert.match(styles, /\.uc-chat-page__messages-inner \{[\s\S]*padding-bottom: var\(--uc-chat-composer-clearance, 180px\);/);
+  assert.match(styles, /\.uc-chat-page__conversation \{[^}]*grid-template-rows: auto auto minmax\(0, 1fr\) auto;/);
+  assert.match(styles, /\.uc-chat-page__composer-region \{[^}]*position: relative;[^}]*justify-self: center;/);
+  assert.match(styles, /\.uc-chat-page__messages \{[^}]*scroll-padding-bottom: var\(--uc-space-4\);/);
+  assert.match(styles, /\.uc-chat-page__messages-inner \{[^}]*padding-bottom: var\(--uc-space-4\);/);
+  assert.doesNotMatch(source + styles, /--uc-chat-composer-clearance/);
   assert.match(styles, /\.uc-chat-page__composer:focus-within \{[\s\S]*border-color: var\(--uc-color-border-default\);[\s\S]*box-shadow: var\(--uc-shadow-md\);/);
   assert.match(source, /item\.state === 'completed'/);
   assert.match(source, /uc-chat-page__scroll-to-bottom/);

@@ -84,6 +84,7 @@ let continuationChallenge = 0;
 let closedPlanningEvidence = false;
 let subscriber: ((event: ConversationResponseStreamEventDto) => void) | undefined;
 let execution: ConversationResponseExecutionDto | undefined;
+let pendingWorkflow: ConversationWorkflowDto | null = null;
 let sequence = 0;
 let conversation: ConversationDto;
 let traces: ProductionTraceEventDto[] = [];
@@ -144,7 +145,7 @@ const api = {
     listConversations: async () => ok([conversation]),
     listProjectContextCandidates: async () => ok([]),
     listTextCandidates: async (feature: string) => ok(feature === 'text_reasoning' ? [candidate] : []),
-    getPendingWorkflow: async () => ok(null),
+    getPendingWorkflow: async () => ok(pendingWorkflow),
     getConversation: async () => ok(conversation),
     reconcileReconciliation: async () => {
       counters.inspections++;
@@ -177,10 +178,12 @@ const api = {
           missing: [], ambiguities: [], confidence: 'high', needsConfirmation: false }, pendingQuestions: [],
         createdAt: timestamp, updatedAt: timestamp
       };
+      pendingWorkflow = workflow;
       return ok({ conversation, workflow });
     },
     startResponse: async () => {
       counters.starts++;
+      pendingWorkflow = null;
       conversation = { ...conversation, revision: conversation.revision + 1,
         messages: [...conversation.messages, message('assistant', documentMode ? '' : '这是合成的普通回复正文。', {
           state: 'streaming', reasoningContent: secret,
@@ -224,6 +227,8 @@ const documentGeneration = {
   openDocument: async () => ok({ path: 'C:/isolated/年度经营报告.pptx' })
 };
 Object.assign(api, { documentGeneration });
+const verifiedClipboard = (window as Window & { __unicompClipboardForVerification?: NonNullable<typeof window.unicomp>['clipboard'] }).__unicompClipboardForVerification;
+if (verifiedClipboard) Object.assign(api, { clipboard: verifiedClipboard });
 window.unicomp = api as unknown as NonNullable<typeof window.unicomp>;
 const root = createRoot(document.getElementById('root')!);
 let mountKey = 0;
@@ -233,6 +238,7 @@ function mount(scenario: 'saved-document' | 'live-chat' | 'new-chat' | 'document
   execution = undefined;
   sequence = 0;
   if (scenario !== 'reopen') {
+    pendingWorkflow = null;
     documentMode = scenario === 'document' || scenario === 'document-cancel';
     documentBodyCursor = 0;
     documentCancelled = scenario === 'document-cancel';

@@ -1,0 +1,46 @@
+{
+  "schemaVersion": 1,
+  "date": "2026-10-14",
+  "status": "diagnosed",
+  "scope": "read-only active application and latest registered PPT metadata",
+  "runtime": {
+    "checkout": "primary workspace",
+    "branch": "feature/chat-progress-summary",
+    "sourceHead": "4692337",
+    "nativeAppPathMatchesPrimaryWorkspace": true,
+    "sourceAndCompiledAutonomousTreePresent": false
+  },
+  "implementedCheckout": {
+    "branch": "feature/llm-autonomous-design",
+    "head": "3ff8ab8",
+    "implementationCommits": ["82c2d98", "01e5f4d"],
+    "loadedByCurrentApplication": false
+  },
+  "latestRegisteredPpt": {
+    "createdAt": "2026-10-14T15:27:34.329Z",
+    "pageCount": 10,
+    "fileState": "available",
+    "checksumMatchesPhysicalFile": true,
+    "sha256": "5c8a2178776ee63fe2acc9c301f1f09e6c1502a7b7146f7c1ed65767ec50410c",
+    "attempt": 0,
+    "designPath": "legacy-fallback",
+    "fallbackReason": "art_direction_invalid",
+    "diagnosticCodes": ["art_direction_timeout"],
+    "artDirectionStatus": "invalid",
+    "designIrStatus": "invalid",
+    "designIRPresent": false,
+    "layoutIRPresent": false,
+    "layoutStatus": "skipped",
+    "renderPlanStatus": "skipped",
+    "qaOutcome": "passed"
+  },
+  "artDirectionTimeline": {
+    "startedAt": "2026-10-14T15:25:22.844Z",
+    "completedAt": "2026-10-14T15:27:23.052Z",
+    "elapsedMs": 120208
+  },
+  "findings": ["autonomous implementation was not integrated into the active checkout", "old planner timed out and old generator published a validated legacy template PPT"],
+  "nextRequiredStep": "integrate validated commits with existing local UI changes, rebuild the actual startup checkout, then restart normally",
+  "limitations": ["exact Provider latency or incomplete-response cause was not investigated through a new paid request"],
+  "mutations": {"userProjectModified": false, "newProviderRequests": 0, "credentialFilesRead": false, "applicationRestarted": false, "branchesMerged": false}
+}

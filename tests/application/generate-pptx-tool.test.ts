@@ -30,6 +30,18 @@ function args() {
 }
 
 describe('generate_pptx canonical binding', () => {
+  it('returns the actual fallback mode and warning to the model without claiming autonomous success', async () => {
+    const binding = createGeneratePptxBinding({ compiler: { compile: () => outline } as never,
+      executor: { run: async () => ({ workId: 'work-backup', fileName: 'backup.pptx', sizeBytes: 256,
+        presentationDesign: { path: 'legacy-fallback', fallbackReason: 'art_direction_timeout' } }) } as never,
+      revalidateAuthorization: async () => true });
+    const result = await binding.execute(args(), context());
+    expect(result).toMatchObject({ status: 'success', observation: { designMode: 'template-fallback', fallbackReason: 'art_direction_timeout' },
+      diagnostics: [{ code: 'presentation_template_fallback', severity: 'warning' }], artifactRefs: [{ ref: 'work-backup' }] });
+    expect(() => validateDocumentToolResult(binding.contract, result)).not.toThrow();
+    const sanitized = JSON.stringify(sanitizeControlledToolResult({ ...result }));
+    expect(sanitized).toContain('presentation_template_fallback'); expect(sanitized).toContain('template-fallback');
+  });
   it('rejects an invalid draft before execution and omits private compiler errors', async () => {
     const run = vi.fn();
     const binding = createGeneratePptxBinding({ compiler: { compile: () => {

@@ -37,6 +37,8 @@ import { buildDocumentContentSnapshot, parseDocumentContentSnapshot, documentCon
 import type { PresentationPlanPrepared } from './presentation-production-plan';
 import { canonicalizeLayoutJson } from '../../domain/entities/presentation-layout-ir';
 import { compilePresentationRenderPlan, buildPresentationDesignSnapshot } from './presentation-render-plan-compiler';
+import { loadPresentationRenderAssets } from './presentation-render-assets';
+import { presentationDesignFallbackReasons, type PresentationDesignFallbackReason } from '../../domain/entities/presentation-design-contract';
 import type { PresentationDesignCompilationSnapshot, PresentationDesignStatus } from './presentation-render-plan-compiler';
 import { renderPresentationRenderPlan } from './presentation-design-renderer';
 import { applyOfficeDocumentPatchesToBuffer } from './office-document-tool-executor';
@@ -70,6 +72,8 @@ export interface GeneratedTemporaryDocumentFile {
 }
 
 export interface GenerateDocumentFileInput {
+  /** Host-only fallback decision after bounded design failure; never a model parameter. */
+  readonly designFallbackReason?: PresentationDesignFallbackReason;
   readonly onProgress?: DocumentGenerationProgressCallback;
   readonly kind: DocumentWorkspaceKind;
   readonly outline: DocumentOutline;
@@ -164,7 +168,8 @@ async function buildDocumentOutput(
             input.artDirectionDiagnostics,
             contentSnapshot,
             input.onPlanPrepared,
-            input.compatibilityReason
+            input.compatibilityReason,
+            input.designFallbackReason
         );
   const revisedBuffer =
     (input.revisionSourceBuffer || input.revisionSourcePath) && (input.revisionPatch || input.revisionPatches)
@@ -837,7 +842,8 @@ async function buildPptBuffer(
   artDirectionDiagnostics?: GenerateDocumentFileInput['artDirectionDiagnostics'],
   contentSnapshot?: DocumentContentSnapshotV1,
   onPlanPrepared?: PresentationPlanPrepared,
-  compatibilityReason?: GenerateDocumentFileInput['compatibilityReason']
+  compatibilityReason?: GenerateDocumentFileInput['compatibilityReason'],
+  designFallbackReason?: PresentationDesignFallbackReason
 ): Promise<Buffer> {
   const pptx = new PptxGenJS();
   pptx.layout = 'LAYOUT_WIDE';
@@ -857,7 +863,10 @@ async function buildPptBuffer(
   try {
   const renderOutline = normalizePresentationOutline(outline);
   const canonicalContent = contentSnapshot ?? buildDocumentContentSnapshot({ outline });
-  const compilation = designIR === undefined ? undefined : compilePresentationRenderPlan(outline, designIR, template.tokens, { contentSnapshot: canonicalContent });
+  if (designFallbackReason !== undefined && (designIR !== undefined || !presentationDesignFallbackReasons.includes(designFallbackReason))) throw new TypeError('invalid_design_fallback');
+  const authored = designIR?.pages.some(page => page.designTree !== undefined) === true;
+  const assets = authored ? await loadPresentationRenderAssets(images) : [];
+  const compilation = designIR === undefined ? undefined : compilePresentationRenderPlan(outline, designIR, template.tokens, { contentSnapshot: canonicalContent, assets });
   if (compilation?.diagnostics.some(diagnostic => ['content_snapshot_conflict', 'invalid_content_snapshot'].includes(diagnostic.code))) {
     throw new TypeError('content_snapshot_conflict');
   }
@@ -865,16 +874,17 @@ async function buildPptBuffer(
     outline.sections.some(section => section.scene?.elements.length));
   let fallbackReason = fallbackReasonFor(compilation, designIR !== undefined || artDirectionStatus === 'invalid', artDirectionStatus);
   if (designIR === undefined && compatibilityReason) fallbackReason = compatibilityReason;
+  if (designFallbackReason) fallbackReason = designFallbackReason;
   if (fallbackReason === undefined && renderOutline.sections.length !== outline.sections.length) fallbackReason = 'outline_normalization';
   if (fallbackReason === undefined && containsSceneContent) fallbackReason = 'unsupported_scene_content';
-  if (fallbackReason === undefined && images.length > 0) fallbackReason = 'external_images_require_legacy_path';
+  if (fallbackReason === undefined && images.length > 0 && !authored) fallbackReason = 'external_images_require_legacy_path';
   if (fallbackReason === undefined && compilation?.plan && compilation.plan.pages.length > presentationOutlineLimits.maxEstimatedPages) {
     fallbackReason = 'page_count_limit';
   }
 
   // A declared business organization is an execution requirement. A generic
   // template cannot certify that its comparison, sequence or support ran.
-  if (designIR?.pages.some(page => page.organization !== undefined) && fallbackReason !== undefined) {
+  if (designIR?.pages.some(page => page.organization !== undefined || page.designTree !== undefined) && fallbackReason !== undefined) {
     throw new PresentationLayoutError('The declared content organization could not be rendered');
   }
 
@@ -900,7 +910,7 @@ async function buildPptBuffer(
     ...(designAware && compilation?.layoutIR ? { layoutIR: compilation.layoutIR } : {}),
     ...(designAware && compilation?.plan ? { renderPlan: compilation.plan } : {}), snapshot }));
   if (designAware) {
-    renderPresentationRenderPlan(pptx, compilation.plan!);
+    renderPresentationRenderPlan(pptx, compilation.plan!, assets);
   } else {
       renderPresentationCover(pptx, outline, template);
       pages!.forEach((page, index) => renderPresentationPage(pptx, page, template, index + 2));

@@ -8333,7 +8333,7 @@ button.uc-project-center__project-card:disabled {
 .uc-chat-page__conversation {
   position: relative;
   grid-column: 1;
-  grid-template-rows: auto auto minmax(0, 1fr) auto auto;
+  grid-template-rows: auto auto minmax(0, 1fr) auto;
   gap: 0;
   height: 100%;
   min-height: 0;
@@ -8511,7 +8511,7 @@ button.uc-project-center__project-card:disabled {
   min-width: 0;
   padding: var(--uc-space-5) var(--uc-space-6) 0;
   line-height: var(--uc-line-height-body);
-  scroll-padding-bottom: var(--uc-chat-composer-clearance, 180px);
+  scroll-padding-bottom: var(--uc-space-4);
 }
 
 .uc-chat-page__messages-inner {
@@ -8519,7 +8519,7 @@ button.uc-project-center__project-card:disabled {
   min-width: 0;
   min-height: 100%;
   margin: 0 auto;
-  padding-bottom: var(--uc-chat-composer-clearance, 180px);
+  padding-bottom: var(--uc-space-4);
 }
 
 .uc-chat-page__empty {
@@ -8751,19 +8751,12 @@ button.uc-project-center__project-card:disabled {
 }
 
 .uc-chat-page__composer-region {
-  position: absolute;
-  bottom: 0;
-  left: 50%;
+  position: relative;
+  justify-self: center;
   z-index: 2;
   width: min(var(--uc-chat-content-width), calc(100% - 48px));
   padding: 0 0 var(--uc-space-5);
-  transform: translateX(-50%);
   background: transparent;
-  pointer-events: none;
-}
-
-.uc-chat-page__composer-region > * {
-  pointer-events: auto;
 }
 
 .uc-chat-page__workflow-status {
@@ -8834,8 +8827,8 @@ button.uc-project-center__project-card:disabled {
 }
 
 .uc-chat-page__scroll-to-bottom {
-  position: sticky;
-  bottom: 124px;
+  position: absolute;
+  bottom: calc(100% + var(--uc-space-3));
   left: 50%;
   z-index: 2;
   display: grid;
@@ -8843,7 +8836,7 @@ button.uc-project-center__project-card:disabled {
   min-width: 36px;
   height: 36px;
   min-height: 36px;
-  margin: var(--uc-space-3) 0 0;
+  margin: 0;
   padding: 0;
   place-items: center;
   border-radius: var(--uc-radius-full);
@@ -11539,6 +11532,13 @@ button.uc-project-center__project-card:disabled {
   line-height: 1.6;
 }
 
+.uc-chat-document-progress__design-notice {
+  margin: 0 0 8px;
+  font-size: 12px;
+  line-height: 1.6;
+  overflow-wrap: anywhere;
+}
+
 .uc-chat-document-progress__summary {
   display: inline-flex;
   align-items: center;
@@ -11572,22 +11572,50 @@ button.uc-project-center__project-card:disabled {
   margin-bottom: 0;
 }
 
+.uc-chat-document-progress__details {
+  width: 100%;
+  min-width: 0;
+  border: 0;
+  background: transparent;
+}
+
 .uc-chat-document-progress__details > summary {
   display: flex;
   align-items: center;
-  gap: var(--uc-space-2);
-  width: fit-content;
+  gap: 6px;
+  flex-wrap: wrap;
+  box-sizing: border-box;
+  width: 100%;
   max-width: 100%;
   min-height: 28px;
-  border-radius: var(--uc-radius-6);
   padding: 2px 0;
   list-style: none;
-  color: var(--uc-color-text-secondary);
+  color: var(--uc-color-text-tertiary);
   cursor: pointer;
 }
 
-.uc-chat-document-progress__details > summary::-webkit-details-marker {
+.uc-chat-document-progress__details > summary::-webkit-details-marker,
+.uc-chat-document-progress__records > summary::-webkit-details-marker {
   display: none;
+}
+
+.uc-chat-document-progress__elapsed {
+  color: var(--uc-color-text-tertiary);
+  font-variant-numeric: tabular-nums;
+}
+
+.uc-chat-document-progress__details > summary .uc-chat-document-progress__summary {
+  color: inherit;
+}
+
+.uc-chat-document-progress__details > summary .uc-chat-document-progress__status-icon {
+  display: none;
+}
+
+.uc-chat-document-progress__details[open] > summary {
+  margin-bottom: 10px;
+  border-bottom: 1px solid var(--uc-color-border-subtle);
+  padding-bottom: 8px;
 }
 
 .uc-chat-document-progress__status-icon,
@@ -11602,7 +11630,8 @@ button.uc-project-center__project-card:disabled {
   transition: transform var(--uc-duration-fast) var(--uc-easing-standard);
 }
 
-.uc-chat-document-progress__details[open] > summary .uc-chat-document-progress__chevron {
+.uc-chat-document-progress__details[open] > summary > .uc-chat-document-progress__chevron,
+.uc-chat-document-progress__records[open] > summary > .uc-chat-document-progress__chevron {
   transform: rotate(90deg);
 }
 
@@ -11625,10 +11654,87 @@ button.uc-project-center__project-card:disabled {
   color: var(--uc-color-text-primary);
 }
 
-.uc-chat-document-progress__details > summary:focus-visible {
+.uc-chat-document-progress__details > summary:focus-visible,
+.uc-chat-document-progress__records > summary:focus-visible,
+.uc-chat-document-progress__record-viewport:focus-visible {
   outline: 2px solid var(--uc-color-border-focus);
   outline-offset: 3px;
   border-radius: var(--uc-radius-4);
+}
+
+.uc-chat-progress-phases {
+  display: grid;
+  gap: 2px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.uc-chat-progress-phases > li {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  min-height: 24px;
+  color: var(--uc-color-text-tertiary);
+}
+
+.uc-chat-progress-phases__icon {
+  flex: 0 0 auto;
+  width: 14px;
+  height: 14px;
+  color: inherit;
+}
+
+.uc-chat-progress-phases__content {
+  flex: 0 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.uc-chat-progress-phases__meta {
+  flex: 1 1 0;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.uc-chat-progress-phases > li[data-status='failed'] {
+  color: var(--uc-color-status-danger);
+}
+
+.uc-chat-progress-phases > li[data-status='cancelled'] {
+  color: var(--uc-color-status-warning);
+}
+
+.uc-chat-document-progress__records {
+  min-width: 0;
+  margin: 2px 0 0;
+}
+
+.uc-chat-document-progress__records > summary {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 26px;
+  list-style: none;
+  color: var(--uc-color-text-tertiary);
+  cursor: pointer;
+}
+
+.uc-chat-document-progress__records > summary:hover {
+  color: var(--uc-color-text-primary);
+}
+
+.uc-chat-document-progress__record-viewport {
+  max-height: min(320px, 40vh);
+  overflow: auto;
+  overscroll-behavior: contain;
+  scrollbar-gutter: stable;
+  padding: 0 6px 0 0;
 }
 
 .uc-chat-document-progress__step-list {
@@ -11653,32 +11759,16 @@ button.uc-project-center__project-card:disabled {
 
 .uc-chat-production-trace {
   display: grid;
-  gap: var(--uc-space-3);
-  margin: var(--uc-space-2) 0;
-  padding: 0 0 0 var(--uc-space-3);
-  border-left: 1px solid var(--uc-color-border-default);
+  gap: 2px;
+  margin: 4px 0;
+  padding: 0;
   list-style: none;
+  color: var(--uc-color-text-tertiary);
 }
 
 .uc-chat-production-trace > li {
-  position: relative;
   min-width: 0;
   overflow-wrap: anywhere;
-}
-
-.uc-chat-production-trace > li::before {
-  position: absolute;
-  top: 7px;
-  left: calc(-1 * var(--uc-space-3) - 4px);
-  width: 7px;
-  height: 7px;
-  border-radius: 50%;
-  background: var(--uc-color-text-secondary);
-  content: '';
-}
-
-.uc-chat-production-trace > li[data-status='completed']::before {
-  background: var(--uc-color-text-accent);
 }
 
 .uc-chat-production-trace > li[data-status='failed'] .uc-chat-production-trace__status {
@@ -11688,14 +11778,35 @@ button.uc-project-center__project-card:disabled {
 
 .uc-chat-production-trace__heading {
   display: flex;
-  flex-wrap: wrap;
-  align-items: baseline;
-  gap: var(--uc-space-1) var(--uc-space-2);
+  align-items: center;
+  gap: 8px;
+  min-height: 24px;
 }
 
 .uc-chat-production-trace__heading > strong {
-  color: var(--uc-color-text-primary);
-  font-weight: 500;
+  flex: 0 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  color: inherit;
+  font-size: inherit;
+  font-weight: 400;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.uc-chat-production-trace__event-icon {
+  flex: 0 0 auto;
+  width: 14px;
+  height: 14px;
+  color: inherit;
+}
+
+.uc-chat-production-trace__inline-details {
+  flex: 1 1 0;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .uc-chat-production-trace__direction {
@@ -11721,16 +11832,6 @@ button.uc-project-center__project-card:disabled {
   margin: 0;
   color: var(--uc-color-status-warning);
 }
-.uc-chat-production-trace > li[data-status="progress"]::before {
-  background: var(--uc-color-accent-subtle);
-  animation: uc-step-pulse 1.6s infinite ease-in-out;
-}
-
-.uc-chat-production-trace > li[data-status="started"]::before {
-  background: var(--uc-color-accent-subtle);
-  animation: uc-step-pulse 1.8s infinite ease-in-out;
-}
-
 @keyframes uc-step-pulse {
   0% { transform: scale(0.95); opacity: 0.6; }
   50% { transform: scale(1.3); opacity: 1; }
@@ -11754,6 +11855,7 @@ button.uc-project-center__project-card:disabled {
 }
 
 .uc-chat-production-trace__status {
+  flex: 0 0 auto;
   color: var(--uc-color-text-secondary);
   font-size: var(--uc-font-size-caption);
 }
@@ -11766,23 +11868,13 @@ button.uc-project-center__project-card:disabled {
   display: none;
 }
 
-.uc-chat-production-trace {
-  gap: var(--uc-space-2);
-  margin-top: var(--uc-space-1);
-  padding-left: var(--uc-space-4);
+.uc-chat-document-progress[data-developer-mode='false'] .uc-chat-production-trace__details,
+.uc-chat-document-progress[data-developer-mode='false'] .uc-chat-production-trace > li:is([data-status='completed'], [data-status='started'], [data-status='progress']) .uc-chat-production-trace__status {
+  display: none;
 }
 
-.uc-chat-production-trace > li {
-  padding-bottom: var(--uc-space-1);
-}
-
-.uc-chat-production-trace__heading {
-  min-height: 20px;
-  gap: var(--uc-space-1) var(--uc-space-2);
-}
-
-.uc-chat-production-trace__heading > strong {
-  font-size: var(--uc-font-size-caption);
+.uc-chat-document-progress[data-developer-mode='true'] .uc-chat-production-trace__heading {
+  flex-wrap: wrap;
 }
 
 .uc-chat-production-trace__details,
@@ -11867,8 +11959,7 @@ button.uc-project-center__project-card:disabled {
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .uc-chat-document-progress__status-icon,
-  .uc-chat-production-trace > li::before {
+  .uc-chat-document-progress__status-icon {
     animation: none;
   }
 

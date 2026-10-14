@@ -1,6 +1,7 @@
 import type { PresentationPageRole } from './presentation-design-contract';
+import type { PresentationTextSpan } from './presentation-design-tree';
 
-export type PresentationRenderElementType = 'text' | 'table' | 'chart' | 'shape';
+export type PresentationRenderElementType = 'text' | 'table' | 'chart' | 'shape' | 'image';
 export type PresentationRenderAlignment = 'left' | 'center' | 'right' | 'justify';
 export type PresentationRenderVerticalAlignment = 'top' | 'middle' | 'bottom';
 
@@ -14,7 +15,8 @@ export interface PresentationRenderPlanGeometry {
 export type PresentationRenderSourceReference =
   | { readonly kind: 'outline'; readonly ref: string }
   | { readonly kind: 'content'; readonly ref: string }
-  | { readonly kind: 'generated'; readonly key: 'closing-label' | 'page-number' | 'decoration-line' | 'decoration-node' };
+  | { readonly kind: 'generated'; readonly key: 'closing-label' | 'page-number' | 'decoration-line' | 'decoration-node' | 'decoration-rect' | 'decoration-roundRect' }
+  | { readonly kind: 'generated'; readonly key: 'asset-image'; readonly assetKey: string; readonly assetDigest: string; readonly imageFit: 'contain' | 'cover'; readonly aspectRatio: number; readonly imageMask?: 'none' | 'ellipse' };
 
 /** Host provenance of the sole Layout IR from which this writer input was projected. */
 export interface PresentationRenderInputIdentity {
@@ -27,6 +29,8 @@ export interface PresentationRenderInputIdentity {
 }
 
 export interface PresentationRenderPlanStyle {
+  readonly chartKind?: 'bar' | 'line' | 'pie' | 'doughnut';
+  readonly textSpans?: readonly PresentationTextSpan[];
   readonly fontFamily: string;
   readonly fontSize: number;
   readonly bold: boolean;
@@ -68,10 +72,19 @@ export interface PresentationRenderChartContent {
 
 export interface PresentationRenderShapeContent {
   readonly type: 'shape';
-  readonly shapeKind: 'line' | 'ellipse' | 'roundRect';
+  readonly shapeKind: 'line' | 'ellipse' | 'roundRect' | 'rect';
 }
 
-export type PresentationRenderPlanContent = PresentationRenderTextContent | PresentationRenderTableContent | PresentationRenderChartContent | PresentationRenderShapeContent;
+export interface PresentationRenderImageContent {
+  readonly imageMask?: 'none' | 'ellipse';
+  readonly type: 'image';
+  readonly assetKey: string;
+  readonly assetDigest: string;
+  readonly imageFit: 'contain' | 'cover';
+  readonly aspectRatio: number;
+}
+
+export type PresentationRenderPlanContent = PresentationRenderTextContent | PresentationRenderTableContent | PresentationRenderChartContent | PresentationRenderShapeContent | PresentationRenderImageContent;
 
 export interface PresentationRenderPlanElement {
   readonly renderId: string;
@@ -246,10 +259,12 @@ function validateElement(
   else if (renderIds.has(value.renderId)) diagnostics.push(issue('duplicate_render_id', `${path}.renderId`, 'renderId must be unique across the plan'));
   else renderIds.add(value.renderId);
   validateSource(value.source, `${path}.source`, pageNumber, pageSourceRefs, options, diagnostics);
-  if (!['text', 'table', 'chart', 'shape'].includes(String(value.type))) diagnostics.push(issue('unsupported_element_type', `${path}.type`, 'element type is unsupported'));
+  if (!['text', 'table', 'chart', 'shape', 'image'].includes(String(value.type))) diagnostics.push(issue('unsupported_element_type', `${path}.type`, 'element type is unsupported'));
   const geometry = validateGeometry(value.geometry, `${path}.geometry`, diagnostics);
   const style = validateStyle(value.style, `${path}.style`, value.type, diagnostics);
   validateContent(value.content, String(value.type), `${path}.content`, diagnostics);
+  const contentText = isRecord(value.content) && typeof value.content.text === 'string' ? value.content.text : undefined;
+  if (style?.textSpans && contentText !== undefined && style.textSpans.some(span => span.end > contentText.length)) diagnostics.push(issue('invalid_render_plan', `${path}.style.textSpans`, 'Text span exceeds canonical text'));
   if (style) {
     const isPageNumber = isRecord(value.source) && value.source.kind === 'generated' && value.source.key === 'page-number';
     const decoration = isRecord(value.source) && value.source.kind === 'generated' && String(value.source.key).startsWith('decoration-');
@@ -283,8 +298,9 @@ function validateSource(
       else if (!inventory.sourceRefs.includes(value.ref)) diagnostics.push(issue('invalid_source_ref', `${path}.ref`, 'source does not belong to this page'));
     }
   } else if (value.kind === 'generated') {
-    checkKeys(value, ['kind', 'key'], path, diagnostics);
-    if (value.key !== 'closing-label' && value.key !== 'page-number' && value.key !== 'decoration-line' && value.key !== 'decoration-node') diagnostics.push(issue('invalid_source_ref', `${path}.key`, 'generated source key is unsupported'));
+    checkKeys(value, value.key === 'asset-image' ? ['kind', 'key', 'assetKey', 'assetDigest', 'imageFit', 'aspectRatio', 'imageMask'] : ['kind', 'key'], path, diagnostics, ['imageMask']);
+    if (!['closing-label', 'page-number', 'decoration-line', 'decoration-node', 'decoration-rect', 'decoration-roundRect', 'asset-image'].includes(String(value.key))) diagnostics.push(issue('invalid_source_ref', `${path}.key`, 'generated source key is unsupported'));
+    if (value.key === 'asset-image') validateImageFields(value, path, diagnostics);
   } else diagnostics.push(issue('invalid_source_ref', `${path}.kind`, 'source kind is unsupported'));
 }
 
@@ -316,8 +332,25 @@ function validateGeometry(value: unknown, path: string, diagnostics: Presentatio
 
 function validateStyle(value: unknown, path: string, elementType: unknown, diagnostics: PresentationRenderPlanDiagnostic[]): PresentationRenderPlanStyle | undefined {
   if (!isRecord(value)) { diagnostics.push(issue('invalid_render_plan', path, 'style must be an object')); return undefined; }
-  checkKeys(value, ['fontFamily', 'fontSize', 'bold', 'fontWeight', 'lineSpacingMultiple', 'charSpacing', 'color', 'fill', 'borderWidth', 'alignment', 'verticalAlignment', 'tableHeaderFill', 'tableHeaderColor', 'tableBodyFill', 'borderColor', 'chartColors', 'mutedColor', 'showLegend', 'showValues'], path, diagnostics,
-    ['fontWeight', 'lineSpacingMultiple', 'charSpacing', 'fill', 'borderWidth', 'tableHeaderFill', 'tableHeaderColor', 'tableBodyFill', 'borderColor', 'chartColors', 'mutedColor', 'showLegend', 'showValues']);
+  checkKeys(value, ['fontFamily', 'fontSize', 'bold', 'fontWeight', 'lineSpacingMultiple', 'charSpacing', 'color', 'fill', 'borderWidth', 'alignment', 'verticalAlignment', 'tableHeaderFill', 'tableHeaderColor', 'tableBodyFill', 'borderColor', 'chartColors', 'mutedColor', 'showLegend', 'showValues', 'textSpans', 'chartKind'], path, diagnostics,
+    ['fontWeight', 'lineSpacingMultiple', 'charSpacing', 'fill', 'borderWidth', 'tableHeaderFill', 'tableHeaderColor', 'tableBodyFill', 'borderColor', 'chartColors', 'mutedColor', 'showLegend', 'showValues', 'textSpans', 'chartKind']);
+  if (value.chartKind !== undefined && (elementType !== 'chart' || !enumHas(['bar', 'line', 'pie', 'doughnut'], value.chartKind))) diagnostics.push(issue('invalid_render_plan', `${path}.chartKind`, 'Invalid chart representation'));
+  if (value.textSpans !== undefined) {
+    if (elementType !== 'text' || !Array.isArray(value.textSpans) || value.textSpans.length > 32) diagnostics.push(issue('invalid_render_plan', `${path}.textSpans`, 'Text spans must belong to a text element'));
+    else {
+      let lastEnd = 0;
+      value.textSpans.forEach((span, index) => {
+        const spanPath = `${path}.textSpans[${index}]`;
+        if (!isRecord(span) || !isRecord(span.style)) { diagnostics.push(issue('invalid_render_plan', spanPath, 'Invalid text span')); return; }
+        checkKeys(span, ['start', 'end', 'style'], spanPath, diagnostics);
+        checkKeys(span.style, ['fontSize', 'fontWeight', 'color'], `${spanPath}.style`, diagnostics, ['fontSize', 'fontWeight', 'color']);
+        if (!isIntegerInRange(span.start, lastEnd, 15999) || !isIntegerInRange(span.end, Number(span.start) + 1, 16000) || !Object.keys(span.style).length ||
+          span.style.fontSize !== undefined && !isFiniteInRange(span.style.fontSize, 14, 96) || span.style.fontWeight !== undefined && span.style.fontWeight !== 400 && span.style.fontWeight !== 700 ||
+          span.style.color !== undefined && !isColor(span.style.color)) diagnostics.push(issue('invalid_render_plan', spanPath, 'Invalid text span range or style'));
+        lastEnd = Number(span.end);
+      });
+    }
+  }
   if (typeof value.fontFamily !== 'string' || value.fontFamily.trim().length === 0 || value.fontFamily.length > 128) diagnostics.push(issue('invalid_render_plan', `${path}.fontFamily`, 'fontFamily is invalid'));
   if (!isPositiveFinite(value.fontSize, 300)) diagnostics.push(issue('invalid_render_plan', `${path}.fontSize`, 'fontSize must be positive and bounded'));
   if (typeof value.bold !== 'boolean') diagnostics.push(issue('invalid_render_plan', `${path}.bold`, 'bold must be boolean'));
@@ -368,8 +401,17 @@ function validateContent(value: unknown, elementType: string, path: string, diag
     });
   } else if (elementType === 'shape') {
     checkKeys(value, ['type', 'shapeKind'], path, diagnostics);
-    if (!['line', 'ellipse', 'roundRect'].includes(String(value.shapeKind))) diagnostics.push(issue('invalid_render_plan', `${path}.shapeKind`, 'shapeKind is unsupported'));
+    if (!['line', 'ellipse', 'roundRect', 'rect'].includes(String(value.shapeKind))) diagnostics.push(issue('invalid_render_plan', `${path}.shapeKind`, 'shapeKind is unsupported'));
+  } else if (elementType === 'image') {
+    checkKeys(value, ['type', 'assetKey', 'assetDigest', 'imageFit', 'aspectRatio', 'imageMask'], path, diagnostics, ['imageMask']);
+    validateImageFields(value, path, diagnostics);
   } else diagnostics.push(issue('unsupported_element_type', path, 'content type is unsupported'));
+}
+
+function validateImageFields(value: Record<string, unknown>, path: string, diagnostics: PresentationRenderPlanDiagnostic[]): void {
+  if (value.imageMask !== undefined && value.imageMask !== 'none' && value.imageMask !== 'ellipse') diagnostics.push(issue('invalid_source_ref', path, 'Invalid image mask'));
+  if (typeof value.assetKey !== 'string' || !/^image-[1-9]\d{0,2}$/u.test(value.assetKey) || typeof value.assetDigest !== 'string' || !/^[a-f0-9]{64}$/u.test(value.assetDigest) ||
+    !['contain', 'cover'].includes(String(value.imageFit)) || !isFiniteInRange(value.aspectRatio, 0.01, 100)) diagnostics.push(issue('invalid_source_ref', path, 'Invalid Host image binding'));
 }
 
 function validateOverlaps(

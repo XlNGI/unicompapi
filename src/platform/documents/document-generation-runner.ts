@@ -67,7 +67,12 @@ import { readPptxDocument, readPptxSlideOrder } from './pptx-page-reader';
 import { emitProductionEvent } from '../conversation-production-trace';
 import { ExecutionBudgetError, type HostExecutionBudget, type ExecutionStage } from '../../application/execution-budget';
 import type { DocumentGenerationProgressCallback, DocumentGenerationProgressEvent } from '../../application/document-generation-service';
-import { planPresentationArtDirection, type PresentationArtDirectionPlanner } from '../../application/presentation-art-direction';
+import { type PresentationArtDirectionPlanner } from '../../application/presentation-art-direction';
+import { planExecutablePresentationDesign, requestPresentationDesignCorrection } from './presentation-design-planning';
+import { loadPresentationRenderAssets } from './presentation-render-assets';
+import { resolvePresentationTemplate } from './presentation-template';
+import { canFallbackFromPresentationQa, presentationPlanningFallbackReason } from './presentation-template-fallback';
+import { readRegisteredPresentationProductionPlan } from './presentation-production-plan-reader';
 import type { DocumentIR } from '../../domain/entities/document-agent';
 import {
   assessPresentationPageCount,
@@ -79,8 +84,8 @@ import { repairPresentationDesign } from './presentation-design-repair';
 import { buildDocumentContentSnapshot, documentContentAliases, documentContentSnapshotToOutline,
   parseDocumentContentSnapshot } from '../../domain/entities/document-content-snapshot';
 import { canonicalizeLayoutJson } from '../../domain/entities/presentation-layout-ir';
-import { persistPreparedPresentationAttempt, persistPresentationAttemptReceipt, type PresentationDesignAttempt } from './presentation-design-attempts';
-import type { ProductionPresentationDesignIR } from '../../domain/entities/presentation-design-contract';
+import { persistPreparedPresentationAttempt, persistPresentationAttemptReceipt, presentationAttemptPath, type PresentationDesignAttempt } from './presentation-design-attempts';
+import type { PresentationDesignDelivery, PresentationDesignFallbackReason, ProductionPresentationDesignIR } from '../../domain/entities/presentation-design-contract';
 
 export type DocumentGenerationErrorCode =
   | 'invalid_plan'
@@ -158,6 +163,7 @@ export interface DocumentLlmRepairRequest {
 }
 
 export interface DocumentGenerationResult {
+  readonly presentationDesign?: PresentationDesignDelivery;
   readonly task: Task;
   readonly execution: Execution;
   readonly file: FileReference;
@@ -184,6 +190,8 @@ function isPptContinuationHeading(heading: string, sectionHeading: string): bool
 export class DocumentGenerationRunner {
   constructor(
     private readonly options: {
+      /** New PPTs prefer model design; a local template fallback is enabled unless explicitly disabled. */
+      readonly allowLegacyArtDirectionFallback?: boolean;
       readonly rootDirectory: string;
       readonly projectId: ProjectId;
       readonly now?: () => string;
@@ -295,33 +303,53 @@ export class DocumentGenerationRunner {
       // verification stage, including failures during a repair candidate.
       execution = await this.move(context, execution, 'verifying_file');
       let currentOutline = canonicalOutline;
+      const resolvedImages = input.images?.length ? await this.resolveImages(context, input.images) : [];
+      const designAssets = input.kind === 'ppt' && input.requestArtDirection ? await loadPresentationRenderAssets(resolvedImages) : [];
+      const availableAssets = designAssets.map(({ assetKey, aspectRatio }) => ({ assetKey, aspectRatio }));
+      const allowTemplateFallback = this.options.allowLegacyArtDirectionFallback !== false && input.kind === 'ppt' &&
+        !input.designIR && !input.parentWorkId && !input.revisionPatch && !input.revisionPatches;
+      let templateFallbackReason: PresentationDesignFallbackReason | undefined;
+      let presentationDesign: PresentationDesignDelivery | undefined;
       const artDirection = input.kind === 'ppt' && !input.parentWorkId && !input.revisionPatch && !input.revisionPatches
-        ? await this.observe(input, 'plan_validation', 'presentation-art-direction', () => planPresentationArtDirection({
+        ? await this.observe(input, 'plan_validation', 'presentation-art-direction', () => planExecutablePresentationDesign({
             outline: canonicalOutline, documentIR: input.documentIR, userRequirement: input.userRequirement ?? '',
             brandingConstraints: [input.theme, input.presentationTemplate].filter((value): value is NonNullable<typeof value> => value !== undefined),
             request: input.requestArtDirection, signal: input.signal ?? new AbortController().signal,
             executionBudget: input.executionBudget,
-            timeoutMs: input.artDirectionTimeoutMs
+            timeoutMs: input.artDirectionTimeoutMs, availableAssets,
+            requireDesignTree: input.requestArtDirection !== undefined && input.designIR === undefined,
+            tokens: resolvePresentationTemplate(input.presentationTemplate ?? (input.theme === 'financing' ? 'financing' : 'work_report')).tokens,
+            assets: designAssets,
+            onRepair: (attempt, targetPages) => this.reportProgress(input, { code: 'plan_validation', status: 'started',
+              operationId: `presentation-design-correction-${attempt}`, facts: { purpose: 'repair', documentKind: 'ppt', count: targetPages.length } })
           }), { purpose: 'planning', documentKind: 'ppt', count: input.outline.sections.length })
         : undefined;
       const artDirectionStatus = artDirection === undefined ? 'missing' as const
         : artDirection.designIR ? 'validated' as const
           : artDirection.diagnostics.some(item => item.code === 'art_direction_unavailable') ? 'missing' as const : 'invalid' as const;
-      if (artDirection?.diagnostics.some(diagnostic => diagnostic.code === 'invalid_content_organization')) {
-        throw new DocumentGenerationError('invalid_plan', 'The declared content organization is invalid');
+      if (artDirection && !artDirection.designIR && allowTemplateFallback) templateFallbackReason = presentationPlanningFallbackReason(artDirection.diagnostics);
+      if (!templateFallbackReason && ((artDirection && input.requestArtDirection && !input.designIR && !artDirection.designIR) || artDirection?.diagnostics.some(diagnostic => ['invalid_content_organization', 'invalid_design_tree', 'design_tree_missing', 'design_execution_failed',
+        'design_repair_scope_violation', 'design_asset_unavailable'].includes(diagnostic.code)))) {
+        await this.reportProgress(input, { code: 'plan_validation', status: 'failed', operationId: 'presentation-design-rejected',
+          facts: { purpose: 'planning', documentKind: 'ppt', count: artDirection?.diagnostics.length ?? 1, artDirectionStatus, designIrStatus: 'invalid' } });
+        throw new DocumentGenerationError('invalid_plan', 'The requested presentation design could not be validated or executed');
       }
-      const designIrStatus = artDirection?.designIR ? 'validated' as const : artDirectionStatus;
+      let designIrStatus = artDirection?.designIR ? 'validated' as const : artDirectionStatus;
       if (artDirection) await this.reportProgress(input, { code: 'plan_validation', status: 'completed',
         operationId: artDirection.designIR ? 'presentation-design-validated' : 'presentation-design-fallback',
-        facts: { purpose: 'planning', documentKind: 'ppt', count: artDirection.diagnostics.length, artDirectionStatus, designIrStatus } });
+        facts: { purpose: 'planning', documentKind: 'ppt', count: artDirection.diagnostics.length, artDirectionStatus, designIrStatus,
+          ...(templateFallbackReason ? { designPath: 'legacy-fallback' as const, fallbackReason: templateFallbackReason } : {}) } });
       let currentDesignIR = input.designIR ?? artDirection?.designIR;
+      let repairTargetSystemPages: ('cover' | 'closing')[] = [];
       let repairDiagnostics: readonly DocumentQualityDiagnostic[] = [];
       const supportsLlmRepair = input.kind === 'ppt' && input.requestLlmRepair !== undefined &&
         this.options.renderPreview !== undefined &&
         input.revisionPatch === undefined && input.revisionPatches === undefined;
+      const supportsDesignRepair = input.kind === 'ppt' && input.requestArtDirection !== undefined && currentDesignIR?.pages.some(page => page.designTree) === true;
       const compileAndDiagnose = async (outline: DocumentOutline, attempt: number) => {
         const operationSuffix = attempt === 0 ? '' : `:repair-${attempt}`;
-        if (candidateContent && !currentDesignIR && attempt > 0) {
+        if (candidateContent && !currentDesignIR && attempt > 0 && (!templateFallbackReason ||
+          templateFallbackReason === 'art_direction_unavailable' && !input.requestArtDirection)) {
           const identityMap = Object.fromEntries(Object.entries(documentContentAliases(candidateContent)).filter(([reference]) => reference.startsWith('outline.')));
           candidateContent = buildDocumentContentSnapshot({ outline, previousSnapshot: candidateContent, identityMap });
         }
@@ -338,7 +366,10 @@ export class DocumentGenerationRunner {
         try {
         const candidate = await this.observe(input, 'document_compile', `document-file-write${operationSuffix}`, async () => generateTemporaryFile({
           onProgress: event => this.reportProgress(input, event),
-          onDesignCompiled: snapshot => this.recordDesignCompilation(input, snapshot, attempt),
+          onDesignCompiled: async snapshot => {
+            presentationDesign = { path: snapshot.designPath, ...(snapshot.fallbackReason ? { fallbackReason: snapshot.fallbackReason } : {}) };
+            await this.recordDesignCompilation(input, snapshot, attempt);
+          },
           ...(candidateContent ? { contentSnapshot: candidateContent, onPlanPrepared: async prepared => {
             this.assertNotCancelled(input.signal);
             input.executionBudget?.assertCanProceed('tool');
@@ -349,6 +380,7 @@ export class DocumentGenerationRunner {
               executionId: execution!.id, sourceDraftId: input.sourceDraftId, draftRevision: input.draftRevision, attempt,
               prepared, ...(lastPreparedAttempt ? { previousAttempt: lastPreparedAttempt } : {}),
               targetSectionIds: repairTargetIndexes.map(index => candidateContent!.sections[index].sectionId),
+              targetSystemPages: repairTargetSystemPages,
               diagnosisCodes: repairDiagnosisCodes, now: now() });
             lastPreparedAttempt = preparedAttempt;
             this.assertNotCancelled(input.signal);
@@ -361,6 +393,7 @@ export class DocumentGenerationRunner {
           // The patched Outline is retained only for the explicit legacy compatibility path.
           outline: currentDesignIR ? canonicalOutline : outline,
           ...(currentDesignIR ? { designIR: currentDesignIR } : {}),
+          ...(templateFallbackReason ? { designFallbackReason: templateFallbackReason } : {}),
           artDirectionStatus,
           designIrStatus,
           ...(artDirection?.diagnostics.length ? { artDirectionDiagnostics: artDirection.diagnostics } : {}),
@@ -371,8 +404,8 @@ export class DocumentGenerationRunner {
             ? { presentationTemplate: input.presentationTemplate }
             : {}),
           ...revisionSource,
-          ...(input.images !== undefined && input.images.length > 0
-            ? { images: await this.resolveImages(context, input.images) }
+          ...(resolvedImages.length > 0
+            ? { images: resolvedImages }
             : {})
         }), { tool: 'write_document', ...(attempt > 0 ? { count: attempt, purpose: 'repair' as const } : {}) });
         const previousTemporaryPath = temporaryPath;
@@ -417,7 +450,7 @@ export class DocumentGenerationRunner {
         }
         this.assertNotCancelled(input.signal);
         input.executionBudget?.assertCanProceed('check');
-        const blocksDelivery = !supportsLlmRepair && diagnostics.some(diagnostic => diagnostic.severity === 'error');
+        const blocksDelivery = !supportsLlmRepair && !supportsDesignRepair && diagnostics.some(diagnostic => diagnostic.severity === 'error');
         await this.reportProgress(input, { code: 'document_check', status: blocksDelivery ? 'failed' : 'completed',
           operationId: `document-render-diagnostics${operationSuffix}`, facts: {
             documentKind: input.kind, tool: 'check', count: diagnostics.length, ...(attempt > 0 ? { purpose: 'repair' as const } : {})
@@ -437,7 +470,50 @@ export class DocumentGenerationRunner {
       const initial = await compileAndDiagnose(currentOutline, 0);
       generated = initial.candidate;
       repairDiagnostics = initial.diagnostics;
-      if (supportsLlmRepair && repairDiagnostics.some((diagnostic) => diagnostic.severity === 'error')) {
+      if (currentDesignIR?.pages.some(page => page.designTree) && input.requestArtDirection) {
+        for (let attempt = 1; attempt <= 2 - (artDirection?.correctionCount ?? 0) && repairDiagnostics.some(diagnostic => diagnostic.severity === 'error'); attempt += 1) {
+          const errors = repairDiagnostics.filter(diagnostic => diagnostic.severity === 'error');
+          if (errors.some(diagnostic => !repairableDiagnosticCodes.has(diagnostic.code))) break;
+          const diagnosticPage = (scope: string): number | undefined => {
+            const match = /^(?:page:|pages\[)(\d+)/u.exec(scope);
+            const page = match ? Number(match[1]) : undefined;
+            return page !== undefined && page >= 1 && page <= currentDesignIR!.pages.length ? page : undefined;
+          };
+          const targetPages = [...new Set(errors.flatMap(diagnostic => diagnosticPage(diagnostic.scope) === undefined
+            ? currentDesignIR!.pages.map(page => page.pageNumber) : [diagnosticPage(diagnostic.scope)!]))];
+          repairDiagnosisCodes = [...new Set(errors.map(diagnostic => diagnostic.code))];
+          repairTargetIndexes = targetPages.filter(page => page > 1 && page <= canonicalOutline.sections.length + 1).map(page => page - 2);
+          repairTargetSystemPages = [...(targetPages.includes(1) ? ['cover' as const] : []),
+            ...(targetPages.includes(currentDesignIR!.pages.length) && currentDesignIR!.pages.length > 1 ? ['closing' as const] : [])];
+          const correction = await this.observe(input, 'tool_call', `presentation-render-design-correction-${attempt}`, () => requestPresentationDesignCorrection({
+            outline: canonicalOutline, documentIR: input.documentIR, userRequirement: input.userRequirement ?? '', availableAssets,
+            request: input.requestArtDirection, signal: input.signal ?? new AbortController().signal, executionBudget: input.executionBudget,
+            timeoutMs: input.artDirectionTimeoutMs, previousDesign: currentDesignIR!, targetPages,
+            diagnostics: errors.slice(0, 96).map(diagnostic => ({ code: diagnostic.code, pageNumber: diagnosticPage(diagnostic.scope) ?? targetPages[0] }))
+          }), { tool: 'patch', purpose: 'repair', count: attempt });
+          if (correction.diagnostics.some(item => item.code === 'design_repair_scope_violation')) throw new DocumentGenerationError('revision_scope_violation', 'Design correction changed an unapproved page');
+          if (!correction.designIR || JSON.stringify(canonicalizeLayoutJson(correction.designIR)) === JSON.stringify(canonicalizeLayoutJson(currentDesignIR))) break;
+          currentDesignIR = correction.designIR;
+          const next = await compileAndDiagnose(canonicalOutline, attempt);
+          generated = next.candidate; repairDiagnostics = next.diagnostics;
+        }
+      }
+      if (allowTemplateFallback && !templateFallbackReason && currentDesignIR?.pages.some(page => page.designTree) && canFallbackFromPresentationQa(repairDiagnostics)) {
+        this.assertNotCancelled(input.signal); input.executionBudget?.assertCanProceed('tool');
+        templateFallbackReason = 'design_render_failed';
+        designIrStatus = 'invalid';
+        currentDesignIR = undefined;
+        repairDiagnosisCodes = [...new Set(repairDiagnostics.filter(item => item.severity === 'error').map(item => item.code))];
+        repairTargetIndexes = canonicalOutline.sections.map((_section, index) => index);
+        repairTargetSystemPages = canonicalOutline.sections.length ? ['cover', 'closing'] : ['cover'];
+        await this.reportProgress(input, { code: 'plan_validation', status: 'completed', operationId: 'presentation-design-fallback',
+          facts: { purpose: 'repair', documentKind: 'ppt', designPath: 'legacy-fallback', fallbackReason: templateFallbackReason,
+            artDirectionStatus, designIrStatus, count: repairDiagnosisCodes.length } });
+        const fallback = await compileAndDiagnose(canonicalOutline, (lastPreparedAttempt?.attempt ?? 0) + 1);
+        generated = fallback.candidate; repairDiagnostics = fallback.diagnostics;
+      }
+      if (supportsLlmRepair && (!templateFallbackReason || templateFallbackReason === 'art_direction_unavailable' && !input.requestArtDirection) &&
+        !currentDesignIR?.pages.some(page => page.designTree) && repairDiagnostics.some((diagnostic) => diagnostic.severity === 'error')) {
         if (repairDiagnostics.some((diagnostic) =>
           diagnostic.severity === 'error' && !repairableDiagnosticCodes.has(diagnostic.code))) {
           throw new DocumentGenerationError(
@@ -572,6 +648,7 @@ export class DocumentGenerationRunner {
         execution,
         file,
         work,
+        ...(presentationDesign ? { presentationDesign } : {}),
         ...(validatedOutline ? { validatedOutline } : {}),
         ...(pageCountAssessment ? { pageCountAssessment } : {})
       };
@@ -828,17 +905,27 @@ export class DocumentGenerationRunner {
           pageCountAssessment = assessPresentationPageCount(actualTotalPages, pageRequirement);
           await this.checkPageCount(input, pageCountAssessment);
         }
+        let presentationDesign: PresentationDesignDelivery | undefined;
+        if (input.kind === 'ppt' && await context.storage.readJson(presentationAttemptPath(execution.id, 0)) !== undefined) {
+          const sourcePath = await resolveFileReferencePathSafely(this.options.rootDirectory, file);
+          const plan = await readRegisteredPresentationProductionPlan({ rootDirectory: this.options.rootDirectory, projectId: this.options.projectId,
+            work, file, buffer: await readFile(sourcePath, { signal: input.signal ?? AbortSignal.timeout(5000) }) });
+          if (plan) presentationDesign = { path: plan.plan.snapshot.designPath,
+            ...(plan.plan.snapshot.fallbackReason ? { fallbackReason: plan.plan.snapshot.fallbackReason } : {}) };
+        }
         if (execution.state === 'registering_work') {
           const completed = transitionExecution(execution, 'completed', toIsoTimestamp(
             (this.options.now ?? (() => new Date().toISOString()))()
           ), { outputFileId: file.id, workId: work.id });
           await context.executions.save(completed);
           return { task, execution: completed, file, work,
+            ...(presentationDesign ? { presentationDesign } : {}),
             ...(pageCountAssessment ? { pageCountAssessment } : {}),
             ...(input.kind === 'ppt' && (input.revisionPatch || input.revisionPatches)
               ? { validatedOutline: await this.readRevisedOutline(input, await resolveFileReferencePathSafely(this.options.rootDirectory, file)) } : {}) };
         }
         return { task, execution, file, work,
+          ...(presentationDesign ? { presentationDesign } : {}),
           ...(pageCountAssessment ? { pageCountAssessment } : {}),
           ...(input.kind === 'ppt' && (input.revisionPatch || input.revisionPatches)
             ? { validatedOutline: await this.readRevisedOutline(input, await resolveFileReferencePathSafely(this.options.rootDirectory, file)) } : {}) };

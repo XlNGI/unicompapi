@@ -1,0 +1,14 @@
+{
+  "schemaVersion": 1,
+  "electronPid": 21252,
+  "vitePid": 17108,
+  "workingDirectory": "C:\\Users\\10698\\Documents\\unicompAPIforwindows\\unicompapi",
+  "devUrl": "http://localhost:5173",
+  "normalStartup": true,
+  "firstInstrumentedLaunchFailed": true,
+  "instrumentationRepairAttempts": 2,
+  "startedWithoutInstrumentation": true,
+  "failedInstrumentedProcessClosed": true,
+  "activationEvidence": "normal app process startup after compilation; renderer --app-path equals actual workspace; visible UniComp window",
+  "instrumentedProofUnavailable": true
+}

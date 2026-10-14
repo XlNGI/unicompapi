@@ -17,10 +17,12 @@ import type { DocumentAttachmentApi } from './shared/document-attachment-ipc';
 import type { DocumentGenerationApi } from './shared/document-generation-ipc';
 import type { WebResearchApi } from './shared/web-research-ipc';
 import type { ProductionTraceApi } from './shared/conversation-production-ipc';
+import type { TextClipboardApi } from './shared/text-clipboard';
 
 declare global {
   interface Window {
     unicomp?: {
+      clipboard?: TextClipboardApi;
       autosaveDiagnostics: AutosaveDiagnosticsApi;
       parameterInputDiagnostics: ParameterInputDiagnosticsApi;
       chatContexts: ChatContextApi;

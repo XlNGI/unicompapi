@@ -32,6 +32,7 @@ import { StreamingItem } from './StreamingItem';
 import { StreamingMarkdown } from './StreamingMarkdown';
 import { ChatAttachment } from './ChatAttachment';
 import { DocumentProgress } from './DocumentProgress';
+import { messageClipboardText, writeMessageClipboard } from './messageClipboard';
 import { RetainedDocumentCard } from './RetainedDocumentCard';
 import { mergeProductionEvents, projectProductionMessages, type PendingProductionInput } from './productionTimeline';
 import type { ProductionTraceEventDto } from '../../shared/conversation-production-ipc';
@@ -1410,16 +1411,15 @@ export function ChatPage({
     const composer = composerRegionRef.current;
     const messages = messagesRef.current;
     if (!composer || !messages) return;
-    const reserveComposer = () => {
-      messages.style.setProperty('--uc-chat-composer-clearance', `${Math.ceil(composer.getBoundingClientRect().height) + 24}px`);
-      // The clearance changes scrollHeight without resizing the message list.
-      // Preserve following before the browser emits the resulting scroll event.
+    const followComposerResize = () => {
+      // The composer owns a separate grid row. Its height changes the message
+      // viewport, so preserve following before the resulting scroll event.
       if (followOutputRef.current) messages.scrollTo({ top: messages.scrollHeight, behavior: 'auto' });
     };
-    reserveComposer();
-    const observer = typeof ResizeObserver === 'undefined' ? undefined : new ResizeObserver(reserveComposer);
+    followComposerResize();
+    const observer = typeof ResizeObserver === 'undefined' ? undefined : new ResizeObserver(followComposerResize);
     observer?.observe(composer);
-    return () => { observer?.disconnect(); messages.style.removeProperty('--uc-chat-composer-clearance'); };
+    return () => { observer?.disconnect(); };
   }, []);
 
   useEffect(() => () => {
@@ -3800,9 +3800,14 @@ export function ChatPage({
     }
   }
 
-  async function copyMessage(message: MessageDto) {
+  async function copyMessage(message: MessageDto, documentBody: boolean) {
     try {
-      await navigator.clipboard.writeText(message.content);
+      const text = messageClipboardText(message, documentBody);
+      if (!text) {
+        setNotice('当前消息暂无可复制的正文。');
+        return;
+      }
+      await writeMessageClipboard(text);
       setCopiedMessageId(message.messageId);
       window.setTimeout(() => {
         setCopiedMessageId((current) => current === message.messageId ? undefined : current);
@@ -4689,10 +4694,10 @@ export function ChatPage({
                               <LuPencil aria-hidden="true" />
                             </Button>
                           ) : null}
-                          {item.content ? (
+                          {item.content || item.documentResult?.validatedContent ? (
                             <Button
                               aria-label={copiedMessageId === item.messageId ? '已复制' : '复制消息'}
-                              onClick={() => void copyMessage(item)}
+                              onClick={() => void copyMessage(item, isDocumentDraftMessage || hideDocumentDraftContent)}
                               title={copiedMessageId === item.messageId ? '已复制' : '复制'}
                               variant="ghost"
                             >
@@ -4801,6 +4806,9 @@ export function ChatPage({
           ) : null}
             </div>
           </div>
+        </div>
+
+        <div className="uc-chat-page__composer-region" ref={composerRegionRef}>
           {showScrollToBottom ? (
             <Button
               aria-label="回到最新消息"
@@ -4812,9 +4820,6 @@ export function ChatPage({
               <LuArrowDown aria-hidden="true" />
             </Button>
           ) : null}
-        </div>
-
-        <div className="uc-chat-page__composer-region" ref={composerRegionRef}>
           <section
             aria-labelledby="chat-composer-title"
             className="uc-chat-page__composer"

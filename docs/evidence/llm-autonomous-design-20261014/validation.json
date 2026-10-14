@@ -1,0 +1,218 @@
+{
+  "schemaVersion": 1,
+  "date": "2026-10-14",
+  "status": "passed",
+  "branch": "feature/llm-autonomous-design",
+  "sourceBaseline": "4692337",
+  "implementationCommits": [
+    "82c2d98",
+    "01e5f4d"
+  ],
+  "checks": {
+    "typecheck": "passed",
+    "lint": "passed",
+    "productionBuild": "passed",
+    "platformAudit": "passed",
+    "nodeUi": {
+      "passed": 401,
+      "failed": 0,
+      "skipped": 0
+    },
+    "vitest": {
+      "files": 348,
+      "passed": 3612,
+      "failed": 0,
+      "skipped": 0,
+      "log": "vitest-full.log.gz"
+    },
+    "totalTestsPassed": 4013,
+    "newAutonomousTests": 31
+  },
+  "firstFullRun": {
+    "passed": 3597,
+    "failed": 8,
+    "skipped": 7,
+    "log": "vitest-first-run.log.gz",
+    "resolved": true,
+    "deletedTests": false,
+    "loosenedLegacyTimeouts": false
+  },
+  "electron": {
+    "status": "passed",
+    "boundary": "real Electron BrowserWindow + production preload + production IPC + controlled in-process Provider transport",
+    "mockRequests": 7,
+    "artDirectionRequests": 1,
+    "autonomousDesignExecuted": true,
+    "designExecution": {
+      "status": "passed",
+      "authoredPageCount": 3,
+      "nodeCount": 7,
+      "verifiedElementCount": 7
+    },
+    "pptWorks": 1,
+    "pptThreadReceipt": true,
+    "wordDelivered": true,
+    "excelDelivered": true,
+    "residualOwnedProcesses": 0,
+    "externalProviderCalls": 0
+  },
+  "cases": {
+    "schemaVersion": 1,
+    "date": "2026-10-14",
+    "status": "passed",
+    "modelOutput": "synthetic offline planner fixtures",
+    "boundary": "compiled production Runner -> admitted Design IR -> Layout IR -> real PPTX -> native Office/PDF QA -> hash/publication/Work",
+    "cases": [
+      {
+        "name": "split-65-35",
+        "pages": 3,
+        "plannerRequests": 1,
+        "externalRequests": 0,
+        "execution": "completed",
+        "workCount": 1,
+        "fileHash": "225ed442216974d1dfa76dd9aab687a5989a9ff855919fba3956f2816efc9f61",
+        "geometryErrors": 0,
+        "qaOutcome": "passed",
+        "designExecution": {
+          "status": "passed",
+          "authoredPageCount": 3,
+          "nodeCount": 11,
+          "verifiedElementCount": 10
+        },
+        "visualAudit": {
+          "status": "warning",
+          "multimodalReview": "not_available",
+          "diagnostics": [
+            {
+              "code": "visual_crowded_page",
+              "severity": "warning",
+              "pageNumber": 2,
+              "message": "Element occupancy leaves little safe whitespace"
+            }
+          ]
+        }
+      },
+      {
+        "name": "editorial-grid",
+        "pages": 3,
+        "plannerRequests": 1,
+        "externalRequests": 0,
+        "execution": "completed",
+        "workCount": 1,
+        "fileHash": "88708339680dbf7d07271df26fccd67918e97aac131b5b075d8ae3d8130568bd",
+        "geometryErrors": 0,
+        "qaOutcome": "passed",
+        "designExecution": {
+          "status": "passed",
+          "authoredPageCount": 3,
+          "nodeCount": 10,
+          "verifiedElementCount": 10
+        },
+        "visualAudit": {
+          "status": "passed",
+          "multimodalReview": "not_available",
+          "diagnostics": []
+        }
+      },
+      {
+        "name": "image-composition",
+        "pages": 3,
+        "plannerRequests": 1,
+        "externalRequests": 0,
+        "execution": "completed",
+        "workCount": 1,
+        "fileHash": "abb3c751558b883c8848bf81908166601084e1c66d68ede3b257e9b25c3bedd3",
+        "geometryErrors": 0,
+        "qaOutcome": "passed",
+        "designExecution": {
+          "status": "passed",
+          "authoredPageCount": 3,
+          "nodeCount": 12,
+          "verifiedElementCount": 10
+        },
+        "visualAudit": {
+          "status": "passed",
+          "multimodalReview": "not_available",
+          "diagnostics": []
+        }
+      }
+    ],
+    "externalProviderCalls": 0,
+    "subjectiveMultimodalReview": "not_available"
+  },
+  "manualPngInspection": {
+    "status": "completed",
+    "image": "same-content-designs.png",
+    "scope": "same-fact synthetic composition, text integrity, crop/mask"
+  },
+  "limitations": [
+    "real paid LLM not evaluated",
+    "multimodal subjective visual review not implemented",
+    "cross-page content redistribution not implemented",
+    "font embedding and arbitrary SVG/shadow/animation not implemented",
+    "macOS device validation deferred"
+  ],
+  "delivery": {
+    "localCommits": true,
+    "pushed": false,
+    "mergedIntoDevelop": false,
+    "userApplicationRestarted": false,
+    "otherWorkingTreeChangesPreserved": true
+  },
+  "rawLogArchives": {
+    "format": "gzip",
+    "exactDecompressionVerified": true,
+    "files": [
+      {
+        "file": "build.log.gz",
+        "originalBytes": 1003,
+        "originalSha256": "3f3cc591b2ae9962b7b003d951dbccb9ddcc193d1e4ff2a4dd50f9124b817a77"
+      },
+      {
+        "file": "cases-generation.log.gz",
+        "originalBytes": 1715,
+        "originalSha256": "bb8905ad50af1a603ae2c3e88907bf13c10ce93fa8894abbd93a10159ffa52fd"
+      },
+      {
+        "file": "electron-agent-mock-stderr.log.gz",
+        "originalBytes": 36,
+        "originalSha256": "1fa7fe4fe36d0d2e86e22aff8e630ad138e1833cf51d197afb4aca92e062c92c"
+      },
+      {
+        "file": "electron-agent-mock-stdout.log.gz",
+        "originalBytes": 3227,
+        "originalSha256": "ca20e636c6d773a866f34982c8fa6a2d5b5f4cb30d71d366fa018576752a2aaf"
+      },
+      {
+        "file": "electron-build.log.gz",
+        "originalBytes": 0,
+        "originalSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      },
+      {
+        "file": "lint.log.gz",
+        "originalBytes": 0,
+        "originalSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      },
+      {
+        "file": "node-ui.log.gz",
+        "originalBytes": 33944,
+        "originalSha256": "0042a26b9b7dae046b765049eb47f191ca5783fd219954ab85ef2fcd89a3f9cb"
+      },
+      {
+        "file": "typecheck.log.gz",
+        "originalBytes": 0,
+        "originalSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      },
+      {
+        "file": "vitest-first-run.log.gz",
+        "originalBytes": 52730,
+        "originalSha256": "7c8366070fa715a3f281d526be49defae3faac2e3eec2d9c50ba74632280286b"
+      },
+      {
+        "file": "vitest-full.log.gz",
+        "originalBytes": 45392,
+        "originalSha256": "ad50adef300d5c5ec34237302f7ef8e284290da3fe33db591a1c5c8d7af758cb"
+      }
+    ]
+  }
+}

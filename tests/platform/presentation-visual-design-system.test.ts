@@ -60,6 +60,8 @@ describe('presentation visual design system', () => {
     expect(process?.elements.filter(element => element.type === 'shape').map(element => element.content)).toEqual(
       expect.arrayContaining([{ type: 'shape', shapeKind: 'ellipse' }])
     );
-    expect(process?.elements.some(element => element.content.type === 'shape' && element.content.shapeKind === 'line')).toBe(false);
+    // Edge accents now execute independently; only the sequence track is disabled by nodes.
+    expect(process?.elements.some(element => element.content.type === 'shape' && element.content.shapeKind === 'line' && element.style.borderWidth !== 1.5)).toBe(false);
+    expect(process?.elements.some(element => element.content.type === 'shape' && element.content.shapeKind === 'line' && element.style.borderWidth === 1.5)).toBe(true);
   });
 });

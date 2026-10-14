@@ -186,6 +186,50 @@ describe('chat composer event behavior', () => {
   });
   afterEach(() => { vi.unstubAllGlobals(); vi.restoreAllMocks(); });
 
+  it.each([false, true])('copies a completed visible reply through the desktop bridge (verified-only=%s)', async verifiedOnly => {
+    initialConversationId = conversation.conversationId;
+    const writeText = vi.fn(async () => undefined);
+    Object.assign(window.unicomp!, { clipboard: { writeText } });
+    const answer = { messageId:'copy-answer', conversationId:conversation.conversationId, revision:1,
+      role:'assistant' as const,state:'completed' as const,content:verifiedOnly?'':'普通回复',attachments:[],
+      createdAt:conversation.updatedAt,updatedAt:conversation.updatedAt,
+      ...(verifiedOnly ? { documentResult:{ workId:'work-copy',fileName:'报告.pptx',kind:'ppt' as const,sizeBytes:100,validatedContent:'# 可读正文' } } : {}) };
+    vi.mocked(window.unicomp!.chatContexts!.getConversation).mockResolvedValue({ok:true,value:{...conversation,messages:[answer]}} as never);
+    await settle(24);
+    (element('复制消息').props.onClick as () => void)();
+    await settle(8);
+    expect(writeText).toHaveBeenCalledWith(verifiedOnly?'# 可读正文':'普通回复');
+    expect(element('已复制')).toBeDefined();
+  });
+
+  it('shows copy failure without success feedback when the desktop writer rejects', async () => {
+    initialConversationId = conversation.conversationId;
+    Object.assign(window.unicomp!, {clipboard:{writeText:async()=>{throw new Error('unavailable');}}});
+    const answer = {messageId:'copy-failure',conversationId:conversation.conversationId,revision:1,
+      role:'assistant' as const,state:'completed' as const,content:'正文',attachments:[],createdAt:conversation.updatedAt,updatedAt:conversation.updatedAt};
+    vi.mocked(window.unicomp!.chatContexts!.getConversation).mockResolvedValue({ok:true,value:{...conversation,messages:[answer]}} as never);
+    await settle(24);
+    (element('复制消息').props.onClick as () => void)();
+    await settle(8);
+    expect(element('复制消息')).toBeDefined();
+    expect(containsText(tree,'复制失败，请手动选择消息内容。')).toBe(true);
+  });
+
+  it('leaves the clipboard untouched and explains when a document has no readable body', async () => {
+    initialConversationId = conversation.conversationId;
+    const writeText = vi.fn(async()=>undefined);
+    Object.assign(window.unicomp!,{clipboard:{writeText}});
+    const answer = {messageId:'copy-empty',conversationId:conversation.conversationId,revision:1,role:'assistant' as const,
+      state:'completed' as const,content:'{"reasoning":"PRIVATE"}',attachments:[],createdAt:conversation.updatedAt,
+      updatedAt:conversation.updatedAt,documentGenerationStatus:{kind:'ppt' as const,state:'completed' as const}};
+    vi.mocked(window.unicomp!.chatContexts!.getConversation).mockResolvedValue({ok:true,value:{...conversation,messages:[answer]}} as never);
+    await settle(24);
+    (element('复制消息').props.onClick as ()=>void)();
+    await settle(8);
+    expect(writeText).not.toHaveBeenCalled();
+    expect(containsText(tree,'当前消息暂无可复制的正文。')).toBe(true);
+  });
+
   it('binds resize following to the message list when the selected history appears after mount', async () => {
     initialConversationId = conversation.conversationId;
     const pending = deferred<unknown>();

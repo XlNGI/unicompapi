@@ -21,6 +21,8 @@ let additionalRootDirectory;
 let newApiRuntime;
 let deepSeekRuntime;
 let requestCount = 0;
+let artDirectionRequestCount = 0;
+const expectTemplateFallback = process.argv.includes('--template-fallback');
 let abortCount = 0;
 let transportMode = 'normal';
 let toolCallCount = 0;
@@ -81,6 +83,23 @@ const transport = {
   send: async ({ body, signal }) => {
     requestCount += 1;
     const payload = JSON.parse(Buffer.from(body).toString('utf8'));
+    if (!payload.tools && payload.messages.some(message => message.role === 'system' && message.content.includes('Art Direction'))) {
+      artDirectionRequestCount += 1;
+      if (expectTemplateFallback) return sseResponse(payload.model, '{truncated');
+      const brief = '# Electron Tool Calling 验收\n\n## 受控 Office 工具\n真实 Electron 中执行隔离 PPT 生成。';
+      const { PlatformDocumentDraftCompiler } = require('../dist-electron/src/platform/documents/document-generation-application-adapters');
+      const outline = new PlatformDocumentDraftCompiler().compile({ content: brief, kind: 'ppt', operation: 'create' });
+      const design = require('../dist-electron/src/domain/entities/presentation-design-contract');
+      const initial = design.buildFallbackPresentationDesignIR(outline);
+      const inventory = design.buildPresentationArtDirectionInput({ outline, userRequirement: 'Synthetic offline autonomous composition' });
+      const direction = { ...initial, pages: initial.pages.map((page, index) => {
+        const refs = inventory.outline.pages[index].contentRefs;
+        const leaves = refs.filter(ref => !refs.some(child => child.startsWith(ref + '.')));
+        return { ...page, designTree: { schemaVersion: 1, root: { nodeId: 'mock-root', type: 'column', gap: 0.03,
+          children: leaves.map((contentRef, item) => ({ nodeId: `mock-leaf-${item}`, type: 'content', contentRef, style: { fontSize: 28 } })) } } };
+      }) };
+      return sseResponse(payload.model, JSON.stringify(direction));
+    }
     if (transportMode === 'stream-resume') return sseStreamResumeResponse(payload.model);
     if (transportMode === 'cancel') {
       await new Promise((resolve, reject) => {
@@ -227,6 +246,15 @@ async function run() {
       generatedWorks[0].id !== artifactMessage.documentResult.workId) {
     throw new Error('Isolated tool case did not settle exactly one registered Work');
   }
+  const { RegisteredPresentationReader } = require('../dist-electron/src/platform/documents/registered-presentation-reader');
+  const { readRegisteredPresentationProductionPlan } = require('../dist-electron/src/platform/documents/presentation-production-plan-reader');
+  const source = await new RegisteredPresentationReader({ rootDirectory, projectId }).read(generatedWorks[0].id);
+  const admitted = await readRegisteredPresentationProductionPlan({ rootDirectory, projectId, work: source.work, file: source.file, buffer: source.buffer });
+  if (artDirectionRequestCount !== 1 || !admitted || (expectTemplateFallback
+    ? admitted.plan.snapshot.designPath !== 'legacy-fallback' || admitted.plan.designIR !== undefined || admitted.plan.snapshot.fallbackReason !== 'art_direction_invalid'
+    : !admitted.plan.designIR?.pages.every(page => page.designTree) || admitted.plan.snapshot.designExecution?.status !== 'passed')) {
+    throw new Error('Autonomous Art Direction did not reach the registered production plan');
+  }
   let threadArtifact;
   let threadDocumentReceipt;
   let threadToolParentState;
@@ -267,6 +295,10 @@ async function run() {
     observationReturned: toolExecution.content?.includes('工具观察结果') ?? false,
     artifactRegistered: Boolean(artifactMessage?.documentResult),
     generatedWorkCount: generatedWorks.length,
+    autonomousDesignExecuted: !expectTemplateFallback,
+    ...(admitted.plan.snapshot.designExecution ? { designExecution: admitted.plan.snapshot.designExecution } : {}),
+    designPath: admitted.plan.snapshot.designPath,
+    ...(admitted.plan.snapshot.fallbackReason ? { fallbackReason: admitted.plan.snapshot.fallbackReason } : {}),
     documentResult: artifactMessage?.documentResult ?? null,
     threadDocumentReceipt: threadDocumentReceipt ?? null,
     threadToolParentState,
@@ -316,10 +348,10 @@ async function run() {
   const report = { schemaVersion: 1, status: 'passed',
     boundary: 'real Electron BrowserWindow + production preload + production IPC + controlled in-process Provider transport',
     checks: ['normal Agent response', 'persistent execution identity', 'cancel start boundary', 'Provider tool call through the real Electron IPC path', 'Word physical file generation', 'Excel physical file generation'],
-    requestCount, abortCount, toolCalling, threadRuntimeControls,
+    requestCount, artDirectionRequestCount, abortCount, toolCalling, threadRuntimeControls,
     office: { word: wordResult, excel: excelResult },
     externalProvider: 'blocked: no authorized external credentials used' };
-  const output = path.resolve('outputs/conversation-phase6/agent-provider-mock-e2e.json');
+  const output = path.resolve(`outputs/conversation-phase6/agent-provider-mock${expectTemplateFallback ? '-template-fallback' : ''}-e2e.json`);
   await mkdir(path.dirname(output), { recursive: true });
   await writeFile(output, `${JSON.stringify(report, null, 2)}\n`, 'utf8');
   process.stdout.write(`${JSON.stringify(report)}\n`);

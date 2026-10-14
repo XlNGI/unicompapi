@@ -193,8 +193,8 @@ export interface DocumentGenerationProgressEvent {
     readonly pageNumber?: number;
     readonly pageRole?: 'hero' | 'statement' | 'comparison' | 'metric' | 'process' | 'evidence' | 'section' | 'content' | 'closing';
     readonly pageIntentDigest?: string;
-    readonly composition?: 'single-focus' | 'comparison' | 'evidence-led' | 'sequence' | 'structured';
-    readonly selectedLayout?: 'weighted-regions' | 'adaptive-grid' | 'flow-track';
+    readonly composition?: 'single-focus' | 'comparison' | 'evidence-led' | 'sequence' | 'structured' | 'authored';
+    readonly selectedLayout?: 'weighted-regions' | 'adaptive-grid' | 'flow-track' | 'design-tree';
     readonly elementCount?: number;
     readonly density?: 'sparse' | 'balanced' | 'dense';
     readonly whitespace?: 'minimal' | 'balanced' | 'generous';
@@ -290,6 +290,7 @@ export interface DocumentGenerationExecutionInput {
 }
 
 export interface DocumentGenerationExecutionResult {
+  readonly presentationDesign?: { readonly path: 'design-aware' | 'legacy-fallback'; readonly fallbackReason?: string };
   readonly taskId: TaskId;
   readonly executionId: ExecutionId;
   readonly workId: WorkId;

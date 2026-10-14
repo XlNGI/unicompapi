@@ -53,8 +53,8 @@ export interface ProductionEventFacts {
   readonly pageRole?: 'hero' | 'statement' | 'comparison' | 'metric' | 'process' | 'evidence' | 'section' | 'content' | 'closing';
   readonly pageIntentDigest?: string;
   readonly pageIntent?: string;
-  readonly composition?: 'single-focus' | 'comparison' | 'evidence-led' | 'sequence' | 'structured';
-  readonly selectedLayout?: 'weighted-regions' | 'adaptive-grid' | 'flow-track';
+  readonly composition?: 'single-focus' | 'comparison' | 'evidence-led' | 'sequence' | 'structured' | 'authored';
+  readonly selectedLayout?: 'weighted-regions' | 'adaptive-grid' | 'flow-track' | 'design-tree';
   readonly density?: 'sparse' | 'balanced' | 'dense';
   readonly whitespace?: 'minimal' | 'balanced' | 'generous';
   readonly primaryRegion?: 'left' | 'center' | 'right' | 'top' | 'bottom' | 'leading' | 'trailing' | 'supporting';
@@ -126,8 +126,8 @@ export function parseProductionEventFacts(input: unknown): ProductionEventFacts 
     renderPlanStatus: ['valid', 'invalid', 'skipped'],
     repairAction: ['reduce_gap', 'rebalance_regions', 'reduce_font_size', 'compatible_composition'],
     pageRole: ['hero', 'statement', 'comparison', 'metric', 'process', 'evidence', 'section', 'content', 'closing'],
-    composition: ['single-focus', 'comparison', 'evidence-led', 'sequence', 'structured'],
-    selectedLayout: ['weighted-regions', 'adaptive-grid', 'flow-track'],
+    composition: ['single-focus', 'comparison', 'evidence-led', 'sequence', 'structured', 'authored'],
+    selectedLayout: ['weighted-regions', 'adaptive-grid', 'flow-track', 'design-tree'],
     density: ['sparse', 'balanced', 'dense'],
     whitespace: ['minimal', 'balanced', 'generous'],
     primaryRegion: ['left', 'center', 'right', 'top', 'bottom', 'leading', 'trailing', 'supporting']

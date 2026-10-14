@@ -176,7 +176,8 @@ describe('real canonical repository outbox to public production trace', () => {
     expect([...timeline.timelineByMessage.keys()]).toEqual(['assistant-outbox']);
     const html = renderToStaticMarkup(createElement(DocumentProgress, { detail: '执行中',
       events: timeline.timelineByMessage.get('assistant-outbox'), requestBySource: timeline.requestBySource }));
-    expect(html.match(/<li /g)).toHaveLength(1);
+    expect(html.match(/<li [^>]*data-event-code=/g)).toHaveLength(1);
+    expect(html).toContain('aria-label="执行概览"');
     expect(html).toContain('已接收 42 字符');
     expect(JSON.stringify(trace)).not.toContain(requestHash);
     expect(JSON.stringify(trace)).not.toMatch(/requestHash|requestBody|prompt|token|credential|rootDirectory|C:\\/);

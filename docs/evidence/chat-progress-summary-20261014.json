@@ -1,0 +1,186 @@
+{
+  "schemaVersion": 1,
+  "date": "2026-10-14",
+  "branch": "feature/chat-progress-summary",
+  "base": "develop@4692337",
+  "scope": "对话消息内生产进度展示维护；不修改 Host 执行、费用、权限或正式作品登记门禁。",
+  "changes": [
+    "仅从已发生事件投影最多五类进度环节，合并重复权限校验和模型交互。",
+    "详细执行记录保留在第二层原生折叠区，限制高度并支持滚动、键盘及开发者事实查看。",
+    "请求发送完成、权限校验完成不会冒充内容或文档制作完成；缺少完成记录的终态步骤显示已结束。",
+    "没有保存动作时仅显示检查文件；实际保存事件出现后显示检查与保存。",
+    "详细记录的进度合并保留 trace、source、run、operation 与 tool 边界。",
+    "测试夹具补齐当前 getPendingWorkflow 读取合同，未修改生产工作流代码。"
+  ],
+  "checks": {
+    "typecheck": {
+      "command": "pnpm typecheck",
+      "status": "passed"
+    },
+    "lint": {
+      "command": "pnpm lint",
+      "status": "passed"
+    },
+    "build": {
+      "command": "pnpm build",
+      "status": "passed",
+      "warnings": [
+        "既有 Vite CJS Node API 弃用提示",
+        "既有大 chunk 提示"
+      ]
+    },
+    "platformAudit": {
+      "command": "pnpm audit:platform",
+      "status": "passed",
+      "violations": 0
+    },
+    "vitest": {
+      "command": "pnpm exec vitest run tests/application/chat-production-timeline.test.tsx tests/application/document-body-preview.test.ts tests/application/virtual-message-list.test.tsx tests/application/streaming-text.test.ts",
+      "status": "passed",
+      "files": 4,
+      "tests": 59
+    },
+    "uiContract": {
+      "command": "node --test tests/ui/chat-document-ui-contract.test.mjs",
+      "status": "passed",
+      "tests": 18
+    },
+    "renderer": {
+      "command": "pnpm exec electron scripts/verify-chat-production-progress-electron.cjs --progress-summary",
+      "status": "passed",
+      "scope": "Real ChatPage/DocumentProgress in isolated Electron; synthetic IPC, HTTP(S) denied, no model calls",
+      "layouts": [
+        {
+          "width": 1280,
+          "theme": "light",
+          "panelWidth": 600,
+          "panelHeight": 310.9375,
+          "phaseTitles": [
+            "准备任务",
+            "生成内容",
+            "制作文档",
+            "检查与保存"
+          ],
+          "statuses": [
+            "completed",
+            "completed",
+            "completed",
+            "completed"
+          ],
+          "rawRows": 58,
+          "rawVisible": false,
+          "overflow": false,
+          "composerTop": 702,
+          "panelBottom": 422.53125
+        },
+        {
+          "width": 800,
+          "theme": "light",
+          "panelWidth": 600,
+          "panelHeight": 310.9375,
+          "phaseTitles": [
+            "准备任务",
+            "生成内容",
+            "制作文档",
+            "检查与保存"
+          ],
+          "statuses": [
+            "completed",
+            "completed",
+            "completed",
+            "completed"
+          ],
+          "rawRows": 58,
+          "rawVisible": false,
+          "overflow": false,
+          "composerTop": 702,
+          "panelBottom": 422.53125
+        },
+        {
+          "width": 540,
+          "theme": "dark",
+          "panelWidth": 497,
+          "panelHeight": 310.9375,
+          "phaseTitles": [
+            "准备任务",
+            "生成内容",
+            "制作文档",
+            "检查与保存"
+          ],
+          "statuses": [
+            "completed",
+            "completed",
+            "completed",
+            "completed"
+          ],
+          "rawRows": 58,
+          "rawVisible": false,
+          "overflow": false,
+          "composerTop": 702,
+          "panelBottom": 422.53125
+        },
+        {
+          "width": 340,
+          "theme": "light",
+          "panelWidth": 297,
+          "panelHeight": 310.9375,
+          "phaseTitles": [
+            "准备任务",
+            "生成内容",
+            "制作文档",
+            "检查与保存"
+          ],
+          "statuses": [
+            "completed",
+            "completed",
+            "completed",
+            "completed"
+          ],
+          "rawRows": 58,
+          "rawVisible": false,
+          "overflow": false,
+          "composerTop": 702,
+          "panelBottom": 422.53125
+        }
+      ],
+      "streamUpdates": 25,
+      "disclosureAndBodyRetained": true,
+      "recordsScrollableAndKeyboardFocusable": true,
+      "keyboardDisclosureVerified": true,
+      "failedAndCancelledStatesVerified": true,
+      "errors": [],
+      "blockedRequests": []
+    }
+  },
+  "existingExtendedFailures": [
+    {
+      "command": "pnpm exec electron scripts/verify-chat-production-progress-electron.cjs",
+      "assertion": "ordinary chat keeps its normal reply without a second generated-body panel",
+      "actual": 1,
+      "expected": 0,
+      "baselineReproduced": true
+    },
+    {
+      "command": "pnpm exec electron scripts/verify-chat-production-progress-electron.cjs --stream-stability --strict-mode",
+      "assertion": "文档流终态进入本地生成后，生成正文 DOM 节点身份保持不变",
+      "actual": false,
+      "expected": true,
+      "baselineReproduced": true
+    }
+  ],
+  "baselineComparison": "使用 git show 4692337:src/pages/chat/DocumentProgress.tsx 提取修改前组件，仅适配相对 import，再通过隔离 Vite alias 替换当前进度组件；其余代码、补齐合同后的夹具与断言保持一致，以上两项失败均复现。",
+  "artifacts": {
+    "report": "outputs/chat-production-progress/summary/report.json",
+    "detail": "outputs/chat-production-progress/summary/summary-detail.png",
+    "light": "outputs/chat-production-progress/summary/summary-1280-light.png",
+    "dark": "outputs/chat-production-progress/summary/summary-540-dark.png",
+    "narrow": "outputs/chat-production-progress/summary/summary-340-light.png"
+  },
+  "limitations": [
+    "隔离验收使用真实 ChatPage/DocumentProgress 和 Electron renderer，IPC 与进度事件为合成数据，未执行完整 AppLayout/preload/Host 端到端链路。",
+    "540px 与 340px 为聊天组件宿主宽度验证，不改变生产外壳最小宽度。",
+    "未执行全仓 Vitest；既有长流程脚本仍有上述失败，不宣称全链路或全量全绿。",
+    "未读取凭证、调用真实 Provider、产生外部请求或生成真实 Office 文件；未运行 macOS 实机。",
+    "下一步可独立排查普通回复生成正文面板与流式终态正文重挂断言，不将该范围纳入本次进度展示改动。"
+  ]
+}
