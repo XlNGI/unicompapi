@@ -1,0 +1,321 @@
+{
+  "canvas": {
+    "height": 7.5,
+    "width": 13.333
+  },
+  "compatibility": {
+    "origin": "solver"
+  },
+  "diagnostics": [],
+  "identity": {
+    "contentDigest": "6b72b38b81b99264797f0812b87e62f4c5c468778b9a0b14097d38716b35b39f",
+    "contentLineageId": "content",
+    "contentRevision": 1,
+    "designDigest": "f6b41be604016f0d52dd250c33d65cf2258f755eac48c6be6ecf8f29d28e54c6",
+    "layoutDigest": "738366144057b8c2d2ef9caa443648f54deba18b99f30e4c44eafb93e52b9ebb",
+    "layoutId": "layout-b09c7d54e7dd3d63683312b9913f78ac"
+  },
+  "minimumFontSize": 14,
+  "pages": [
+    {
+      "backgroundColor": "07111F",
+      "elements": [
+        {
+          "elementId": "element-64a446d2dae10eef6dc2d3fc869d32da",
+          "geometry": {
+            "height": 5.2914,
+            "width": 10.5331,
+            "x": 1.4,
+            "y": 0.7875
+          },
+          "source": {
+            "kind": "content",
+            "ref": "content:a9"
+          },
+          "style": {
+            "alignment": "center",
+            "bold": true,
+            "charSpacing": 0,
+            "color": "F5FAFF",
+            "fontFamily": "Microsoft YaHei",
+            "fontSize": 40,
+            "fontWeight": 700,
+            "lineSpacingMultiple": 1.2,
+            "verticalAlignment": "middle"
+          },
+          "type": "text",
+          "zIndex": 0
+        },
+        {
+          "elementId": "element-cfc0fa71137fd9bb480432841140c3d1",
+          "geometry": {
+            "height": 0.18,
+            "width": 0.45,
+            "x": 11.483035000000001,
+            "y": 6.532500000000001
+          },
+          "source": {
+            "key": "page-number",
+            "kind": "generated"
+          },
+          "style": {
+            "alignment": "right",
+            "bold": false,
+            "charSpacing": 0,
+            "color": "B7C9DC",
+            "fontFamily": "Microsoft YaHei",
+            "fontSize": 10,
+            "fontWeight": 400,
+            "lineSpacingMultiple": 1.2,
+            "verticalAlignment": "middle"
+          },
+          "type": "text",
+          "zIndex": 1
+        }
+      ],
+      "pageId": "page-fb2216495ce4d0e742baad965ce42ea6",
+      "pageNumber": 1,
+      "pageRole": "hero",
+      "source": {
+        "key": "cover",
+        "kind": "system"
+      }
+    },
+    {
+      "backgroundColor": "07111F",
+      "elements": [
+        {
+          "elementId": "element-e7aeca57585c0e9211a044ac035f7c5f",
+          "geometry": {
+            "height": 4.6003,
+            "width": 5.0357,
+            "x": 7.364,
+            "y": 1.9147
+          },
+          "source": {
+            "aspectRatio": 1.5,
+            "assetDigest": "f33acdfde287e49c1452a4778dfafbeb636d03f4d06f55447cbf599f2ce4ffdc",
+            "assetKey": "image-1",
+            "imageFit": "cover",
+            "imageMask": "ellipse",
+            "key": "asset-image",
+            "kind": "generated"
+          },
+          "style": {
+            "alignment": "left",
+            "bold": false,
+            "color": "35D6C8",
+            "fontFamily": "Microsoft YaHei",
+            "fontSize": 14,
+            "verticalAlignment": "top"
+          },
+          "type": "image",
+          "zIndex": 0
+        },
+        {
+          "elementId": "element-43f3e8b5e3d960651ffae7c6f421895a",
+          "geometry": {
+            "height": 1.1501,
+            "width": 11.4664,
+            "x": 0.9333,
+            "y": 0.525
+          },
+          "source": {
+            "kind": "content",
+            "ref": "content:a8"
+          },
+          "style": {
+            "alignment": "left",
+            "bold": true,
+            "charSpacing": 0,
+            "color": "F5FAFF",
+            "fontFamily": "Microsoft YaHei",
+            "fontSize": 34,
+            "fontWeight": 700,
+            "lineSpacingMultiple": 1.2,
+            "verticalAlignment": "top"
+          },
+          "type": "text",
+          "zIndex": 1
+        },
+        {
+          "elementId": "element-cbac02395ce054fd7dd1541175f0a757",
+          "geometry": {
+            "height": 1.4108,
+            "width": 6.1547,
+            "x": 0.9333,
+            "y": 1.9147
+          },
+          "source": {
+            "kind": "content",
+            "ref": "content:a2"
+          },
+          "style": {
+            "alignment": "left",
+            "bold": false,
+            "charSpacing": 0,
+            "color": "35D6C8",
+            "fontFamily": "Microsoft YaHei",
+            "fontSize": 30,
+            "fontWeight": 400,
+            "lineSpacingMultiple": 1.2,
+            "verticalAlignment": "top"
+          },
+          "type": "text",
+          "zIndex": 2
+        },
+        {
+          "elementId": "element-56bc30d4387c2f5bb9c3b4f89eebfb5f",
+          "geometry": {
+            "height": 1.4108,
+            "width": 6.1547,
+            "x": 0.9333,
+            "y": 3.5095
+          },
+          "source": {
+            "kind": "content",
+            "ref": "content:a4"
+          },
+          "style": {
+            "alignment": "left",
+            "bold": false,
+            "charSpacing": 0,
+            "color": "F5FAFF",
+            "fontFamily": "Microsoft YaHei",
+            "fontSize": 24,
+            "fontWeight": 400,
+            "lineSpacingMultiple": 1.2,
+            "verticalAlignment": "top"
+          },
+          "type": "text",
+          "zIndex": 3
+        },
+        {
+          "elementId": "element-7eab1a45257b533f59a685880e4f25af",
+          "geometry": {
+            "height": 1.4108,
+            "width": 6.1547,
+            "x": 0.9333,
+            "y": 5.1042
+          },
+          "source": {
+            "kind": "content",
+            "ref": "content:a6"
+          },
+          "style": {
+            "alignment": "left",
+            "bold": false,
+            "charSpacing": 0,
+            "color": "F5FAFF",
+            "fontFamily": "Microsoft YaHei",
+            "fontSize": 24,
+            "fontWeight": 400,
+            "lineSpacingMultiple": 1.2,
+            "verticalAlignment": "top"
+          },
+          "type": "text",
+          "zIndex": 4
+        },
+        {
+          "elementId": "element-49cf48fde71d9b7bb88b8465cd92a274",
+          "geometry": {
+            "height": 0.18,
+            "width": 0.45,
+            "x": 11.94969,
+            "y": 6.795
+          },
+          "source": {
+            "key": "page-number",
+            "kind": "generated"
+          },
+          "style": {
+            "alignment": "right",
+            "bold": false,
+            "charSpacing": 0,
+            "color": "B7C9DC",
+            "fontFamily": "Microsoft YaHei",
+            "fontSize": 10,
+            "fontWeight": 400,
+            "lineSpacingMultiple": 1.2,
+            "verticalAlignment": "middle"
+          },
+          "type": "text",
+          "zIndex": 5
+        }
+      ],
+      "pageId": "page-ca6c2bb048aa9e78a34fcd852de19372",
+      "pageNumber": 2,
+      "pageRole": "content",
+      "source": {
+        "kind": "content",
+        "sectionId": "content:a1"
+      }
+    },
+    {
+      "backgroundColor": "07111F",
+      "elements": [
+        {
+          "elementId": "element-5b4baad9a3213cc1f28ec3001334cdb1",
+          "geometry": {
+            "height": 5.2914,
+            "width": 10.5331,
+            "x": 1.4,
+            "y": 0.7875
+          },
+          "source": {
+            "kind": "content",
+            "ref": "content:a9"
+          },
+          "style": {
+            "alignment": "center",
+            "bold": true,
+            "charSpacing": 0,
+            "color": "F5FAFF",
+            "fontFamily": "Microsoft YaHei",
+            "fontSize": 40,
+            "fontWeight": 700,
+            "lineSpacingMultiple": 1.2,
+            "verticalAlignment": "middle"
+          },
+          "type": "text",
+          "zIndex": 0
+        },
+        {
+          "elementId": "element-288961354f81cfd4a00194ff55cb90bb",
+          "geometry": {
+            "height": 0.18,
+            "width": 0.45,
+            "x": 11.483035000000001,
+            "y": 6.532500000000001
+          },
+          "source": {
+            "key": "page-number",
+            "kind": "generated"
+          },
+          "style": {
+            "alignment": "right",
+            "bold": false,
+            "charSpacing": 0,
+            "color": "B7C9DC",
+            "fontFamily": "Microsoft YaHei",
+            "fontSize": 10,
+            "fontWeight": 400,
+            "lineSpacingMultiple": 1.2,
+            "verticalAlignment": "middle"
+          },
+          "type": "text",
+          "zIndex": 1
+        }
+      ],
+      "pageId": "page-46443f5d932fd12a6246aaa79f3441e6",
+      "pageNumber": 3,
+      "pageRole": "closing",
+      "source": {
+        "key": "closing",
+        "kind": "system"
+      }
+    }
+  ],
+  "repairs": [],
+  "schemaVersion": 1
+}

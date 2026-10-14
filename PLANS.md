@@ -1,5 +1,19 @@
 # UniComp 开发计划
 
+### 维护扩展：LLM 自主设计与系统忠实执行（2026-10-14；Windows 自动、本地 Office 与隔离 Electron 验收通过）
+
+负责人明确要求“先不要优化模板，我要的是 llm 的自主设计，系统根据设计实现”，并授权实施、做好实施记录。本轮属于既有 PPT 生成链路维护扩展，从 `develop@4692337` 在隔离工作树建立 `feature/llm-autonomous-design`；原 `feature/chat-progress-summary` 工作区及未提交改动保留。依据负责人最新要求、AGENTS.md、本文件顶部维护事实与当前源码；不依据历史阶段状态推进。
+
+实施范围：唯一生产 Design IR v2 的版本化可选设计树、Application/Provider 规划合同、约束求解、元素样式和受控本地图片绑定、Production Layout IR/Render Plan/PPTX writer、设计执行检查及有限修正、相关测试和工程证据。不修改模板定义或权威交接原件。按基础自主构图、元素/素材表达、反馈与修正三个可审阅增量推进；新能力必须贯通真实生产文件路径，不能只扩展字段。取消/时间/费用继续使用现有 Host 预算；未经本轮明确授权不发起真实收费 Provider 或外部搜索请求。
+
+实际交付：Design IR v2 增加唯一的受控 `designTree`，模型决定行列/网格/锚定构图、区域权重、嵌套、跨栏、元素样式、原文范围强调、四种图表表现、本地图片的 contain/cover 和椭圆遮罩；Host 校验引用/预算、求解几何，再持久化到唯一 Production Layout IR。新自主规划必须逐页提供设计树；无效或无法执行的设计拒绝发布，不自动换成模板。旧 v2 通过已提供的设计或 Host 显式兼容模式保留。显式设计不被本地兼容构图修复替换；编译与渲染反馈共用最多两次模型修正，校验全篇设计与非目标页不变。设计投影检查、候选 Hash/父链、封面/结尾目标身份、QA 收据与 Work 登记继续闭合。没有修改模板定义。
+
+验证：最终类型检查、全仓 lint、真实生产构建、平台审计通过；Node/UI 401/401，串行全量 Vitest 348 文件、3612/3612，合计 4013 项，0 失败/跳过。新增自主设计定向测试 31 项。首次全量为 3597/3612，8 失败、7 环境跳过；保留原日志，按新合同修订旧预算/不支持类型断言、检查实际图表 XML 文件名，并把既有开发媒体工具以忽略目录链接接入隔离工作树。没有删测试、放宽旧时限或降低门禁。定向复核 124/124 后重跑完整全量通过。
+
+编译后的生产 Runner 三组同内容案例（65/35 嵌套、跨栏网格、图片裁切/椭圆遮罩）分别完成 3 页真实 PPTX、PDF、PNG、QA 和唯一 Work 登记，几何错误均 0；计划、Layout IR、Hash 和设计执行收据均可复核。65/35 案例保留一条元素占用率 warning，不解释为审美失败或通过。真实 Electron/BrowserWindow/preload/IPC 的受控 Mock 验收通过，1 次 Art Direction 到达已登记 PPT 的生产计划，3 页设计执行检查通过，PPT/Word/Excel 文件与 Thread 收据闭合；7 次进程内 Mock 请求、真实 Provider 外发 0，关闭后本轮 Electron 残留 0。
+
+实施提交：`82c2d98`（设计树/视觉执行），`01e5f4d`（自主规划/有限修正）；工程记录和证据另存一个本地提交。全部保留在 `feature/llm-autonomous-design`，未推送、合入 develop/main、发布或重启用户应用。三组案例与 Provider 输出均为离线合成夹具，不宣称真实 LLM 审美表现；多模态视觉审核、跨页拆并/重排、字体嵌入、复杂 SVG/阴影/动画以及 macOS 实机未实施或未验收。实际范围、失败复核与后续建议见 [实施记录](docs/current/llm-autonomous-design-implementation-20261014.md) 和 [验收汇总](docs/evidence/llm-autonomous-design-20261014/validation.json)。
+
 ### 负责人决定：以当前功能分支内容覆盖 develop（2026-10-14）
 
 负责人在查看双向差异后明确要求“将当前分支覆盖develop”。本轮以 `feature/office-agent-item-stream` 的已提交内容及当前工作区为最终内容来源，纳入 Thread 流式渲染、页面恢复和 20 个 PPT 审计证据文件。覆盖前来源 HEAD 为 `5d90d0e`，本地及刷新后的远程 develop 均为 `f8e4a19`。采用保留双方历史的 ours 策略合并，再让 develop 快进到同一提交并正常推送；保留功能分支，不删除原提交，不使用强制推送。实际交付结果以本地和远程引用核对为准。

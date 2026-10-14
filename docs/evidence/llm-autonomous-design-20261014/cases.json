@@ -1,0 +1,84 @@
+{
+  "schemaVersion": 1,
+  "date": "2026-10-14",
+  "status": "passed",
+  "modelOutput": "synthetic offline planner fixtures",
+  "boundary": "compiled production Runner -> admitted Design IR -> Layout IR -> real PPTX -> native Office/PDF QA -> hash/publication/Work",
+  "cases": [
+    {
+      "name": "split-65-35",
+      "pages": 3,
+      "plannerRequests": 1,
+      "externalRequests": 0,
+      "execution": "completed",
+      "workCount": 1,
+      "fileHash": "225ed442216974d1dfa76dd9aab687a5989a9ff855919fba3956f2816efc9f61",
+      "geometryErrors": 0,
+      "qaOutcome": "passed",
+      "designExecution": {
+        "status": "passed",
+        "authoredPageCount": 3,
+        "nodeCount": 11,
+        "verifiedElementCount": 10
+      },
+      "visualAudit": {
+        "status": "warning",
+        "multimodalReview": "not_available",
+        "diagnostics": [
+          {
+            "code": "visual_crowded_page",
+            "severity": "warning",
+            "pageNumber": 2,
+            "message": "Element occupancy leaves little safe whitespace"
+          }
+        ]
+      }
+    },
+    {
+      "name": "editorial-grid",
+      "pages": 3,
+      "plannerRequests": 1,
+      "externalRequests": 0,
+      "execution": "completed",
+      "workCount": 1,
+      "fileHash": "88708339680dbf7d07271df26fccd67918e97aac131b5b075d8ae3d8130568bd",
+      "geometryErrors": 0,
+      "qaOutcome": "passed",
+      "designExecution": {
+        "status": "passed",
+        "authoredPageCount": 3,
+        "nodeCount": 10,
+        "verifiedElementCount": 10
+      },
+      "visualAudit": {
+        "status": "passed",
+        "multimodalReview": "not_available",
+        "diagnostics": []
+      }
+    },
+    {
+      "name": "image-composition",
+      "pages": 3,
+      "plannerRequests": 1,
+      "externalRequests": 0,
+      "execution": "completed",
+      "workCount": 1,
+      "fileHash": "abb3c751558b883c8848bf81908166601084e1c66d68ede3b257e9b25c3bedd3",
+      "geometryErrors": 0,
+      "qaOutcome": "passed",
+      "designExecution": {
+        "status": "passed",
+        "authoredPageCount": 3,
+        "nodeCount": 12,
+        "verifiedElementCount": 10
+      },
+      "visualAudit": {
+        "status": "passed",
+        "multimodalReview": "not_available",
+        "diagnostics": []
+      }
+    }
+  ],
+  "externalProviderCalls": 0,
+  "subjectiveMultimodalReview": "not_available"
+}
