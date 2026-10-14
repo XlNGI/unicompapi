@@ -49,6 +49,44 @@ export type PresentationFlow = (typeof presentationFlows)[number];
 export const presentationEmphasisStrengths = ['subtle', 'moderate', 'strong', 'dominant'] as const;
 export type PresentationEmphasisStrength = (typeof presentationEmphasisStrengths)[number];
 
+/** Small, composable visual primitives. They extend v2 without introducing a second IR. */
+export const presentationSurfaceTreatments = ['flat', 'card', 'outlined'] as const;
+export type PresentationSurfaceTreatment = (typeof presentationSurfaceTreatments)[number];
+export const presentationAccentTreatments = ['none', 'rule', 'edge'] as const;
+export type PresentationAccentTreatment = (typeof presentationAccentTreatments)[number];
+export const presentationVisualComponents = ['none', 'nodes', 'track', 'frame'] as const;
+export type PresentationVisualComponent = (typeof presentationVisualComponents)[number];
+
+export interface PresentationDesignPalette {
+  readonly background: string;
+  readonly surface: string;
+  readonly text: string;
+  readonly muted: string;
+  readonly accent: string;
+  readonly secondaryAccent: string;
+}
+
+export interface PresentationDesignTypography {
+  readonly displayScale: number;
+  readonly bodyScale: number;
+  readonly displayWeight: number;
+  readonly bodyWeight: number;
+  readonly lineSpacing: number;
+  readonly charSpacing: number;
+}
+
+export interface PresentationDesignVisualSystem {
+  readonly palette?: PresentationDesignPalette;
+  readonly typography?: PresentationDesignTypography;
+}
+
+export interface PresentationDesignVisualTreatment {
+  readonly surface: PresentationSurfaceTreatment;
+  readonly accent: PresentationAccentTreatment;
+  /** Generic visual primitive intent; it is not a page template or geometry. */
+  readonly component?: PresentationVisualComponent;
+}
+
 export interface PresentationDesignGlobal {
   readonly visualTone: PresentationDesignTone;
   readonly visualRhythm: PresentationDesignRhythm;
@@ -56,6 +94,8 @@ export interface PresentationDesignGlobal {
   readonly whitespace: PresentationDesignWhitespace;
   readonly typographyDirection: PresentationTypographyDirection;
   readonly colorDirection: PresentationColorDirection;
+  /** Optional model-selected tokens; absent means the selected host template tokens. */
+  readonly visualSystem?: PresentationDesignVisualSystem;
 }
 
 export interface PresentationDesignHierarchy {
@@ -97,6 +137,8 @@ export interface PresentationDesignIRPage {
   readonly emphasis: PresentationDesignEmphasis;
   readonly contentRoles: PresentationDesignContentRoles;
   readonly visualStrategy: string;
+  /** Optional page-local treatment; layout remains semantic and host-computed. */
+  readonly visualTreatment?: PresentationDesignVisualTreatment;
   readonly organization?: PresentationContentOrganizationV1;
 }
 
@@ -377,7 +419,8 @@ export function buildPresentationArtDirectionPrompt(input: PresentationArtDirect
     `Allowed colorDirection: ${presentationColorDirections.join(', ')}.`,
     `Allowed pageRole: ${presentationPageRoles.join(', ')}.`,
     `Allowed composition principle: ${presentationCompositionPrinciples.join(', ')}; focalArea: ${presentationFocalAreas.join(', ')}; balance: ${presentationBalances.join(', ')}; flow: ${presentationFlows.join(', ')}.`,
-    `Allowed emphasis strength: ${presentationEmphasisStrengths.join(', ')}.`,
+    `Allowed emphasis strength: ${presentationEmphasisStrengths.join(', ')}; surface: ${presentationSurfaceTreatments.join(', ')}; accent: ${presentationAccentTreatments.join(', ')}; component: ${presentationVisualComponents.join(', ')}.`,
+    'Use visualSystem when the user asks for a deliberate palette or typography system; use visualTreatment for a page-local surface/accent treatment. Do not emit coordinates.',
     'Hierarchy primary must contain at least one reference; hierarchy arrays must be disjoint.',
     'Keep pageIntent and visualStrategy concise (600 characters maximum each).',
     'Include organization schemaVersion 1 for each page: layout comparison, metrics, sequence, evidence, or grouped; explicit page-local business groups and compare, sequence, or supports relationships.',
@@ -408,14 +451,31 @@ export function buildPresentationDesignIRJsonSchema(): Record<string, unknown> {
     density: enumeration(presentationDesignDensities), whitespace: enumeration(presentationDesignWhitespaces),
     emphasis: object({ target: ref, strength: enumeration(presentationEmphasisStrengths) }),
     contentRoles: object(Object.fromEntries(roleKeys.map(role => [role, refList]))), visualStrategy: text,
+    visualTreatment: { type: 'object', additionalProperties: false,
+      required: ['surface', 'accent'], properties: { surface: enumeration(presentationSurfaceTreatments), accent: enumeration(presentationAccentTreatments),
+        component: enumeration(presentationVisualComponents) } },
     organization: buildPresentationContentOrganizationJsonSchema()
   });
-  page.required = page.required.filter(field => field !== 'organization');
+  page.required = page.required.filter(field => field !== 'visualTreatment' && field !== 'organization');
   const globalDesign = object({
     visualTone: enumeration(presentationDesignTones), visualRhythm: enumeration(presentationDesignRhythms),
     density: enumeration(presentationDesignDensities), whitespace: enumeration(presentationDesignWhitespaces),
-    typographyDirection: enumeration(presentationTypographyDirections), colorDirection: enumeration(presentationColorDirections)
+    typographyDirection: enumeration(presentationTypographyDirections), colorDirection: enumeration(presentationColorDirections),
+    visualSystem: { type: 'object', additionalProperties: false, required: [], properties: {
+      palette: { type: 'object', additionalProperties: false,
+        required: ['background', 'surface', 'text', 'muted', 'accent', 'secondaryAccent'],
+        properties: Object.fromEntries(['background', 'surface', 'text', 'muted', 'accent', 'secondaryAccent']
+          .map(key => [key, { type: 'string', pattern: '^[0-9A-Fa-f]{6}$' }])) },
+      typography: { type: 'object', additionalProperties: false,
+        required: ['displayScale', 'bodyScale', 'displayWeight', 'bodyWeight', 'lineSpacing', 'charSpacing'],
+        properties: {
+          displayScale: { type: 'number', minimum: 0.75, maximum: 1.5 }, bodyScale: { type: 'number', minimum: 0.75, maximum: 1.5 },
+          displayWeight: { type: 'integer', minimum: 400, maximum: 900 }, bodyWeight: { type: 'integer', minimum: 300, maximum: 700 },
+          lineSpacing: { type: 'number', minimum: 1, maximum: 2 }, charSpacing: { type: 'number', minimum: -2, maximum: 8 }
+        } }
+    } }
   });
+  globalDesign.required = globalDesign.required.filter(field => field !== 'visualSystem');
   return {
     ...object({ schemaVersion: { const: 2 }, globalDesign, pages: { type: 'array', minItems: 1, maxItems: MAX_PAGES, items: page } })
   };
@@ -527,20 +587,59 @@ function parseDesignIRObject(value: unknown, diagnostics: PresentationDesignIRDi
 
 function parseGlobal(value: unknown, diagnostics: PresentationDesignIRDiagnostic[]): PresentationDesignGlobal | undefined {
   if (!isRecord(value)) { diagnostics.push(error('invalid_shape', '$.globalDesign', 'globalDesign must be an object')); return undefined; }
-  checkKeys(value, ['visualTone', 'visualRhythm', 'density', 'whitespace', 'typographyDirection', 'colorDirection'], '$.globalDesign', diagnostics);
+  checkKeys(value, ['visualTone', 'visualRhythm', 'density', 'whitespace', 'typographyDirection', 'colorDirection', 'visualSystem'], '$.globalDesign', diagnostics, ['visualSystem']);
   const visualTone = enumValue(value.visualTone, presentationDesignTones, '$.globalDesign.visualTone', diagnostics);
   const visualRhythm = enumValue(value.visualRhythm, presentationDesignRhythms, '$.globalDesign.visualRhythm', diagnostics);
   const density = enumValue(value.density, presentationDesignDensities, '$.globalDesign.density', diagnostics);
   const whitespace = enumValue(value.whitespace, presentationDesignWhitespaces, '$.globalDesign.whitespace', diagnostics);
   const typographyDirection = enumValue(value.typographyDirection, presentationTypographyDirections, '$.globalDesign.typographyDirection', diagnostics);
   const colorDirection = enumValue(value.colorDirection, presentationColorDirections, '$.globalDesign.colorDirection', diagnostics);
-  if ([visualTone, visualRhythm, density, whitespace, typographyDirection, colorDirection].some(value => value === undefined)) return undefined;
-  return { visualTone: visualTone!, visualRhythm: visualRhythm!, density: density!, whitespace: whitespace!, typographyDirection: typographyDirection!, colorDirection: colorDirection! };
+  const visualSystem = value.visualSystem === undefined ? undefined : parseVisualSystem(value.visualSystem, '$.globalDesign.visualSystem', diagnostics);
+  if ([visualTone, visualRhythm, density, whitespace, typographyDirection, colorDirection].some(value => value === undefined) || (value.visualSystem !== undefined && visualSystem === undefined)) return undefined;
+  return { visualTone: visualTone!, visualRhythm: visualRhythm!, density: density!, whitespace: whitespace!, typographyDirection: typographyDirection!, colorDirection: colorDirection!, ...(visualSystem ? { visualSystem } : {}) };
+}
+
+function parseVisualSystem(value: unknown, path: string, diagnostics: PresentationDesignIRDiagnostic[]): PresentationDesignVisualSystem | undefined {
+  if (!isRecord(value)) { diagnostics.push(error('invalid_shape', path, 'visualSystem must be an object')); return undefined; }
+  checkKeys(value, ['palette', 'typography'], path, diagnostics, ['palette', 'typography']);
+  let palette: PresentationDesignPalette | undefined;
+  if (value.palette !== undefined) {
+    if (!isRecord(value.palette)) diagnostics.push(error('invalid_shape', `${path}.palette`, 'palette must be an object'));
+    else {
+      const paletteValue = value.palette as Record<string, unknown>;
+      const keys = ['background', 'surface', 'text', 'muted', 'accent', 'secondaryAccent'] as const;
+      checkKeys(paletteValue, keys, `${path}.palette`, diagnostics);
+      if (keys.some(key => typeof paletteValue[key] !== 'string' || !/^[0-9A-F]{6}$/iu.test(paletteValue[key] as string)))
+        diagnostics.push(error('invalid_shape', `${path}.palette`, 'palette colors must be six digit hex values'));
+      else palette = Object.fromEntries(keys.map(key => [key, String(paletteValue[key]).toUpperCase()])) as unknown as PresentationDesignPalette;
+    }
+  }
+  let typography: PresentationDesignTypography | undefined;
+  if (value.typography !== undefined) {
+    if (!isRecord(value.typography)) diagnostics.push(error('invalid_shape', `${path}.typography`, 'typography must be an object'));
+    else {
+      const typographyValue = value.typography as Record<string, unknown>;
+      const keys = ['displayScale', 'bodyScale', 'displayWeight', 'bodyWeight', 'lineSpacing', 'charSpacing'] as const;
+      checkKeys(typographyValue, keys, `${path}.typography`, diagnostics);
+      const valid = Number.isFinite(typographyValue.displayScale) && (typographyValue.displayScale as number) >= 0.75 && (typographyValue.displayScale as number) <= 1.5 &&
+        Number.isFinite(typographyValue.bodyScale) && (typographyValue.bodyScale as number) >= 0.75 && (typographyValue.bodyScale as number) <= 1.5 &&
+        Number.isSafeInteger(typographyValue.displayWeight) && (typographyValue.displayWeight as number) >= 400 && (typographyValue.displayWeight as number) <= 900 &&
+        Number.isSafeInteger(typographyValue.bodyWeight) && (typographyValue.bodyWeight as number) >= 300 && (typographyValue.bodyWeight as number) <= 700 &&
+        Number.isFinite(typographyValue.lineSpacing) && (typographyValue.lineSpacing as number) >= 1 && (typographyValue.lineSpacing as number) <= 2 &&
+        Number.isFinite(typographyValue.charSpacing) && (typographyValue.charSpacing as number) >= -2 && (typographyValue.charSpacing as number) <= 8;
+      if (!valid) diagnostics.push(error('invalid_shape', `${path}.typography`, 'typography values are outside the bounded range'));
+      else typography = { displayScale: typographyValue.displayScale as number, bodyScale: typographyValue.bodyScale as number,
+        displayWeight: typographyValue.displayWeight as number, bodyWeight: typographyValue.bodyWeight as number,
+        lineSpacing: typographyValue.lineSpacing as number, charSpacing: typographyValue.charSpacing as number };
+    }
+  }
+  if (value.palette === undefined && value.typography === undefined) diagnostics.push(error('invalid_shape', path, 'visualSystem must contain palette or typography'));
+  return palette || typography ? { ...(palette ? { palette } : {}), ...(typography ? { typography } : {}) } : undefined;
 }
 
 function parsePage(value: unknown, path: string, diagnostics: PresentationDesignIRDiagnostic[]): PresentationDesignIRPage | undefined {
   if (!isRecord(value)) { diagnostics.push(error('invalid_shape', path, 'page must be an object')); return undefined; }
-  checkKeys(value, ['pageNumber', 'pageRole', 'pageIntent', 'hierarchy', 'composition', 'density', 'whitespace', 'emphasis', 'contentRoles', 'visualStrategy', 'organization'], path, diagnostics, ['organization']);
+  checkKeys(value, ['pageNumber', 'pageRole', 'pageIntent', 'hierarchy', 'composition', 'density', 'whitespace', 'emphasis', 'contentRoles', 'visualStrategy', 'visualTreatment', 'organization'], path, diagnostics, ['visualTreatment', 'organization']);
   if (typeof value.pageNumber !== 'number' || !Number.isSafeInteger(value.pageNumber) || value.pageNumber < 1 || value.pageNumber > MAX_PAGES) diagnostics.push(error('invalid_page_number', `${path}.pageNumber`, 'pageNumber must be a positive bounded integer'));
   const pageRole = enumValue(value.pageRole, presentationPageRoles, `${path}.pageRole`, diagnostics);
   const pageIntent = boundedText(value.pageIntent, `${path}.pageIntent`, diagnostics);
@@ -551,6 +650,7 @@ function parsePage(value: unknown, path: string, diagnostics: PresentationDesign
   const emphasis = parseEmphasis(value.emphasis, `${path}.emphasis`, diagnostics);
   const contentRoles = parseContentRoles(value.contentRoles, `${path}.contentRoles`, diagnostics);
   const visualStrategy = boundedText(value.visualStrategy, `${path}.visualStrategy`, diagnostics);
+  const visualTreatment = parseVisualTreatment(value.visualTreatment, `${path}.visualTreatment`, diagnostics);
   let organization: PresentationContentOrganizationV1 | undefined;
   if (value.organization !== undefined) {
     try { organization = parsePresentationContentOrganization(value.organization); }
@@ -561,9 +661,20 @@ function parsePage(value: unknown, path: string, diagnostics: PresentationDesign
         `${path}.organization${failure?.path.slice(1) ?? ''}`, 'Invalid page content organization'));
     }
   }
-  if (!Number.isInteger(value.pageNumber) || pageRole === undefined || pageIntent === undefined || hierarchy === undefined || composition === undefined || density === undefined || whitespace === undefined || emphasis === undefined || contentRoles === undefined || visualStrategy === undefined) return undefined;
+  if (!Number.isInteger(value.pageNumber) || pageRole === undefined || pageIntent === undefined || hierarchy === undefined || composition === undefined || density === undefined || whitespace === undefined || emphasis === undefined || contentRoles === undefined || visualStrategy === undefined || (value.visualTreatment !== undefined && visualTreatment === undefined)) return undefined;
   return { pageNumber: value.pageNumber as number, pageRole, pageIntent, hierarchy, composition, density, whitespace, emphasis, contentRoles, visualStrategy,
+    ...(visualTreatment ? { visualTreatment } : {}),
     ...(organization ? { organization } : {}) };
+}
+
+function parseVisualTreatment(value: unknown, path: string, diagnostics: PresentationDesignIRDiagnostic[]): PresentationDesignVisualTreatment | undefined {
+  if (value === undefined) return undefined;
+  if (!isRecord(value)) { diagnostics.push(error('invalid_shape', path, 'visualTreatment must be an object')); return undefined; }
+  checkKeys(value, ['surface', 'accent', 'component'], path, diagnostics, ['component']);
+  const surface = enumValue(value.surface, presentationSurfaceTreatments, `${path}.surface`, diagnostics);
+  const accent = enumValue(value.accent, presentationAccentTreatments, `${path}.accent`, diagnostics);
+  const component = value.component === undefined ? undefined : enumValue(value.component, presentationVisualComponents, `${path}.component`, diagnostics);
+  return surface && accent && (value.component === undefined || component !== undefined) ? { surface, accent, ...(component ? { component } : {}) } : undefined;
 }
 
 function parseHierarchy(value: unknown, path: string, diagnostics: PresentationDesignIRDiagnostic[]): PresentationDesignHierarchy | undefined {

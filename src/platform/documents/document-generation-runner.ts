@@ -80,6 +80,7 @@ import { buildDocumentContentSnapshot, documentContentAliases, documentContentSn
   parseDocumentContentSnapshot } from '../../domain/entities/document-content-snapshot';
 import { canonicalizeLayoutJson } from '../../domain/entities/presentation-layout-ir';
 import { persistPreparedPresentationAttempt, persistPresentationAttemptReceipt, type PresentationDesignAttempt } from './presentation-design-attempts';
+import type { ProductionPresentationDesignIR } from '../../domain/entities/presentation-design-contract';
 
 export type DocumentGenerationErrorCode =
   | 'invalid_plan'
@@ -115,6 +116,7 @@ export interface DocumentGenerationPlanInput {
   readonly sourceDraftId: string;
   readonly outline: DocumentOutline;
   readonly documentIR?: DocumentIR;
+  readonly designIR?: ProductionPresentationDesignIR;
   readonly userRequirement?: string;
   readonly requestArtDirection?: PresentationArtDirectionPlanner;
   readonly artDirectionTimeoutMs?: number;
@@ -312,7 +314,7 @@ export class DocumentGenerationRunner {
       if (artDirection) await this.reportProgress(input, { code: 'plan_validation', status: 'completed',
         operationId: artDirection.designIR ? 'presentation-design-validated' : 'presentation-design-fallback',
         facts: { purpose: 'planning', documentKind: 'ppt', count: artDirection.diagnostics.length, artDirectionStatus, designIrStatus } });
-      let currentDesignIR = artDirection?.designIR;
+      let currentDesignIR = input.designIR ?? artDirection?.designIR;
       let repairDiagnostics: readonly DocumentQualityDiagnostic[] = [];
       const supportsLlmRepair = input.kind === 'ppt' && input.requestLlmRepair !== undefined &&
         this.options.renderPreview !== undefined &&

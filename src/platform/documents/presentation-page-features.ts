@@ -396,7 +396,9 @@ function makeElementConstraint(
   const directionScale = global.typographyDirection === 'display-led' && unit.hierarchy === 'primary' ? 1.12
     : global.typographyDirection === 'body-led' && unit.hierarchy === 'supporting' ? 1.08
       : global.typographyDirection === 'data-led' && unit.role === 'metric' ? 1.12 : 1;
-  const preferredFontSize = clamp(fontBase * directionScale * (page.density === 'dense' ? 0.9 : page.density === 'sparse' ? 1.04 : 1), tokens.typography.minimumFontSize, tokens.typography.maximumFontSize);
+  const visualTypography = global.visualSystem?.typography;
+  const visualScale = unit.role === 'title' || unit.hierarchy === 'primary' ? visualTypography?.displayScale ?? 1 : visualTypography?.bodyScale ?? 1;
+  const preferredFontSize = clamp(fontBase * directionScale * visualScale * (page.density === 'dense' ? 0.9 : page.density === 'sparse' ? 1.04 : 1), tokens.typography.minimumFontSize, tokens.typography.maximumFontSize);
   const tableColumnWidths = unit.tableCellWidthsEm?.[0]?.map((_width, columnIndex) => Math.max(...unit.tableCellWidthsEm!.map(row => row[columnIndex] ?? 0)));
   const estimatedSingleLineWidth = unit.role === 'table' && tableColumnWidths
     ? tableColumnWidths.reduce((sum, width) => sum + width, 0) * preferredFontSize / 72 + tableColumnWidths.length * 0.12

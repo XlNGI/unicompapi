@@ -186,6 +186,10 @@ export function registerDocumentGenerationIpcHandlers(options: {
           const source = await new RegisteredPresentationReader({ rootDirectory: session.rootDirectory, projectId: session.projectId }).read(workId, outline);
           return source.map!;
         },
+        loadPresentationProductionPlan: async workId => {
+          const source = await new RegisteredPresentationReader({ rootDirectory: session.rootDirectory, projectId: session.projectId }).readWithProductionPlan(workId);
+          return source.productionPlan?.plan;
+        },
         validatePresentationSelection: presentationScope.validatePresentationSelection,
         canRetryMessage: presentationScope.canRetryMessage,
         generationInputs: new ConversationDocumentInputStore(storage, session.projectId),

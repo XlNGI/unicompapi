@@ -197,7 +197,8 @@ function projectRenderPlan(layout: ProductionPresentationLayoutIR): Presentation
         geometry: element.geometry, style: element.style, zIndex: element.zIndex,
         content: element.type === 'table' ? { type: 'table' as const, header: ['geometry'], rows: [['validation']] }
           : element.type === 'chart' ? { type: 'chart' as const, chartKind: 'bar' as const, data: [{ label: 'geometry', value: 1 }] }
-          : { type: 'text' as const, text: 'geometry validation' }
+            : element.type === 'shape' ? { type: 'shape' as const, shapeKind: 'line' as const }
+              : { type: 'text' as const, text: 'geometry validation' }
       }))
     }))
   };

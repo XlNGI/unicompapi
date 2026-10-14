@@ -19,9 +19,12 @@ function renderElement(slide: PptxGenJS.Slide, element: PresentationRenderPlanEl
       objectName, x, y, w, h,
       fontFace: style.fontFamily,
       fontSize: style.fontSize,
-      bold: style.bold,
+      bold: style.fontWeight === undefined ? style.bold : style.fontWeight >= 600,
+      ...(style.lineSpacingMultiple === undefined ? {} : { lineSpacingMultiple: style.lineSpacingMultiple }),
+      ...(style.charSpacing === undefined ? {} : { charSpacing: style.charSpacing }),
       color: style.color,
       ...(style.fill ? { fill: { color: style.fill } } : {}),
+      ...(style.borderWidth && style.borderColor ? { line: { color: style.borderColor, width: style.borderWidth } } : {}),
       align: style.alignment,
       valign: style.verticalAlignment,
       margin: 0,
@@ -43,7 +46,7 @@ function renderElement(slide: PptxGenJS.Slide, element: PresentationRenderPlanEl
       fontFace: style.fontFamily,
       fontSize: style.fontSize,
       color: style.color,
-      border: { pt: 0.6, color: style.borderColor ?? style.color },
+      border: { pt: style.borderWidth ?? 0.6, color: style.borderColor ?? style.color },
       margin: 0.06,
       valign: style.verticalAlignment,
       autoPage: false,
@@ -70,6 +73,16 @@ function renderElement(slide: PptxGenJS.Slide, element: PresentationRenderPlanEl
       catAxisLabelColor: style.mutedColor ?? style.color,
       valAxisLabelColor: style.mutedColor ?? style.color,
       chartColors: [...(style.chartColors ?? [style.color])]
+    });
+    return;
+  }
+  if (content.type === 'shape') {
+    slide.addShape(content.shapeKind, {
+      objectName, x, y, w, h,
+      ...(content.shapeKind === 'line' ? { line: { color: style.borderColor ?? style.color, width: style.borderWidth ?? 1 } } : {
+        fill: { color: style.fill ?? style.color },
+        line: { color: style.borderColor ?? style.color, width: style.borderWidth ?? 1 }
+      })
     });
     return;
   }

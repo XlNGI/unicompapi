@@ -19,6 +19,7 @@ import { buildPresentationLayoutConstraintModel } from './presentation-page-feat
 import { solvePresentationLayoutWithRepair, type PresentationLayoutPageResult, type PresentationLayoutRepairAction } from './presentation-layout-engine';
 import type { PresentationTemplateTokens } from './presentation-template';
 import { compilePresentationElementStyle, resolvePresentationPageStyle } from './presentation-style-compiler';
+import { auditPresentationRenderPlan, type PresentationVisualAudit } from './presentation-visual-audit';
 import type {
   PresentationDesignCompilationSnapshot as LegacyCompatibleSnapshot,
   PresentationDesignStrategy
@@ -61,6 +62,7 @@ export interface PresentationDesignCompilationSnapshot extends LegacyCompatibleS
   readonly diagnostics: readonly PresentationDesignCompileDiagnostic[];
   readonly strategies: readonly { readonly pageNumber: number; readonly strategy: PresentationDesignStrategy | 'legacy-template' }[];
   readonly pages: readonly PresentationDesignPageSummary[];
+  readonly visualAudit?: PresentationVisualAudit;
 }
 
 export interface PresentationDesignCompilation {
@@ -76,6 +78,7 @@ export interface PresentationDesignCompilation {
   readonly renderPlanStatus: 'valid' | 'invalid' | 'skipped';
   readonly repairCount: number;
   readonly repairs?: readonly { readonly attempt: number; readonly action: PresentationLayoutRepairAction; readonly pages: readonly number[] }[];
+  readonly visualAudit?: PresentationVisualAudit;
 }
 
 export function compilePresentationRenderPlan(
@@ -153,9 +156,10 @@ export function compilePresentationRenderPlan(
       repairs: layout.repairs, diagnostics: layout.diagnostics,
       organizations: layout.pages.flatMap(page => page.contentOrganization ? [{ pageNumber: page.pageNumber, organization: page.contentOrganization }] : []) });
     const plan = derivePresentationRenderPlanFromLayoutIR(layoutIR, contentSnapshot);
+    const visualAudit = auditPresentationRenderPlan(plan);
     return {
       contentSnapshot, designIR, layoutIR, plan, constraints: layout.constraints, features: model.features, layouts: layout.pages,
-      diagnostics: [], layoutStatus: 'success', renderPlanStatus: 'valid', repairCount: layout.repairCount, repairs: layout.repairs
+      diagnostics: [], visualAudit, layoutStatus: 'success', renderPlanStatus: 'valid', repairCount: layout.repairCount, repairs: layout.repairs
     };
   } catch (error) {
     const diagnostics = error instanceof Error && 'diagnostics' in error
@@ -223,6 +227,7 @@ export function buildPresentationDesignSnapshot(
     renderPlanStatus: path === 'legacy-fallback' ? (compilation?.renderPlanStatus ?? 'skipped') : compilation?.renderPlanStatus ?? 'skipped',
     repairCount: compilation?.repairCount ?? 0,
     repairs: compilation?.repairs ?? [],
+    ...(compilation?.visualAudit ? { visualAudit: compilation.visualAudit } : {}),
     diagnostics,
     strategies,
     pages
@@ -278,7 +283,9 @@ function buildRenderPlan(
         zIndex: placement.zIndex
       };
     });
-    return { pageNumber: layout.pageNumber, pageRole: designPage.pageRole, backgroundColor: pageStyle.backgroundColor, elements };
+    const decorations = buildSequenceDecorations(layout, pageStyle, designPage.visualTreatment?.component);
+    return { pageNumber: layout.pageNumber, pageRole: designPage.pageRole, backgroundColor: pageStyle.backgroundColor,
+      elements: [...decorations, ...elements.map(element => ({ ...element, zIndex: element.zIndex + decorations.length }))] };
   });
   return {
     schemaVersion: 1,
@@ -288,7 +295,37 @@ function buildRenderPlan(
   };
 }
 
-function resolveContent(references: Readonly<Record<string, DocumentContentResolvedRef>>, ref: string): PresentationRenderPlanElement['content'] {
+/** Process pages get explicit, persisted track/node primitives when the semantic organization is a sequence. */
+function buildSequenceDecorations(
+  layout: PresentationLayoutPageResult,
+  pageStyle: ReturnType<typeof resolvePresentationPageStyle>,
+  component: 'none' | 'nodes' | 'track' | 'frame' | undefined
+): PresentationRenderPlanElement[] {
+  if (layout.pageRole !== 'process' || layout.composition !== 'sequence' || layout.contentOrganization?.layout !== 'sequence' || component === 'none' || component === 'frame') return [];
+  const steps = layout.placements.filter(item => item.sourceRef !== 'generated.page-number' && item.hierarchy !== 'primary')
+    .sort((left, right) => left.geometry.x - right.geometry.x);
+  if (steps.length < 2 || steps.length > 14) return [];
+  const y = Math.max(0.28, Math.min(...steps.map(step => step.geometry.y)) - 0.24);
+  const centers = steps.map(step => step.geometry.x + step.geometry.width / 2);
+  const style = {
+    fontFamily: pageStyle.fontFamily, fontSize: 1, bold: false, color: pageStyle.accentColor,
+    alignment: 'center' as const, verticalAlignment: 'middle' as const
+  };
+  const elements: PresentationRenderPlanElement[] = [];
+  if (component === undefined || component === 'nodes' || component === 'track') centers.forEach((center, index) => elements.push({ renderId: `p${layout.pageNumber}-dec-node-${index + 1}`,
+    source: { kind: 'generated', key: 'decoration-node' }, type: 'shape', geometry: { x: center - 0.10, y, width: 0.20, height: 0.20 }, style,
+    content: { type: 'shape', shapeKind: 'ellipse' }, zIndex: index }));
+  if (component === 'nodes') return elements;
+  centers.slice(0, -1).forEach((center, index) => {
+    const next = centers[index + 1]!;
+    elements.push({ renderId: `p${layout.pageNumber}-dec-line-${index + 1}`, source: { kind: 'generated', key: 'decoration-line' }, type: 'shape',
+      geometry: { x: center + 0.10, y: y + 0.087, width: Math.max(0.02, next - center - 0.20), height: 0.025 }, style,
+      content: { type: 'shape', shapeKind: 'line' }, zIndex: centers.length + index });
+  });
+  return elements;
+}
+
+function resolveContent(references: Readonly<Record<string, DocumentContentResolvedRef>>, ref: string): Exclude<PresentationRenderPlanElement['content'], { readonly type: 'shape' }> {
   const resolved = references[ref];
   if (resolved?.text !== undefined) return { type: 'text', text: resolved.text };
   const block = resolved?.payload;
