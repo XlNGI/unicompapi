@@ -57,6 +57,7 @@ test('task center folds task and provider call facts into one timeline', () => {
   assert.match(source, /uc-task-center__unified-timeline/);
   assert.match(source, /uc-task-center__timeline-prompts/);
   assert.match(styles, /\.uc-task-center__timeline-prompts\s*\{[\s\S]*?grid-template-columns: 1fr;/);
+  assert.match(styles, /\.uc-expandable-text p\.is-expanded\s*\{[\s\S]*?max-height: none;[\s\S]*?-webkit-line-clamp: unset;/);
   assert.doesNotMatch(source, /任务中心视图|call-records-tab|task-records-tab/);
   assert.doesNotMatch(source, /调用尝试|调用详情|variant="embedded"|uc-task-center__embedded-calls/);
 });

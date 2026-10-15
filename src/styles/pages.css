@@ -5856,6 +5856,13 @@ button.uc-project-center__project-card:disabled {
   -webkit-line-clamp: 3;
 }
 
+.uc-expandable-text p.is-expanded {
+  display: block;
+  max-height: none;
+  overflow: visible;
+  -webkit-line-clamp: unset;
+}
+
 .uc-task-center__timeline-call-summary span,
 .uc-task-center__timeline-code {
   color: var(--uc-color-text-secondary);
