@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import type { ComponentType } from 'react';
 import { ChatPage, type ChatModelSelection } from '../pages/chat/ChatPage';
 import { ImageEditingPage } from '../pages/creation/image/ImageEditingPage';
@@ -21,6 +21,7 @@ import type { ImageWorkspaceDtoMode } from '../shared/image-workspace-ipc';
 import type { VideoWorkspaceDtoMode } from '../shared/video-workspace-ipc';
 import type { TaskReuseTarget } from '../shared/task-reuse';
 import { AppLayout } from './layout/AppLayout';
+import { PROJECT_SESSION_CHANGED_EVENT } from './project-session-events';
 import {
   defaultNavigationItemId,
   getSecondaryNavigationItems,
@@ -85,6 +86,13 @@ export function App() {
   const [selectedChatConversationId, setSelectedChatConversationId] = useState<string>();
   const [chatModelSelection, setChatModelSelection] = useState<ChatModelSelection>();
   const [selectedTaskId, setSelectedTaskId] = useState<string>();
+  const [videoEditorSessionVersion, setVideoEditorSessionVersion] = useState(0);
+  useEffect(() => {
+    // Keep the editor across navigation, but dispose its media and state on project changes.
+    const resetVideoEditor = () => setVideoEditorSessionVersion((version) => version + 1);
+    window.addEventListener(PROJECT_SESSION_CHANGED_EVENT, resetVideoEditor);
+    return () => window.removeEventListener(PROJECT_SESSION_CHANGED_EVENT, resetVideoEditor);
+  }, []);
   const ActivePage = activeSubItemId
     ? pagesBySecondaryNavigationItem[activeSubItemId]
     : pagesByNavigationItem[activeItemId];
@@ -222,6 +230,7 @@ export function App() {
         <ActivePage />
       )}
       <VideoEditingPage
+        key={videoEditorSessionVersion}
         active={activeSubItemId === 'video-editing'}
         onNavigate={handleNavigate}
         preferredDraftId={openedVideoDraftId}
