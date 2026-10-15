@@ -3,6 +3,7 @@ import { readFile } from 'node:fs/promises';
 import test from 'node:test';
 
 const source = await readFile('src/pages/tasks/TasksPage.tsx', 'utf8');
+const styles = await readFile('src/styles/pages.css', 'utf8');
 const feeSource = await readFile('src/pages/tasks/call-fees.ts', 'utf8');
 const appSource = await readFile('src/ui/App.tsx', 'utf8');
 const consumptionStore = await readFile('src/ui/consumption-read-store.ts', 'utf8');
@@ -55,6 +56,7 @@ test('task center folds task and provider call facts into one timeline', () => {
   assert.match(source, /calls\.flatMap\(\(call\) => callTimelineItems\(call\)\)/);
   assert.match(source, /uc-task-center__unified-timeline/);
   assert.match(source, /uc-task-center__timeline-prompts/);
+  assert.match(styles, /\.uc-task-center__timeline-prompts\s*\{[\s\S]*?grid-template-columns: 1fr;/);
   assert.doesNotMatch(source, /任务中心视图|call-records-tab|task-records-tab/);
   assert.doesNotMatch(source, /调用尝试|调用详情|variant="embedded"|uc-task-center__embedded-calls/);
 });
