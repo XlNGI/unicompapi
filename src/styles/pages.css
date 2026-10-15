@@ -5841,7 +5841,7 @@ button.uc-project-center__project-card:disabled {
 
 .uc-task-center__timeline-prompts {
   display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
+  grid-template-columns: 1fr;
   gap: var(--uc-space-2);
 }
 
@@ -5854,6 +5854,13 @@ button.uc-project-center__project-card:disabled {
   white-space: pre-wrap;
   -webkit-box-orient: vertical;
   -webkit-line-clamp: 3;
+}
+
+.uc-expandable-text p.is-expanded {
+  display: block;
+  max-height: none;
+  overflow: visible;
+  -webkit-line-clamp: unset;
 }
 
 .uc-task-center__timeline-call-summary span,
