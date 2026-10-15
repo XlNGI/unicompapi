@@ -1,0 +1,22 @@
+{
+  "id": "4f2f5286-8d19-42e6-9a85-e95465728e13",
+  "object": "media.task",
+  "protocol": "unicomp.media.v1",
+  "model": "happyhorse-1.1-i2v",
+  "status": "submission_unknown",
+  "created": 1792055381,
+  "poll_url": "https://www.unicompapi.com/v1/videos/4f2f5286-8d19-42e6-9a85-e95465728e13",
+  "review_phase": null,
+  "billing": {
+    "currency": "CNY_MICRO",
+    "price_version": "pv_86a0eeb6b26fe8555ac0da4e41d391d314e8ea655d8e39dd24045138368215f7",
+    "quoted_amount": 1012500,
+    "charged_amount": 0,
+    "reserved_amount": 1012500,
+    "settlement_pending": false
+  },
+  "error": {
+    "code": "MEDIA_RESULT_UNKNOWN",
+    "message": "任务结果尚未确认，请稍后查询原任务状态，避免重复提交或生成。"
+  }
+}

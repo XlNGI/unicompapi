@@ -1,0 +1,54 @@
+{
+  "maximumCnyMicro": 5000000,
+  "records": [
+    {
+      "model": "wan3.0-video-ali",
+      "idempotencyKey": "www-video-2d2e4867aab653a2ba3d18f76052077ea9cee5fdcfb0bdc6e8b104251fd7e5f9",
+      "reservedCnyMicro": 5000000,
+      "quotedAmount": 540000,
+      "actualChargedCnyMicro": 540000,
+      "state": "succeeded",
+      "createdAt": "2026-10-15T08:44:28.636Z",
+      "taskId": "03f35c64-d159-4b1f-aa7e-23f06d50a46e",
+      "settlementPending": false
+    },
+    {
+      "model": "wan3.0-video-ali",
+      "feature": "image_to_video",
+      "idempotencyKey": "www-video-f0eb0f3d736f1dcf6331b673f2136197d85e0392160ce0efd70c709ef5dcbebc",
+      "reservedCnyMicro": 4460000,
+      "quotedAmount": 540000,
+      "actualChargedCnyMicro": 540000,
+      "state": "succeeded",
+      "createdAt": "2026-10-15T09:02:24.242Z",
+      "taskId": "7d22ec14-5824-4eef-9dda-2263099d2290",
+      "settlementPending": false
+    },
+    {
+      "model": "happyhorse-1.1-t2v",
+      "feature": "text_to_video",
+      "idempotencyKey": "www-video-d44ed0a7ced19832e5cfa8630a8d56cf98873164db5c92dd0abdb740ba6f18f8",
+      "reservedCnyMicro": 3920000,
+      "quotedAmount": 1012500,
+      "actualChargedCnyMicro": 1012500,
+      "state": "succeeded",
+      "createdAt": "2026-10-15T09:07:12.259Z",
+      "taskId": "c85b0032-d5ae-4f9b-99b6-db8b2f62c908",
+      "settlementPending": false
+    },
+    {
+      "model": "happyhorse-1.1-i2v",
+      "feature": "image_to_video",
+      "idempotencyKey": "www-video-144f6ebc39e50602609096fb0665f6fca4e1e0ba58ac528157c8017df0080948",
+      "reservedCnyMicro": 2907500,
+      "quotedAmount": 1012500,
+      "actualChargedCnyMicro": 0,
+      "state": "submission_unknown",
+      "createdAt": "2026-10-15T09:09:37.817Z",
+      "taskId": "4f2f5286-8d19-42e6-9a85-e95465728e13",
+      "settlementPending": false
+    }
+  ],
+  "outboundScope": "Synthetic cup prompt, generated local reference image/video and documented parameters only; no enterprise project content",
+  "createdAt": "2026-10-15T08:23:10.520Z"
+}

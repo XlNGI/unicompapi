@@ -1,0 +1,657 @@
+{
+  "live": false,
+  "status": "passed",
+  "checks": [
+    {
+      "model": "MiniMax-H3",
+      "feature": "text_to_video",
+      "workId": "work-video-result-c3abae52-1969-44f4-ad0a-6b6dde5283de",
+      "checksumSha256": "db3fbb7c9c6621cd36d92dc1afd4e25db35f27762efb22401eeb6412762bcf8c",
+      "state": "passed"
+    },
+    {
+      "model": "doubao-seedance-2-0-260128",
+      "feature": "text_to_video",
+      "workId": "work-video-result-51ad61a4-82a8-4e14-9c74-94ce14f986bb",
+      "checksumSha256": "db3fbb7c9c6621cd36d92dc1afd4e25db35f27762efb22401eeb6412762bcf8c",
+      "state": "passed"
+    },
+    {
+      "model": "doubao-seedance-2-0-260128",
+      "feature": "image_to_video",
+      "workId": "work-video-result-06279f39-a15f-4d1a-8318-ae1a8d41fed7",
+      "checksumSha256": "db3fbb7c9c6621cd36d92dc1afd4e25db35f27762efb22401eeb6412762bcf8c",
+      "state": "passed"
+    },
+    {
+      "model": "happyhorse-1.1-t2v",
+      "feature": "text_to_video",
+      "workId": "work-video-result-493cf740-d7d5-44de-ab03-d4ff5433157d",
+      "checksumSha256": "db3fbb7c9c6621cd36d92dc1afd4e25db35f27762efb22401eeb6412762bcf8c",
+      "state": "passed"
+    },
+    {
+      "model": "happyhorse-1.1-i2v",
+      "feature": "image_to_video",
+      "workId": "work-video-result-fd8c59a4-16e2-49f8-aa31-71ec503496a4",
+      "checksumSha256": "db3fbb7c9c6621cd36d92dc1afd4e25db35f27762efb22401eeb6412762bcf8c",
+      "state": "passed"
+    },
+    {
+      "model": "happyhorse-1.1-r2v",
+      "feature": "image_to_video",
+      "workId": "work-video-result-9d950a86-994e-4383-b878-116ecd9bfd0f",
+      "checksumSha256": "db3fbb7c9c6621cd36d92dc1afd4e25db35f27762efb22401eeb6412762bcf8c",
+      "state": "passed"
+    },
+    {
+      "model": "wan3.0-video",
+      "feature": "text_to_video",
+      "workId": "work-video-result-6b56506f-4b41-4410-a3dc-3e277151105f",
+      "checksumSha256": "db3fbb7c9c6621cd36d92dc1afd4e25db35f27762efb22401eeb6412762bcf8c",
+      "state": "passed"
+    },
+    {
+      "model": "wan3.0-video",
+      "feature": "image_to_video",
+      "workId": "work-video-result-8ef4423a-5e20-4057-9b3b-596eac08a548",
+      "checksumSha256": "db3fbb7c9c6621cd36d92dc1afd4e25db35f27762efb22401eeb6412762bcf8c",
+      "state": "passed"
+    },
+    {
+      "model": "wan3.0-video-ali",
+      "feature": "text_to_video",
+      "workId": "work-video-result-351b8072-4578-433b-93bb-068480e49f0f",
+      "checksumSha256": "db3fbb7c9c6621cd36d92dc1afd4e25db35f27762efb22401eeb6412762bcf8c",
+      "state": "passed"
+    },
+    {
+      "model": "wan3.0-video-ali",
+      "feature": "image_to_video",
+      "workId": "work-video-result-1076cc0b-2b5b-4a2b-89aa-8fa953a5028a",
+      "checksumSha256": "db3fbb7c9c6621cd36d92dc1afd4e25db35f27762efb22401eeb6412762bcf8c",
+      "state": "passed"
+    },
+    {
+      "model": "wan3.0-video-prime-ali",
+      "feature": "text_to_video",
+      "workId": "work-video-result-d9e24ed7-bd2c-4029-a34b-3b691624975f",
+      "checksumSha256": "db3fbb7c9c6621cd36d92dc1afd4e25db35f27762efb22401eeb6412762bcf8c",
+      "state": "passed"
+    },
+    {
+      "model": "wan3.0-video-prime-ali",
+      "feature": "image_to_video",
+      "workId": "work-video-result-aa7f8c68-9e1c-4151-ab43-6705d3f09f82",
+      "checksumSha256": "db3fbb7c9c6621cd36d92dc1afd4e25db35f27762efb22401eeb6412762bcf8c",
+      "state": "passed"
+    },
+    {
+      "model": "happyhorse-1.0-video-edit",
+      "feature": "video_edit",
+      "workId": "work-video-result-baae9491-371e-4bb3-9d71-8cb244358c00",
+      "checksumSha256": "db3fbb7c9c6621cd36d92dc1afd4e25db35f27762efb22401eeb6412762bcf8c",
+      "state": "passed"
+    }
+  ],
+  "externalRequests": 0,
+  "paidPost": 0,
+  "requests": [
+    {
+      "method": "POST",
+      "path": "/v1/h3/tasks",
+      "operation": "post"
+    },
+    {
+      "method": "POST",
+      "path": "/v1/h3/tasks",
+      "operation": "post"
+    },
+    {
+      "method": "GET",
+      "path": "/v1/h3/tasks/task-www-0",
+      "operation": "read"
+    },
+    {
+      "method": "GET",
+      "path": "/v1/h3/tasks/task-www-0",
+      "operation": "read"
+    },
+    {
+      "method": "GET",
+      "path": "/v1/h3/tasks/task-www-0",
+      "operation": "read"
+    },
+    {
+      "method": "GET",
+      "path": "/v1/h3/tasks/task-www-0",
+      "operation": "read"
+    },
+    {
+      "method": "GET",
+      "path": "/v1/h3/tasks/task-www-0",
+      "operation": "read"
+    },
+    {
+      "method": "GET",
+      "path": "/v1/h3/tasks/task-www-0/content",
+      "operation": "read"
+    },
+    {
+      "method": "POST",
+      "path": "/v1/videos/quote",
+      "operation": "post"
+    },
+    {
+      "method": "POST",
+      "path": "/v1/videos",
+      "operation": "post"
+    },
+    {
+      "method": "GET",
+      "path": "/v1/videos/task-www-1",
+      "operation": "read"
+    },
+    {
+      "method": "GET",
+      "path": "/v1/videos/task-www-1",
+      "operation": "read"
+    },
+    {
+      "method": "GET",
+      "path": "/v1/videos/task-www-1",
+      "operation": "read"
+    },
+    {
+      "method": "GET",
+      "path": "/v1/videos/task-www-1",
+      "operation": "read"
+    },
+    {
+      "method": "GET",
+      "path": "/v1/videos/task-www-1",
+      "operation": "read"
+    },
+    {
+      "method": "GET",
+      "path": "/v1/videos/task-www-1/content",
+      "operation": "read"
+    },
+    {
+      "method": "POST",
+      "path": "/v1/assets",
+      "operation": "upload"
+    },
+    {
+      "method": "POST",
+      "path": "/v1/videos/quote",
+      "operation": "post"
+    },
+    {
+      "method": "POST",
+      "path": "/v1/videos",
+      "operation": "post"
+    },
+    {
+      "method": "GET",
+      "path": "/v1/videos/task-www-2",
+      "operation": "read"
+    },
+    {
+      "method": "GET",
+      "path": "/v1/videos/task-www-2",
+      "operation": "read"
+    },
+    {
+      "method": "GET",
+      "path": "/v1/videos/task-www-2",
+      "operation": "read"
+    },
+    {
+      "method": "GET",
+      "path": "/v1/videos/task-www-2",
+      "operation": "read"
+    },
+    {
+      "method": "GET",
+      "path": "/v1/videos/task-www-2",
+      "operation": "read"
+    },
+    {
+      "method": "GET",
+      "path": "/v1/videos/task-www-2/content",
+      "operation": "read"
+    },
+    {
+      "method": "POST",
+      "path": "/v1/videos/quote",
+      "operation": "post"
+    },
+    {
+      "method": "POST",
+      "path": "/v1/videos",
+      "operation": "post"
+    },
+    {
+      "method": "GET",
+      "path": "/v1/videos/task-www-3",
+      "operation": "read"
+    },
+    {
+      "method": "GET",
+      "path": "/v1/videos/task-www-3",
+      "operation": "read"
+    },
+    {
+      "method": "GET",
+      "path": "/v1/videos/task-www-3",
+      "operation": "read"
+    },
+    {
+      "method": "GET",
+      "path": "/v1/videos/task-www-3",
+      "operation": "read"
+    },
+    {
+      "method": "GET",
+      "path": "/v1/videos/task-www-3",
+      "operation": "read"
+    },
+    {
+      "method": "GET",
+      "path": "/v1/videos/task-www-3/content",
+      "operation": "read"
+    },
+    {
+      "method": "POST",
+      "path": "/v1/assets",
+      "operation": "upload"
+    },
+    {
+      "method": "POST",
+      "path": "/v1/videos/quote",
+      "operation": "post"
+    },
+    {
+      "method": "POST",
+      "path": "/v1/videos",
+      "operation": "post"
+    },
+    {
+      "method": "GET",
+      "path": "/v1/videos/task-www-4",
+      "operation": "read"
+    },
+    {
+      "method": "GET",
+      "path": "/v1/videos/task-www-4",
+      "operation": "read"
+    },
+    {
+      "method": "GET",
+      "path": "/v1/videos/task-www-4",
+      "operation": "read"
+    },
+    {
+      "method": "GET",
+      "path": "/v1/videos/task-www-4",
+      "operation": "read"
+    },
+    {
+      "method": "GET",
+      "path": "/v1/videos/task-www-4",
+      "operation": "read"
+    },
+    {
+      "method": "GET",
+      "path": "/v1/videos/task-www-4/content",
+      "operation": "read"
+    },
+    {
+      "method": "POST",
+      "path": "/v1/assets",
+      "operation": "upload"
+    },
+    {
+      "method": "POST",
+      "path": "/v1/videos/quote",
+      "operation": "post"
+    },
+    {
+      "method": "POST",
+      "path": "/v1/videos",
+      "operation": "post"
+    },
+    {
+      "method": "GET",
+      "path": "/v1/videos/task-www-5",
+      "operation": "read"
+    },
+    {
+      "method": "GET",
+      "path": "/v1/videos/task-www-5",
+      "operation": "read"
+    },
+    {
+      "method": "GET",
+      "path": "/v1/videos/task-www-5",
+      "operation": "read"
+    },
+    {
+      "method": "GET",
+      "path": "/v1/videos/task-www-5",
+      "operation": "read"
+    },
+    {
+      "method": "GET",
+      "path": "/v1/videos/task-www-5",
+      "operation": "read"
+    },
+    {
+      "method": "GET",
+      "path": "/v1/videos/task-www-5/content",
+      "operation": "read"
+    },
+    {
+      "method": "POST",
+      "path": "/v1/videos/quote",
+      "operation": "post"
+    },
+    {
+      "method": "POST",
+      "path": "/v1/videos",
+      "operation": "post"
+    },
+    {
+      "method": "GET",
+      "path": "/v1/videos/task-www-6",
+      "operation": "read"
+    },
+    {
+      "method": "GET",
+      "path": "/v1/videos/task-www-6",
+      "operation": "read"
+    },
+    {
+      "method": "GET",
+      "path": "/v1/videos/task-www-6",
+      "operation": "read"
+    },
+    {
+      "method": "GET",
+      "path": "/v1/videos/task-www-6",
+      "operation": "read"
+    },
+    {
+      "method": "GET",
+      "path": "/v1/videos/task-www-6",
+      "operation": "read"
+    },
+    {
+      "method": "GET",
+      "path": "/v1/videos/task-www-6/content",
+      "operation": "read"
+    },
+    {
+      "method": "POST",
+      "path": "/v1/assets",
+      "operation": "upload"
+    },
+    {
+      "method": "POST",
+      "path": "/v1/videos/quote",
+      "operation": "post"
+    },
+    {
+      "method": "POST",
+      "path": "/v1/videos",
+      "operation": "post"
+    },
+    {
+      "method": "GET",
+      "path": "/v1/videos/task-www-7",
+      "operation": "read"
+    },
+    {
+      "method": "GET",
+      "path": "/v1/videos/task-www-7",
+      "operation": "read"
+    },
+    {
+      "method": "GET",
+      "path": "/v1/videos/task-www-7",
+      "operation": "read"
+    },
+    {
+      "method": "GET",
+      "path": "/v1/videos/task-www-7",
+      "operation": "read"
+    },
+    {
+      "method": "GET",
+      "path": "/v1/videos/task-www-7",
+      "operation": "read"
+    },
+    {
+      "method": "GET",
+      "path": "/v1/videos/task-www-7/content",
+      "operation": "read"
+    },
+    {
+      "method": "POST",
+      "path": "/v1/videos/quote",
+      "operation": "post"
+    },
+    {
+      "method": "POST",
+      "path": "/v1/videos",
+      "operation": "post"
+    },
+    {
+      "method": "GET",
+      "path": "/v1/videos/task-www-8",
+      "operation": "read"
+    },
+    {
+      "method": "GET",
+      "path": "/v1/videos/task-www-8",
+      "operation": "read"
+    },
+    {
+      "method": "GET",
+      "path": "/v1/videos/task-www-8",
+      "operation": "read"
+    },
+    {
+      "method": "GET",
+      "path": "/v1/videos/task-www-8",
+      "operation": "read"
+    },
+    {
+      "method": "GET",
+      "path": "/v1/videos/task-www-8",
+      "operation": "read"
+    },
+    {
+      "method": "GET",
+      "path": "/v1/videos/task-www-8/content",
+      "operation": "read"
+    },
+    {
+      "method": "POST",
+      "path": "/v1/assets",
+      "operation": "upload"
+    },
+    {
+      "method": "POST",
+      "path": "/v1/videos/quote",
+      "operation": "post"
+    },
+    {
+      "method": "POST",
+      "path": "/v1/videos",
+      "operation": "post"
+    },
+    {
+      "method": "GET",
+      "path": "/v1/videos/task-www-9",
+      "operation": "read"
+    },
+    {
+      "method": "GET",
+      "path": "/v1/videos/task-www-9",
+      "operation": "read"
+    },
+    {
+      "method": "GET",
+      "path": "/v1/videos/task-www-9",
+      "operation": "read"
+    },
+    {
+      "method": "GET",
+      "path": "/v1/videos/task-www-9",
+      "operation": "read"
+    },
+    {
+      "method": "GET",
+      "path": "/v1/videos/task-www-9",
+      "operation": "read"
+    },
+    {
+      "method": "GET",
+      "path": "/v1/videos/task-www-9/content",
+      "operation": "read"
+    },
+    {
+      "method": "POST",
+      "path": "/v1/videos/quote",
+      "operation": "post"
+    },
+    {
+      "method": "POST",
+      "path": "/v1/videos",
+      "operation": "post"
+    },
+    {
+      "method": "GET",
+      "path": "/v1/videos/task-www-10",
+      "operation": "read"
+    },
+    {
+      "method": "GET",
+      "path": "/v1/videos/task-www-10",
+      "operation": "read"
+    },
+    {
+      "method": "GET",
+      "path": "/v1/videos/task-www-10",
+      "operation": "read"
+    },
+    {
+      "method": "GET",
+      "path": "/v1/videos/task-www-10",
+      "operation": "read"
+    },
+    {
+      "method": "GET",
+      "path": "/v1/videos/task-www-10",
+      "operation": "read"
+    },
+    {
+      "method": "GET",
+      "path": "/v1/videos/task-www-10/content",
+      "operation": "read"
+    },
+    {
+      "method": "POST",
+      "path": "/v1/assets",
+      "operation": "upload"
+    },
+    {
+      "method": "POST",
+      "path": "/v1/videos/quote",
+      "operation": "post"
+    },
+    {
+      "method": "POST",
+      "path": "/v1/videos",
+      "operation": "post"
+    },
+    {
+      "method": "GET",
+      "path": "/v1/videos/task-www-11",
+      "operation": "read"
+    },
+    {
+      "method": "GET",
+      "path": "/v1/videos/task-www-11",
+      "operation": "read"
+    },
+    {
+      "method": "GET",
+      "path": "/v1/videos/task-www-11",
+      "operation": "read"
+    },
+    {
+      "method": "GET",
+      "path": "/v1/videos/task-www-11",
+      "operation": "read"
+    },
+    {
+      "method": "GET",
+      "path": "/v1/videos/task-www-11",
+      "operation": "read"
+    },
+    {
+      "method": "GET",
+      "path": "/v1/videos/task-www-11/content",
+      "operation": "read"
+    },
+    {
+      "method": "POST",
+      "path": "/v1/assets",
+      "operation": "upload"
+    },
+    {
+      "method": "POST",
+      "path": "/v1/videos/quote",
+      "operation": "post"
+    },
+    {
+      "method": "POST",
+      "path": "/v1/videos",
+      "operation": "post"
+    },
+    {
+      "method": "GET",
+      "path": "/v1/videos/task-www-12",
+      "operation": "read"
+    },
+    {
+      "method": "GET",
+      "path": "/v1/videos/task-www-12",
+      "operation": "read"
+    },
+    {
+      "method": "GET",
+      "path": "/v1/videos/task-www-12",
+      "operation": "read"
+    },
+    {
+      "method": "GET",
+      "path": "/v1/videos/task-www-12",
+      "operation": "read"
+    },
+    {
+      "method": "GET",
+      "path": "/v1/videos/task-www-12",
+      "operation": "read"
+    },
+    {
+      "method": "GET",
+      "path": "/v1/videos/task-www-12/content",
+      "operation": "read"
+    }
+  ],
+  "boundaries": "injected transport; no real provider acceptance"
+}

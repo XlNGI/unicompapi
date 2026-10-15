@@ -1,0 +1,68 @@
+{
+  "live": true,
+  "status": "passed",
+  "checks": [
+    {
+      "model": "wan3.0-video-ali",
+      "feature": "text_to_video",
+      "workId": "work-video-result-873c60ed-b2d9-4364-be29-257deeb387f1",
+      "checksumSha256": "2f6f102e1cadc3d407ca9dc8e2de6b918b2a9e3e8d7da0f0f5e9668a538af24e",
+      "metadata": {
+        "mimeType": "video/mp4",
+        "container": "mp4",
+        "durationMs": 2000,
+        "width": 854,
+        "height": 480,
+        "sizeBytes": 568476
+      },
+      "recovery": "original task only; zero paid POST",
+      "state": "passed"
+    }
+  ],
+  "externalRequests": 5,
+  "paidPost": 0,
+  "requests": [
+    {
+      "method": "GET",
+      "path": "/v1/videos/03f35c64-d159-4b1f-aa7e-23f06d50a46e",
+      "operation": "read"
+    },
+    {
+      "method": "GET",
+      "path": "/v1/videos/03f35c64-d159-4b1f-aa7e-23f06d50a46e",
+      "operation": "read"
+    },
+    {
+      "method": "GET",
+      "path": "/v1/videos/03f35c64-d159-4b1f-aa7e-23f06d50a46e",
+      "operation": "read"
+    },
+    {
+      "method": "GET",
+      "path": "/v1/videos/03f35c64-d159-4b1f-aa7e-23f06d50a46e",
+      "operation": "read"
+    },
+    {
+      "method": "GET",
+      "path": "/v1/videos/03f35c64-d159-4b1f-aa7e-23f06d50a46e/content",
+      "operation": "read"
+    }
+  ],
+  "budget": {
+    "maximumCnyMicro": 5000000,
+    "records": [
+      {
+        "model": "wan3.0-video-ali",
+        "idempotencyKey": "www-video-2d2e4867aab653a2ba3d18f76052077ea9cee5fdcfb0bdc6e8b104251fd7e5f9",
+        "reservedCnyMicro": 5000000,
+        "quotedAmount": 540000,
+        "actualChargedCnyMicro": 540000,
+        "state": "succeeded",
+        "createdAt": "2026-10-15T08:44:28.636Z",
+        "taskId": "03f35c64-d159-4b1f-aa7e-23f06d50a46e",
+        "settlementPending": false
+      }
+    ]
+  },
+  "boundaries": "one actual model; isolated native preload/IPC/Host, original encrypted credential; no production project modified"
+}

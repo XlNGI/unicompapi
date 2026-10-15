@@ -1,0 +1,128 @@
+{
+  "live": true,
+  "status": "passed",
+  "checks": [
+    {
+      "model": "happyhorse-1.1-t2v",
+      "feature": "text_to_video",
+      "workId": "work-video-result-5ae0d8a4-3c8d-4fd7-b6fc-6254ea14bd02",
+      "checksumSha256": "d22c3852eaccac38a1baa46eee65ea2bc4ad776d46be9d6e6c2992c2fedde663",
+      "state": "passed"
+    }
+  ],
+  "externalRequests": 14,
+  "paidPost": 1,
+  "requests": [
+    {
+      "method": "POST",
+      "path": "/v1/videos/quote",
+      "operation": "post"
+    },
+    {
+      "method": "POST",
+      "path": "/v1/videos",
+      "operation": "post"
+    },
+    {
+      "method": "GET",
+      "path": "/v1/videos/c85b0032-d5ae-4f9b-99b6-db8b2f62c908",
+      "operation": "read"
+    },
+    {
+      "method": "GET",
+      "path": "/v1/videos/c85b0032-d5ae-4f9b-99b6-db8b2f62c908",
+      "operation": "read"
+    },
+    {
+      "method": "GET",
+      "path": "/v1/videos/c85b0032-d5ae-4f9b-99b6-db8b2f62c908",
+      "operation": "read"
+    },
+    {
+      "method": "GET",
+      "path": "/v1/videos/c85b0032-d5ae-4f9b-99b6-db8b2f62c908",
+      "operation": "read"
+    },
+    {
+      "method": "GET",
+      "path": "/v1/videos/c85b0032-d5ae-4f9b-99b6-db8b2f62c908",
+      "operation": "read"
+    },
+    {
+      "method": "GET",
+      "path": "/v1/videos/c85b0032-d5ae-4f9b-99b6-db8b2f62c908",
+      "operation": "read"
+    },
+    {
+      "method": "GET",
+      "path": "/v1/videos/c85b0032-d5ae-4f9b-99b6-db8b2f62c908",
+      "operation": "read"
+    },
+    {
+      "method": "GET",
+      "path": "/v1/videos/c85b0032-d5ae-4f9b-99b6-db8b2f62c908",
+      "operation": "read"
+    },
+    {
+      "method": "GET",
+      "path": "/v1/videos/c85b0032-d5ae-4f9b-99b6-db8b2f62c908",
+      "operation": "read"
+    },
+    {
+      "method": "GET",
+      "path": "/v1/videos/c85b0032-d5ae-4f9b-99b6-db8b2f62c908",
+      "operation": "read"
+    },
+    {
+      "method": "GET",
+      "path": "/v1/videos/c85b0032-d5ae-4f9b-99b6-db8b2f62c908",
+      "operation": "read"
+    },
+    {
+      "method": "GET",
+      "path": "/v1/videos/c85b0032-d5ae-4f9b-99b6-db8b2f62c908/content",
+      "operation": "read"
+    }
+  ],
+  "budget": {
+    "maximumCnyMicro": 5000000,
+    "records": [
+      {
+        "model": "wan3.0-video-ali",
+        "idempotencyKey": "www-video-2d2e4867aab653a2ba3d18f76052077ea9cee5fdcfb0bdc6e8b104251fd7e5f9",
+        "reservedCnyMicro": 5000000,
+        "quotedAmount": 540000,
+        "actualChargedCnyMicro": 540000,
+        "state": "succeeded",
+        "createdAt": "2026-10-15T08:44:28.636Z",
+        "taskId": "03f35c64-d159-4b1f-aa7e-23f06d50a46e",
+        "settlementPending": false
+      },
+      {
+        "model": "wan3.0-video-ali",
+        "feature": "image_to_video",
+        "idempotencyKey": "www-video-f0eb0f3d736f1dcf6331b673f2136197d85e0392160ce0efd70c709ef5dcbebc",
+        "reservedCnyMicro": 4460000,
+        "quotedAmount": 540000,
+        "actualChargedCnyMicro": 540000,
+        "state": "succeeded",
+        "createdAt": "2026-10-15T09:02:24.242Z",
+        "taskId": "7d22ec14-5824-4eef-9dda-2263099d2290",
+        "settlementPending": false
+      },
+      {
+        "model": "happyhorse-1.1-t2v",
+        "feature": "text_to_video",
+        "idempotencyKey": "www-video-d44ed0a7ced19832e5cfa8630a8d56cf98873164db5c92dd0abdb740ba6f18f8",
+        "reservedCnyMicro": 3920000,
+        "quotedAmount": 1012500,
+        "actualChargedCnyMicro": 1012500,
+        "state": "succeeded",
+        "createdAt": "2026-10-15T09:07:12.259Z",
+        "taskId": "c85b0032-d5ae-4f9b-99b6-db8b2f62c908",
+        "settlementPending": false
+      }
+    ]
+  },
+  "boundaries": "one actual model; isolated native preload/IPC/Host, original encrypted credential; no production project modified"
+}

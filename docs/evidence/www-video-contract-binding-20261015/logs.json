@@ -1,0 +1,178 @@
+{
+  "logs": [
+    {
+      "file": "build-final.log.gz",
+      "originalBytes": 1158,
+      "sha256": "fbd5ac39c7285bcd52e22cec57082810bf9d4e5acac3b6f7ace08e447c1ea881",
+      "roundtripVerified": true
+    },
+    {
+      "file": "build-initial.log.gz",
+      "originalBytes": 1158,
+      "sha256": "faa6531b720040c2f1a81c08a491bb03c43082ef1818afa7c85480eef2c6df1c",
+      "roundtripVerified": true
+    },
+    {
+      "file": "electron-e2e.log.gz",
+      "originalBytes": 139,
+      "sha256": "b221383de8fd7a6295901432572f526dea111b6015b847157a71f034cd6cb077",
+      "roundtripVerified": true
+    },
+    {
+      "file": "electron-final.log.gz",
+      "originalBytes": 139,
+      "sha256": "8890ace2af71b48e56ce23d4072e4d80dcc76dff6c24e16e9f33c595e3e4984c",
+      "roundtripVerified": true
+    },
+    {
+      "file": "electron-script-final.log.gz",
+      "originalBytes": 139,
+      "sha256": "997a3cbb2030b041c15eb59892349cbd3b8b1e4c6879b9e4003708b52253f9ac",
+      "roundtripVerified": true
+    },
+    {
+      "file": "full-tests.log.gz",
+      "originalBytes": 60443,
+      "sha256": "020997fa511f62d9784b5c68a50980128da5db8e5aa8f47d04359039b6cdf5f2",
+      "roundtripVerified": true
+    },
+    {
+      "file": "lint-final.log.gz",
+      "originalBytes": 66,
+      "sha256": "e536c149a8ea348bf32c7d0e4c3ef9093000c88899f74635d00842c2289ac37b",
+      "roundtripVerified": true
+    },
+    {
+      "file": "lint.log.gz",
+      "originalBytes": 66,
+      "sha256": "d1540b1ea50237abcedc8d477ab4575b556b0599aa541130aa2b73ae445e3e10",
+      "roundtripVerified": true
+    },
+    {
+      "file": "live-e2e.log.gz",
+      "originalBytes": 56,
+      "sha256": "0ce4c0c46ac431b90023f52ada9fd8942c0977934d38f97673184efea1f06c01",
+      "roundtripVerified": true
+    },
+    {
+      "file": "live-happyhorse-image.log.gz",
+      "originalBytes": 165,
+      "sha256": "d0f71c6894bbb2af5f6d3a70e09a23752b78dac612257244f15a6578e2de2693",
+      "roundtripVerified": true
+    },
+    {
+      "file": "live-happyhorse-text.log.gz",
+      "originalBytes": 232,
+      "sha256": "5d4d96ce0909c847c797c8b9d2319641d68fdb64cefd04b683a4360eb163e0e0",
+      "roundtripVerified": true
+    },
+    {
+      "file": "live-recovery.log.gz",
+      "originalBytes": 231,
+      "sha256": "3e61dabd8d4241a862fe7e5678cf232f08c8716a34ce1183003bb5de1279d2c4",
+      "roundtripVerified": true
+    },
+    {
+      "file": "live-wan-image.log.gz",
+      "originalBytes": 232,
+      "sha256": "53c421e410b091b0c22e0c868abc9912d0de0c25e1c8694ccee383e0e2d2a907",
+      "roundtripVerified": true
+    },
+    {
+      "file": "node-final.log.gz",
+      "originalBytes": 33941,
+      "sha256": "b506b6c2130583b2af6c8b9b335d1b32737cdf48ac9bc60c6fedd5bba48e7236",
+      "roundtripVerified": true
+    },
+    {
+      "file": "node-tests.log.gz",
+      "originalBytes": 33935,
+      "sha256": "60951e4273d34fff488650f1e7e4323eb9d2f3efdc0249714885fcca07c06eef",
+      "roundtripVerified": true
+    },
+    {
+      "file": "original-read-3-final.log.gz",
+      "originalBytes": 216,
+      "sha256": "fea351d2b8ce76ad9534426f9316e66ac5b423041335e3feb87ce0f14475401c",
+      "roundtripVerified": true
+    },
+    {
+      "file": "original-read-3.log.gz",
+      "originalBytes": 216,
+      "sha256": "214bb1ad4634a00076545768954d425270eaab76135d6788561a4049f21563dd",
+      "roundtripVerified": true
+    },
+    {
+      "file": "original-read.log.gz",
+      "originalBytes": 437,
+      "sha256": "87ab4804d02eecb301e3d3fc808aa5fec040c98cc8a0f94ee5427ed9853c1a9f",
+      "roundtripVerified": true
+    },
+    {
+      "file": "platform-audit-final.log.gz",
+      "originalBytes": 2838,
+      "sha256": "3dac1e6c634325f857eefe4f95802718ca48c22c32d553572d472ae00346d66a",
+      "roundtripVerified": true
+    },
+    {
+      "file": "platform-audit.log.gz",
+      "originalBytes": 2838,
+      "sha256": "3f7f92c82d386b6ec0b54128af2a81a983c072d77082037a129c110d996360dd",
+      "roundtripVerified": true
+    },
+    {
+      "file": "typecheck-final.log.gz",
+      "originalBytes": 108,
+      "sha256": "352af4d7cd9e4eadaeff4bb436c7ba1731c94d483402321ffd5f0bafa799576f",
+      "roundtripVerified": true
+    },
+    {
+      "file": "typecheck.log.gz",
+      "originalBytes": 108,
+      "sha256": "fba261dfd12c2c8fe28d9a37be9d0d4ea3c1277e27dd49f987e6b4e7e123ce9a",
+      "roundtripVerified": true
+    },
+    {
+      "file": "ui-final.log.gz",
+      "originalBytes": 253,
+      "sha256": "06df38bb726f83de494f2c62b278a7ed05c559f311b6783229b22d881f32a3ad",
+      "roundtripVerified": true
+    },
+    {
+      "file": "ui.log.gz",
+      "originalBytes": 253,
+      "sha256": "1eeff78032f82d6491a188fcff694c0c6a314d9449bdd7456db2e2c9218a57f1",
+      "roundtripVerified": true
+    },
+    {
+      "file": "vitest-final.log.gz",
+      "originalBytes": 81910,
+      "sha256": "16de30bc49ddd25fd04b7d03c83a3bef1f21fdc2344ca4f3edc72b859f411260",
+      "roundtripVerified": true
+    },
+    {
+      "file": "vitest-full.log.gz",
+      "originalBytes": 85075,
+      "sha256": "4949f83ec64b080d53f2411d63265df6f54d3521b9584a70fce453d3a9b88b44",
+      "roundtripVerified": true
+    },
+    {
+      "file": "vitest-recovery.log.gz",
+      "originalBytes": 1076,
+      "sha256": "f4ae4ea984b438883444b252469f872d4b45e96a22ce7ef90fdf8db3d35002cc",
+      "roundtripVerified": true
+    },
+    {
+      "file": "vitest-surface-final.log.gz",
+      "originalBytes": 756,
+      "sha256": "4d0fb3c09b390613c4be6d5bb5de02e4719ba78967cac329b5d7f356fb64477c",
+      "roundtripVerified": true
+    },
+    {
+      "file": "vitest-targeted.log.gz",
+      "originalBytes": 757,
+      "sha256": "f460b8aeacb8db9d10c5506ad1b21f4c9d0a62ebcabf9de82f880323b3b925d8",
+      "roundtripVerified": true
+    }
+  ]
+}

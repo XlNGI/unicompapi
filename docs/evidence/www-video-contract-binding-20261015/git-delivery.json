@@ -1,0 +1,40 @@
+{
+  "schemaVersion": 1,
+  "recordedAt": "2026-10-15T10:08:09Z",
+  "authorization": "User explicitly requested uploading the new code to a branch.",
+  "status": "code_push_verified",
+  "branch": "feature/www-video-contract-binding",
+  "remote": "origin",
+  "repository": "https://github.com/XlNGI/unicompapi.git",
+  "baseCommit": "21162da",
+  "codeCommit": "a7456b03b8943e658ac7c2953ac4b0275db58721",
+  "verifiedRemoteCodeCommit": "a7456b03b8943e658ac7c2953ac4b0275db58721",
+  "codeFiles": 45,
+  "verification": {
+    "remoteCodeRefMatched": true,
+    "diffCheck": "passed",
+    "compressedLogsSha256Verified": 29,
+    "credentialPatternScanFindings": 0,
+    "existingAcceptanceTestsPassed": 4102,
+    "businessCodeChangedDuringDelivery": false,
+    "newPaidRequests": 0
+  },
+  "scope": {
+    "featureBranchPushed": true,
+    "upstreamTrackingConfigured": true,
+    "localAndRemoteBranchRetained": true,
+    "mergedIntoDevelopOrMain": false,
+    "forcePush": false,
+    "applicationRestarted": false,
+    "publishedRelease": false
+  },
+  "acceptance": {
+    "status": "implementation_and_bindings_verified_real_service_acceptance_partial",
+    "successfulRealCases": 3,
+    "confirmedChargedCnyMicro": 2092500,
+    "unknownOriginals": 1,
+    "providerReservedCnyMicroAtAcceptance": 1012500,
+    "noNewLiveVerificationDuringDelivery": true
+  },
+  "accompanyingEvidence": "PLANS.md, the mapping document and original acceptance evidence are committed separately on the same feature branch. The final remote branch ref identifies their commit; this record intentionally does not self-reference its own commit hash."
+}
