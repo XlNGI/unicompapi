@@ -60,6 +60,7 @@ const parameterLabels: Readonly<Record<string, string>> = {
   duration: '视频时长',
   duration_seconds: '视频时长（秒）',
   generation_mode: '生成模式',
+  maximum_cost_cny: '本次报价上限（元）',
   fps: '帧率',
   frames: '帧数',
   generate_audio: '生成音频',

@@ -333,7 +333,7 @@ export class ProviderRegistryController {
             profileStatus: activeProfile?.status,
             ...(activeProfile?.apiContract ? { apiContract: {
               contractId: activeProfile.apiContract.contractId, revision: activeProfile.apiContract.contractRevision,
-              authority: 'model_vendor' as const, state: 'declared' as const,
+              authority: activeProfile.apiContract.contractId.startsWith('relay.unicompapi-www.') ? 'relay' as const : 'model_vendor' as const, state: 'declared' as const,
               rules: activeProfile.apiContract.rules
             } } : {}),
             productFeatures: productFeatures.length > 0 ? productFeatures : undefined

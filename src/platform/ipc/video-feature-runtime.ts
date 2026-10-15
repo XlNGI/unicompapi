@@ -6,6 +6,8 @@ import {
   createProviderInvocationEvent,
   createLocalResultObservation,
   recoverRemoteCompletedExecution,
+  canQueryKnownRemoteVideoExecution,
+  recoverQueriedRemoteVideoExecution,
   isTerminalExecutionState,
   toTaskId,
   toIsoTimestamp,
@@ -199,8 +201,7 @@ export function createVideoFeatureControllerRuntime(
         task.submission.kind !== 'video_generation' ||
         !execution ||
         execution.state !== 'failed' ||
-        execution.failure?.stage !== 'downloading' ||
-        execution.failure.retryability !== 'retryable' ||
+        !(execution.failure?.stage === 'downloading' && execution.failure.retryability === 'retryable' || canQueryKnownRemoteVideoExecution(execution)) ||
         !execution.remoteOperationId
       ) {
         throw new Error('This task does not have a recoverable video result download');
@@ -228,10 +229,12 @@ export function createVideoFeatureControllerRuntime(
       if (!attached) {
         throw new Error('The original video route cannot be restored');
       }
-      const recovered = recoverRemoteCompletedExecution(
-        execution,
-        toIsoTimestamp(now())
-      );
+      const queryRecovery = canQueryKnownRemoteVideoExecution(execution);
+      if (queryRecovery && (!options.asyncOperationPort || (await options.asyncOperationPort.query(execution.remoteOperationId)).state !== 'completed')) {
+        throw new Error('原任务尚未确认可交付，请稍后查询原任务，勿重新生成。');
+      }
+      const recovered = queryRecovery ? recoverQueriedRemoteVideoExecution(execution, toIsoTimestamp(now())) :
+        recoverRemoteCompletedExecution(execution, toIsoTimestamp(now()));
       await executions.save(recovered);
       const received = await recoveryResultReceiver.receive(recovered.id);
       if (!received.ok || !received.value.works[0]) {
@@ -651,6 +654,8 @@ function userFacingSubmissionFeedback(
   phase: 'before_request' | 'after_request'
 ): string {
   switch (safeCode) {
+    case 'www_video.generation_not_submitted':
+      return '报价、参数或素材检查未通过，尚未提交收费生成。请检查报价上限和素材后重试。';
     case 'vidu.credential_unavailable':
       return '凭证不可用：请到服务商连接里重新保存 Token 后再生成';
     case 'vidu.credit_insufficient':

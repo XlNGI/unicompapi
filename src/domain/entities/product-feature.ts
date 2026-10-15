@@ -10,7 +10,8 @@ export const productFeatures = [
   'reference_to_image',
   'image_edit',
   'text_to_video',
-  'image_to_video'
+  'image_to_video',
+  'video_edit'
 ] as const;
 export type ProductFeature = (typeof productFeatures)[number];
 
@@ -25,7 +26,8 @@ export const productFeatureInternalPurposes: Readonly<
   reference_to_image: 'reference_to_image',
   image_edit: 'image_editing',
   text_to_video: 'video_generation',
-  image_to_video: 'reference_to_video'
+  image_to_video: 'reference_to_video',
+  video_edit: 'reference_to_video'
 };
 
 export const parameterSchemaExposures = [
@@ -271,6 +273,10 @@ export function validateProductFeatureRequest(
   }
   if (subject.surface === 'quick' && !['text_to_image', 'text_to_video'].includes(feature)) {
     throw featureConstraint('Quick creation only supports text-to-image and text-to-video');
+  }
+  if (feature === 'video_edit') {
+    if (videoCount !== 1 || imageCount !== 0 || subject.surface !== 'professional') throw featureConstraint('Video editing requires one video on the professional surface');
+    return;
   }
   if (feature === 'text_to_image' || feature === 'text_to_video') {
     if (imageCount !== 0 || videoCount !== 0) {

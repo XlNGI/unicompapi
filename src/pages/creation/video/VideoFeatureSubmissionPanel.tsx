@@ -234,7 +234,7 @@ export function VideoFeatureSubmissionPanel({
   const progressFailure = progressRecord?.failureMessage;
   const featureSelection = draft.featureSelection ?? {
     productFeature: draft.mode === 'image_to_video'
-      ? 'image_to_video' as const
+      ? draft.imageToVideo.source?.mediaKind === 'video' ? 'video_edit' as const : 'image_to_video' as const
       : 'text_to_video' as const,
     parameterValues: {}
   };

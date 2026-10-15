@@ -58,10 +58,12 @@ describe('ProductFeature and ParameterSchema V2 contracts', () => {
       'reference_to_image',
       'image_edit',
       'text_to_video',
-      'image_to_video'
+      'image_to_video',
+      'video_edit'
     ]);
     expect(productFeatureToInternalPurpose('text_to_image')).toBe('image_generation');
     expect(productFeatureToInternalPurpose('image_to_video')).toBe('reference_to_video');
+    expect(productFeatureToInternalPurpose('video_edit')).toBe('reference_to_video');
     expect(productFeatureToInternalPurpose('text_chat')).toBe('text_execution');
   });
 

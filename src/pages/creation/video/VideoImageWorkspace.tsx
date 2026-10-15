@@ -114,6 +114,7 @@ export function VideoImageWorkspace({
   const referenceImages = draft.imageToVideo.referenceImages ?? (
     draft.imageToVideo.source ? [draft.imageToVideo.source] : []
   );
+  const videoEdit = draft.imageToVideo.source?.mediaKind === 'video';
   const unsupportedContexts = draft.contextReferences.filter(
     (reference) =>
       reference.kind !== 'project_context' ||
@@ -130,11 +131,11 @@ export function VideoImageWorkspace({
       draft.prompt.finalPrompt.trim() === enhancementContent?.trim());
   const blockedReason =
     draft.featureSelection != null &&
-    draft.featureSelection.productFeature !== 'image_to_video'
+    draft.featureSelection.productFeature !== (videoEdit ? 'video_edit' : 'image_to_video')
       ? '当前草稿没有固定为图生视频，请重新保存草稿。'
       : draft.imageToVideo.materials
         ? '此旧草稿仍含动态素材槽位，请先明确迁移或移除。'
-      : referenceImages.length === 0 || referenceImages.some((reference) => reference.mediaKind !== 'image')
+      : referenceImages.length === 0 || (!videoEdit && referenceImages.some((reference) => reference.mediaKind !== 'image'))
           ? '图生视频至少需要一张受控参考图片。'
           : hasInvalidImageReference(draft.prompt.finalPrompt)
             ? '提示词包含已删除图片的失效引用，请修改提示词后再提交。'
@@ -155,7 +156,7 @@ export function VideoImageWorkspace({
         reference.assetId,
         await videoWorkspaces.createMaterialPreview(draft.draftId, {
           kind: 'image_source',
-          referenceIndex
+          ...(reference.mediaKind === 'image' ? { referenceIndex } : {})
         })
       ] as const)
     ).then((previewResults) => {
@@ -202,7 +203,7 @@ export function VideoImageWorkspace({
     changeDraft({
       ...draft,
       featureSelection: {
-        productFeature: 'image_to_video',
+        productFeature: videoEdit ? 'video_edit' : 'image_to_video',
         parameterValues: {}
       }
     });
@@ -242,7 +243,24 @@ export function VideoImageWorkspace({
     return result.value as ImageVideoDraftDto;
   }
 
+  async function selectVideo() {
+    if (!videoWorkspaces || busy || referenceImages.length > 0) return;
+    setBusy(true);
+    try {
+      const saved = await ensureSavedDraft();
+      if (!saved) return;
+      const result = await videoWorkspaces.selectMaterial(saved.draftId, imageSourceTarget, 'video');
+      if (!result.ok) { onMessage(describeWorkspaceError(result.error)); return; }
+      if (result.value.draft) {
+        onDraftPersisted(result.value.draft as ImageVideoDraftDto);
+        onMessage('视频已完成本地校验；请选择支持视频编辑的服务。');
+      }
+    } catch { onMessage('选择视频失败，请重试。'); }
+    finally { setBusy(false); }
+  }
+
   async function selectImage() {
+    if (videoEdit) return;
     if (!videoWorkspaces || busy) return;
     setBusy(true);
     onMessage('');
@@ -308,6 +326,7 @@ export function VideoImageWorkspace({
   }
 
   async function importImage(file: File, dropToken?: string) {
+    if (videoEdit) return;
     if (!videoWorkspaces || busy) return;
     setBusy(true);
     onMessage('');
@@ -373,6 +392,7 @@ export function VideoImageWorkspace({
   }
 
   async function useWorkAsReference(workId: string) {
+    if (videoEdit) return;
     if (!videoWorkspaces || busy) return;
     setBusy(true);
     onMessage('');
@@ -450,6 +470,7 @@ export function VideoImageWorkspace({
       const remaining = referenceImages.filter((_, itemIndex) => itemIndex !== removedIndex);
       const updated = {
         ...saved,
+        featureSelection: { productFeature: 'image_to_video' as const, parameterValues: {} },
         imageToVideo: {
           ...saved.imageToVideo,
           source: undefined,
@@ -534,14 +555,14 @@ export function VideoImageWorkspace({
             <span aria-hidden="true">1</span>
             <div>
               <h2>创作输入</h2>
-              <p>填写创作需求，并选择一张或多张已完成本地校验的参考图片。</p>
+              <p>选择参考图片生成视频，或选择一段本地视频进行编辑。</p>
             </div>
           </header>
           <div className="uc-image-quick__field">
             <div className="uc-image-professional__reference-field">
-              <span>参考图片 <small>已添加 {referenceImages.length} 张</small></span>
+              <span>{videoEdit ? '原视频' : '参考图片'} <small>已添加 {referenceImages.length} {videoEdit ? '段' : '张'}</small></span>
               <ControlledImageDropZone
-                disabled={!videoWorkspaces || busy}
+                disabled={!videoWorkspaces || busy || videoEdit}
                 hasImage={referenceImages.length > 0}
                 onDropFile={(file, dropToken) => void importImage(file, dropToken)}
                 onDropWork={(workId) => void useWorkAsReference(workId)}
@@ -558,7 +579,9 @@ export function VideoImageWorkspace({
                       {referenceImages.map((reference, index) => (
                         <div className="uc-image-professional__reference-item" key={reference.assetId}>
                           <div className="uc-image-professional__reference-thumbnail">
-                            {previews[reference.assetId]?.mediaKind === 'image' ? (
+                            {previews[reference.assetId]?.mediaKind === 'video' ? (
+                              <video controls preload="metadata" src={previews[reference.assetId].url} />
+                            ) : previews[reference.assetId]?.mediaKind === 'image' ? (
                               <img alt={`图${index + 1}`} src={previews[reference.assetId].url} />
                             ) : (
                               <span className="uc-image-professional__reference-status">
@@ -589,10 +612,10 @@ export function VideoImageWorkspace({
                               <LuTrash2 aria-hidden="true" />
                             </Button>
                           </div>
-                          <span className="uc-image-professional__reference-label">图{index + 1}</span>
+                          <span className="uc-image-professional__reference-label">{videoEdit ? '原视频' : <>图{index + 1}</>}</span>
                         </div>
                       ))}
-                      <Button
+                      {!videoEdit && <Button
                         aria-label="继续添加图片"
                         className="uc-image-professional__reference-add"
                         disabled={!videoWorkspaces || busy}
@@ -601,7 +624,7 @@ export function VideoImageWorkspace({
                         variant="secondary"
                       >
                         <LuPlus aria-hidden="true" />
-                      </Button>
+                      </Button>}
                     </div>
                   ) : (
                     <div className="uc-image-professional__placeholder">
@@ -619,6 +642,7 @@ export function VideoImageWorkspace({
                   )}
                 </section>
               </ControlledImageDropZone>
+              {referenceImages.length === 0 && <Button disabled={!videoWorkspaces || busy} onClick={() => void selectVideo()} variant="secondary">选择视频进行编辑</Button>}
             </div>
             <span>原始创作需求 <span className="uc-dynamic-parameters__required">必填</span></span>
             <div className="uc-image-professional__prompt-input">

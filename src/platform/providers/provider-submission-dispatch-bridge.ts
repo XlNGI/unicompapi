@@ -116,6 +116,7 @@ export function safeCodeForProviderMessage(
   message: string,
   fallback: string
 ): string {
+  if (message === 'The WWW video generation request was not submitted') return 'www_video.generation_not_submitted';
   if (message === 'The Vidu credential is unavailable') {
     return 'vidu.credential_unavailable';
   }

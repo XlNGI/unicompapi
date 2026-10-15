@@ -44,6 +44,7 @@ import {
   newApiChatUsageSchema,
   newApiImageUsageSchema,
   newApiVideoUsageSchema,
+  wwwVideoUsageSchema,
   seedanceVideoUsageSchema,
   viduUsageSchema,
   diagnosticErrorName,
@@ -169,6 +170,7 @@ const providerUsageSchemas = new ProviderUsageSchemaRegistry([
   newApiChatUsageSchema,
   newApiImageUsageSchema,
   newApiVideoUsageSchema,
+  wwwVideoUsageSchema,
   seedanceVideoUsageSchema,
   viduUsageSchema
 ]);

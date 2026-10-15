@@ -45,7 +45,8 @@ import {
   isOpenAiCompatiblePackageId,
   isOpenAiCompatiblePackageVersion
 } from './openai-compatible-identity';
-import { UNICOMPAPI_PROVIDER_PACKAGE_ID } from './unicompapi-contracts';
+import { UNICOMPAPI_PROVIDER_PACKAGE_ID, UNICOMPAPI_WWW_PROVIDER_PACKAGE_ID } from './unicompapi-contracts';
+import { WwwVideoAdapter, type ControlledWwwVideoPort } from './www-video-adapter';
 import { UNICOMPAPI_SEEDANCE_2_IMAGE_TO_VIDEO_PARAMETER_SCHEMA_ID } from './unicompapi-model-capabilities';
 import { NewApiRuntimeError, type NewApiSharedRuntime } from './newapi-runtime';
 import { ControlledImageMaterialError } from '../vidu/controlled-image-material';
@@ -165,6 +166,7 @@ export class NewApiVideoAdapter
   private readonly operations = new Map<string, NewApiOperationContext>();
   private readonly results = new Map<string, NewApiResultSnapshot>();
   private disposed = false;
+  private readonly www: WwwVideoAdapter;
 
   constructor(
     private readonly runtime: NewApiSharedRuntime,
@@ -175,8 +177,9 @@ export class NewApiVideoAdapter
     private readonly usage: NewApiVideoUsageObservationSinkPort,
     private readonly ids: NewApiVideoAdapterIdFactory,
     private readonly nowTimestamp: () => IsoTimestamp = () =>
-      toIsoTimestamp(new Date().toISOString())
-  ) {}
+      toIsoTimestamp(new Date().toISOString()),
+    videos?: ControlledWwwVideoPort
+  ) { this.www = new WwwVideoAdapter(runtime, connections, credentials, images, usage, ids, videos); }
 
   async submit(input: {
     readonly routeSnapshot: unknown;
@@ -184,6 +187,7 @@ export class NewApiVideoAdapter
     readonly beforeRequestStarted?: () => Promise<void>;
     readonly signal?: AbortSignal;
   }): Promise<ProviderSubmitOutcome> {
+    if (isWwwRoute(input.routeSnapshot)) return this.www.submit(input);
     let requestStarted = false;
     let submissionContext: NewApiOperationContext | undefined;
     try {
@@ -265,6 +269,7 @@ export class NewApiVideoAdapter
     readonly invocationAttemptId: ProviderInvocationAttemptId;
     readonly usageAlreadyPersisted?: boolean;
   }): Promise<void> {
+    if (isWwwRoute(input.routeSnapshot)) return this.www.attachOperation(input);
     this.requireActive();
     const route = validateRoute(input.routeSnapshot);
     await this.requireParameterSchema(route);
@@ -299,6 +304,7 @@ export class NewApiVideoAdapter
     providerOperationId: string,
     signal?: AbortSignal
   ): Promise<ProviderAsyncOperationStatus> {
+    if (this.www.knowsOperation(providerOperationId)) return this.www.query(providerOperationId, signal);
     this.requireActive();
     const remoteId = requireRemoteId(providerOperationId);
     const context = this.requireOperation(remoteId);
@@ -352,6 +358,7 @@ export class NewApiVideoAdapter
   }
 
   async cancel(providerOperationId: string): Promise<ProviderCancelOutcome> {
+    if (this.www.knowsOperation(providerOperationId)) return this.www.cancel();
     this.requireActive();
     const remoteId = requireRemoteId(providerOperationId);
     this.requireOperation(remoteId);
@@ -363,6 +370,7 @@ export class NewApiVideoAdapter
   async getCompletion(
     remoteOperationId: string
   ): Promise<VideoRemoteCompletionFact | undefined> {
+    if (this.www.knowsOperation(remoteOperationId)) return this.www.getCompletion(remoteOperationId);
     const status = await this.query(remoteOperationId);
     if (status.state === 'completed') return { state: 'completed' };
     if (status.state === 'failed') {
@@ -380,6 +388,7 @@ export class NewApiVideoAdapter
   async listResults(
     remoteOperationId: string
   ): Promise<readonly VideoRemoteResultDescriptor[]> {
+    if (this.www.knowsOperation(remoteOperationId)) return this.www.listResults(remoteOperationId);
     const remoteId = requireRemoteId(remoteOperationId);
     await this.loadCurrentResult(remoteId);
     return [{
@@ -394,6 +403,7 @@ export class NewApiVideoAdapter
     remoteOperationId: string,
     remoteResultId: string
   ): Promise<Readable> {
+    if (this.www.knowsOperation(remoteOperationId)) return this.www.openDownload(remoteOperationId, remoteResultId);
     const remoteId = requireRemoteId(remoteOperationId);
     if (remoteResultId !== resultId) {
       throw new VideoResultPortError(
@@ -440,12 +450,13 @@ export class NewApiVideoAdapter
     if (this.disposed) return;
     this.disposed = true;
     this.operations.clear();
+    this.www.dispose();
     this.results.clear();
     this.runtime.dispose();
   }
 
   get attachedOperationCount(): number {
-    return this.operations.size;
+    return this.operations.size + this.www.attachedOperationCount;
   }
 
   private requireActive(): void {
@@ -455,7 +466,7 @@ export class NewApiVideoAdapter
   }
 
   knowsOperation(providerOperationId: string): boolean {
-    return this.operations.has(providerOperationId);
+    return this.operations.has(providerOperationId) || this.www.knowsOperation(providerOperationId);
   }
 
   private requireOperation(providerOperationId: string): NewApiOperationContext {
@@ -580,6 +591,10 @@ export class NewApiVideoAdapter
     }
     return snapshot;
   }
+}
+
+function isWwwRoute(value: unknown): boolean {
+  return typeof value === 'object' && value !== null && 'packageId' in value && value.packageId === UNICOMPAPI_WWW_PROVIDER_PACKAGE_ID;
 }
 
 export function newApiVideoRecoveryDecision(state: string): {

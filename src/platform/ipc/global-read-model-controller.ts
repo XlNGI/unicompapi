@@ -2,6 +2,7 @@ import { stat, statfs } from 'node:fs/promises';
 import type { Execution, FileReference, Task, Work } from '../../domain';
 import {
   canRecoverRemoteCompletedExecution,
+  canQueryKnownRemoteVideoExecution,
   toTaskId,
   toWorkId
 } from '../../domain';
@@ -715,9 +716,9 @@ function toTaskDetails(
     canRecoverVideoResult:
       entry.projectId === currentProjectId &&
       task.submission.kind === 'video_generation' &&
-      summary.latestExecutionState === 'failed' &&
+      (summary.latestExecutionState === 'failed' &&
       summary.retryability === 'retryable' &&
-      latest?.failure?.stage === 'downloading'
+      latest?.failure?.stage === 'downloading' || Boolean(latest && canQueryKnownRemoteVideoExecution(latest)))
   };
 }
 

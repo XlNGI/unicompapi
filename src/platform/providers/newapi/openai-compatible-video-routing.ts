@@ -1,4 +1,6 @@
 import { randomUUID } from 'node:crypto';
+import { routeWwwVideoProfile } from './www-video-contracts';
+import { UNICOMPAPI_WWW_PROVIDER_PACKAGE_ID } from './unicompapi-contracts';
 import {
   createModelCapabilityEvidence,
   createProviderProtocolBinding,
@@ -51,6 +53,7 @@ export function routeOpenAiCompatibleVideoProfile(
   const connection = snapshot.connections.find(
     (candidate) => candidate.id === model.connectionId
   );
+  if (connection?.packageId === UNICOMPAPI_WWW_PROVIDER_PACKAGE_ID) return routeWwwVideoProfile(snapshot, model, now);
   if (
     !connection ||
     connection.providerId !== model.providerId ||

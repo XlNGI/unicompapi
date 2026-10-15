@@ -5,8 +5,9 @@ import { Button } from '../../components/Button';
 import type { ModelApiContractSummaryDto, ProviderApi, ProviderFrameworkResult, ProviderModelSummaryDto } from '../../shared/provider-ipc';
 import type { ParameterCompatibilityRuleV1 } from '../../domain/entities/parameter-compatibility';
 
-export function ModelContractBinding({ model, api, busy, runAction }: {
+export function ModelContractBinding({ model, packageId, api, busy, runAction }: {
   readonly model: ProviderModelSummaryDto;
+  readonly packageId?: string;
   readonly api: ProviderApi;
   readonly busy: boolean;
   readonly runAction: <T>(action: () => Promise<ProviderFrameworkResult<T>>, message: string) => Promise<boolean>;
@@ -19,10 +20,11 @@ export function ModelContractBinding({ model, api, busy, runAction }: {
     let current = true;
     api.listModelApiContracts?.().then(result => {
       if (!current) return;
-      if (result.ok) setContracts(result.value); else setError('无法读取合同目录。');
+      if (result.ok) setContracts(result.value.filter(c => packageId === 'provider-package-unicompapi-www'
+        ? c.authority === 'relay' && c.modelNames.includes(model.providerModelKey) : c.authority !== 'relay')); else setError('无法读取合同目录。');
     }).catch(() => { if (current) setError('无法读取合同目录。'); });
     return () => { current = false; };
-  }, [api]);
+  }, [api, model.providerModelKey, packageId]);
   useEffect(() => { setSelection(model.apiContract?.contractId ?? null); setRulesText(JSON.stringify(model.apiContract?.rules ?? [], null, 2)); setError(''); }, [model.modelId, model.apiContract]);
   const selected = contracts.find(contract => contract.contractId === selection);
   return <details className="uc-provider-page__native-search">
@@ -31,24 +33,24 @@ export function ModelContractBinding({ model, api, busy, runAction }: {
       event.preventDefault();
       if (!selected || !api.bindModelApiContract || busy) return;
       let rules: readonly ParameterCompatibilityRuleV1[];
-      try { const parsed: unknown = JSON.parse(rulesText); if (!Array.isArray(parsed)) throw new Error(); rules = parsed; }
+      try { const parsed: unknown = selected.authority === 'relay' ? [] : JSON.parse(rulesText); if (!Array.isArray(parsed)) throw new Error(); rules = parsed; }
       catch { setError('兼容规则必须是 JSON 列表。'); return; }
       setError('');
       void runAction(() => api.bindModelApiContract!({ modelId: model.modelId, expectedRevision: model.revision,
         binding: { schemaVersion: 1, contractId: selected.contractId, contractRevision: selected.revision, rules }, confirmed: true }),
-        '已绑定官方合同并记录兼容声明；尚未实测中转调用。');
+        '已绑定 API 合同；真实服务验收状态另行记录。');
     }}>
-      <p className="uc-provider-page__muted">选择该模型实际兼容的厂商 API。保存只更新本地配置；参数校验和显示将使用这份合同。</p>
+      <p className="uc-provider-page__muted">选择该模型实际使用的 API 合同；参数校验和显示将使用这份合同。网关合同仅适用于对应网关和精确型号。</p>
       {model.apiContract && <p>当前绑定：{model.apiContract.contractId} · 已声明，未实测</p>}
       <SelectPicker aria-label="模型 API 合同" block cleanable={false} disabled={busy} value={selection}
         data={contracts.map(contract => ({ value: contract.contractId,
-          label: `${contract.vendor} / ${contract.modelNames.length ? contract.modelNames.join('、') : contract.contractId}` }))}
-        onChange={value => setSelection(value)} placeholder="选择已确认兼容的官方 API" />
-      {selected && <p className="uc-provider-page__muted">官方依据：{selected.sourceUrls.map(url => <a key={url} href={url} target="_blank" rel="noreferrer">官方文档 </a>)}</p>}
-      <details><summary>参数兼容规则</summary>
+          label: `${contract.authority === 'relay' ? '网关合同' : '厂商合同'} · ${contract.vendor} / ${contract.modelNames.length ? contract.modelNames.join('、') : contract.contractId}` }))}
+        onChange={value => setSelection(value)} placeholder="选择已确认兼容的 API 合同" />
+      {selected && <p className="uc-provider-page__muted">合同依据：{selected.sourceUrls.map(url => <a key={url} href={url} target="_blank" rel="noreferrer">{selected.authority === 'relay' ? '网关文档 ' : '厂商文档 '}</a>)}</p>}
+      {selected?.authority !== 'relay' && <details><summary>参数兼容规则</summary>
         <p className="uc-provider-page__muted">完全一致时保留空列表。差异可声明 fieldId、targetPath、unsupported、minimum、maximum、options 或 enumMappings；范围只能收紧，已填写的值不会被静默丢弃。</p>
         <Input as="textarea" rows={5} aria-label="参数兼容规则" value={rulesText} disabled={busy} onChange={setRulesText} maxLength={16000} />
-      </details>
+      </details>}
       {error && <p role="alert">{error}</p>}
       <Button disabled={busy || !selected} type="submit">确认兼容并绑定合同</Button>
     </form>

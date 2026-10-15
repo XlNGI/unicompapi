@@ -39,7 +39,8 @@ const productFeatureLabels: Readonly<Record<string, string>> = {
   reference_to_image: '图生图',
   image_edit: '图片编辑',
   text_to_video: '文生视频',
-  image_to_video: '图生视频'
+  image_to_video: '图生视频',
+  video_edit: '视频编辑'
 };
 
 export interface ProviderManageViewProps {
@@ -351,7 +352,7 @@ export function ProviderManageView({
                     </div>
                   </div>
                   {selectedModel && providersApi?.bindModelApiContract && (
-                    <ModelContractBinding key={selectedModel.modelId} model={selectedModel} api={providersApi} busy={busy} runAction={runAction} />
+                    <ModelContractBinding key={selectedModel.modelId} model={selectedModel} packageId={registry.connections.find(c => c.connectionId === selectedModel.connectionId)?.packageId} api={providersApi} busy={busy} runAction={runAction} />
                   )}
                   {selectedModel && canConfigureNativeSearch && providersApi?.setNativeSearch && (
                     <details className="uc-provider-page__native-search" key={selectedModel.modelId}>

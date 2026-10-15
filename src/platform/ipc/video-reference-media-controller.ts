@@ -540,10 +540,11 @@ function resolveTarget(
         'The image source target belongs only to image-to-video drafts'
       );
     }
-    if (requestedKind && requestedKind !== 'image') {
+    if (requestedKind === 'video' && (target.referenceIndex !== undefined ||
+        draft.imageToVideo.source?.mediaKind === 'image' || (draft.imageToVideo.referenceImages?.length ?? 0) > 0)) {
       throw mediaError(
         'material_type_mismatch',
-        'Image-to-video requires image reference inputs'
+        'Video editing requires one original video source'
       );
     }
     const references = draft.imageToVideo.referenceImages ?? [];
@@ -607,6 +608,7 @@ function attachSelection(
             source: selection,
             referenceImages: undefined
           },
+          featureSelection: { productFeature: asset.mediaKind === 'video' ? 'video_edit' as const : 'image_to_video' as const, parameterValues: {} },
           updatedAt
         }
     : replaceSlotSelection(draft, target.slotId, selection, updatedAt);
@@ -637,6 +639,7 @@ function clearSelection(
             (draft as Extract<VideoWorkspaceDraft, { mode: 'image_to_video' }>).imageToVideo,
             target.referenceIndex
           ),
+          ...(draft.featureSelection?.productFeature === 'video_edit' ? { featureSelection: { productFeature: 'image_to_video' as const, parameterValues: {} } } : {}),
           updatedAt
         }
     : replaceSlotSelection(draft, target.slotId, undefined, updatedAt);

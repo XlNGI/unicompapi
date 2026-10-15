@@ -9,3 +9,4 @@ export * from './newapi-chat-adapter';
 export * from './newapi-image-adapter';
 export * from './newapi-video-adapter';
 export * from './newapi-billing';
+export * from './www-video-contracts';

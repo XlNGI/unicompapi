@@ -52,6 +52,7 @@ import {
   unicompapiStudioH3PackagedModelContracts,
   unicompapiStudioH3VideoUsageSchema
 } from './unicompapi-studio-h3/unicompapi-studio-h3-contracts';
+import { wwwVideoFeatureContracts } from './newapi/www-video-contracts';
 
 export class ProjectVideoFeatureSubjectResolver
   implements FeatureSubjectResolverPort {
@@ -107,7 +108,8 @@ export class ProjectVideoFeatureSubjectResolver
         : draft.imageToVideo.source
           ? [draft.imageToVideo.source]
           : [];
-      if (selections.length === 0 || selections.some((selection) => selection.mediaKind !== 'image')) {
+      const videoEdit = productFeature === 'video_edit';
+      if (selections.length === 0 || selections.some((selection) => selection.mediaKind !== (videoEdit ? 'video' : 'image')) || videoEdit && selections.length !== 1) {
         throw new TypeError('Image-to-video requires at least one image reference');
       }
       if (draft.prompt.finalPrompt.includes('（已失效）')) {
@@ -115,7 +117,7 @@ export class ProjectVideoFeatureSubjectResolver
       }
       for (const selection of selections) {
         const asset = await this.assets.get(toAssetId(selection.assetId));
-        if (!asset || asset.projectId !== this.projectId || asset.mediaKind !== 'image') {
+        if (!asset || asset.projectId !== this.projectId || asset.mediaKind !== selection.mediaKind) {
           throw new TypeError('Selected image source is unavailable');
         }
         materialReferences.push({
@@ -136,8 +138,8 @@ export class ProjectVideoFeatureSubjectResolver
       subject: parsed,
       productFeature,
       surface,
-      imageCount: materialReferences.length,
-      videoCount: 0,
+      imageCount: productFeature === 'video_edit' ? 0 : materialReferences.length,
+      videoCount: productFeature === 'video_edit' ? materialReferences.length : 0,
       contextCount: contextSnapshots.length,
       parameterValues: routeParameterValues(
         draft.featureSelection?.parameterValues ?? {}
@@ -324,6 +326,7 @@ export function createVideoProviderFeatureContracts(): readonly ProviderFeatureC
     });
   });
   return [
+    ...wwwVideoFeatureContracts(),
     ...viduContracts,
     ...minimaxContracts,
     ...unicompapiStudioH3Contracts,
@@ -412,6 +415,7 @@ export function createVideoProviderFeatureContracts(): readonly ProviderFeatureC
 }
 
 function featureForDraft(draft: VideoWorkspaceDraft) {
+  if (draft.mode === 'image_to_video' && draft.imageToVideo.source?.mediaKind === 'video') return 'video_edit' as const;
   const explicit = draft.featureSelection?.productFeature;
   if (explicit) return explicit;
   if (draft.mode === 'quick_video') {

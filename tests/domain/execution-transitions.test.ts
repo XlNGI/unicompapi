@@ -1,6 +1,8 @@
 import { describe, expect, it } from 'vitest';
 import {
   canRecoverRemoteCompletedExecution,
+  canQueryKnownRemoteVideoExecution,
+  recoverQueriedRemoteVideoExecution,
   createRetryExecution,
   recoverRemoteCompletedExecution,
   InvalidStateTransitionError,
@@ -155,6 +157,22 @@ describe('execution state machine', () => {
       state: 'remote_completed',
       failure: undefined
     });
+  });
+
+  it('recovers a confirmed original video after tracking failure without relaxing blind retry', () => {
+    const { execution } = createLinkedExecutionFixture();
+    const queued = transitionExecution(transitionExecution(execution, 'submitting', t3), 'queued', t4, {
+      remoteOperationId: 'original-video', providerOperationRecordId: toProviderOperationRecordId('known-operation'), submissionOutcome: 'accepted_async'
+    });
+    const failed = transitionExecution(queued, 'failed', t5, { failure: { stage: 'queued', message: 'Query interrupted', retryability: 'unknown' } });
+    expect(canQueryKnownRemoteVideoExecution(failed)).toBe(true);
+    expect(() => recoverRemoteCompletedExecution(failed, t6)).toThrow(RetryNotAllowedError);
+    expect(recoverQueriedRemoteVideoExecution(failed, t6)).toMatchObject({ id: failed.id, state: 'remote_completed', remoteOperationId: 'original-video', failure: undefined });
+    for (const patch of [{ remoteOperationId: undefined }, { providerOperationRecordId: undefined }, { submissionOutcome: 'submission_outcome_unknown' as const },
+      { failure: { ...failed.failure!, retryability: 'not_retryable' as const } }]) {
+      expect(canQueryKnownRemoteVideoExecution({ ...failed, ...patch })).toBe(false);
+      expect(() => recoverQueriedRemoteVideoExecution({ ...failed, ...patch }, t6)).toThrow(RetryNotAllowedError);
+    }
   });
 
   it('does not allow blind retry while cancellation status is unknown', () => {

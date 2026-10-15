@@ -1,5 +1,7 @@
 import { supportsConversationImageInput } from './conversation-image-input';
 import { buildBoundTextParameterSchema } from './contracts/bound-text-contract';
+import { wwwVideoContract, wwwVideoContractFingerprint, listWwwVideoContracts, WWW_VIDEO_CONTRACT_PREFIX } from './newapi/www-video-contracts';
+import { UNICOMPAPI_WWW_PROVIDER_PACKAGE_ID, UNICOMPAPI_WWW_BASE_URL, UNICOMPAPI_WWW_ENDPOINT_POLICY_ID } from './newapi/unicompapi-contracts';
 import { NEWAPI_CHAT_ADAPTER_ID, NEWAPI_CHAT_RESULT_SCHEMA_ID, NEWAPI_TEXT_CONSTRAINT_SET_ID, newApiChatUsageSchema } from './newapi/newapi-contracts';
 import { latestCapabilityEvidenceByCapability, pinCapabilityEvidence } from './model-capability-selection';
 import { createHash } from 'node:crypto';
@@ -127,12 +129,18 @@ export class RegistryFeatureCandidateSource implements FeatureCandidateSourcePor
             model.providerModelKey,
             feature.productFeature
           )) continue;
-          const contract: ProviderFeatureContractV1 | undefined = profile.apiContract ? {
+          const isWwwVideo = profile.apiContract?.contractId.startsWith(WWW_VIDEO_CONTRACT_PREFIX) === true;
+          const wwwContract = isWwwVideo ? wwwVideoContract(model.providerModelKey) : undefined;
+          if (isWwwVideo && (profile.packageId !== UNICOMPAPI_WWW_PROVIDER_PACKAGE_ID || profile.adapterKey !== NEWAPI_VIDEO_ADAPTER_ID ||
+              connection.endpoint !== UNICOMPAPI_WWW_BASE_URL || connection.endpointPolicyId !== UNICOMPAPI_WWW_ENDPOINT_POLICY_ID ||
+              !wwwContract || !(wwwContract.features as readonly string[]).includes(subject.productFeature) || wwwContract.id !== profile.apiContract?.contractId || wwwContract.revision !== profile.apiContract.contractRevision ||
+              wwwVideoContractFingerprint(wwwContract) !== profile.apiContract.contractFingerprint)) continue;
+          const contract: ProviderFeatureContractV1 | undefined = profile.apiContract && !isWwwVideo ? {
             parameterSchema: buildBoundTextParameterSchema(profile.apiContract, feature.productFeature),
             resultSchemaId: NEWAPI_CHAT_RESULT_SCHEMA_ID, resultSchemaRevision: 1, usageSchema: newApiChatUsageSchema,
             constraintSetId: NEWAPI_TEXT_CONSTRAINT_SET_ID, constraintSetRevision: 1, featureMappingVersion: 1
           } : this.contracts.resolve(feature);
-          if (profile.apiContract && profile.adapterKey !== NEWAPI_CHAT_ADAPTER_ID) continue;
+          if (profile.apiContract && !isWwwVideo && profile.adapterKey !== NEWAPI_CHAT_ADAPTER_ID) continue;
           if (!contract) continue;
           if (!packagePublishesAdapter(this.packages, profile.packageId, profile.adapterKey)) {
             // Drop stale profiles after a package stops publishing the adapter
@@ -201,7 +209,7 @@ export class RegistryFeatureCandidateSource implements FeatureCandidateSourcePor
               connectionState: connection.state,
               profileStatus: profile.status,
               ...(profile.apiContract ? { contractBindingDeclared: true } : {}),
-              featureSupported: [...latestEvidence.values()].every(evidence => ['verified_supported', 'user_confirmed', 'declared_supported'].includes(evidence.state)) && supportsRequestedImageCount(
+              featureSupported: (!isWwwVideo || wwwVideoSubjectSupported(subject)) && [...latestEvidence.values()].every(evidence => ['verified_supported', 'user_confirmed', 'declared_supported'].includes(evidence.state)) && supportsRequestedImageCount(
                 subject,
                 feature.productFeature,
                 contract.parameterSchema.schemaId,
@@ -209,7 +217,7 @@ export class RegistryFeatureCandidateSource implements FeatureCandidateSourcePor
                 contract.constraintSetId,
                 profile.packageId
               ) &&
-                (!profile.apiContract || subject.imageCount === 0 || [...latestCapabilityEvidenceByCapability(imageEvidence).values()]
+                (isWwwVideo || !profile.apiContract || subject.imageCount === 0 || [...latestCapabilityEvidenceByCapability(imageEvidence).values()]
                   .some(evidence => ['verified_supported', 'user_confirmed', 'declared_supported'].includes(evidence.state))) &&
                 (subject.surface !== 'conversation' || !['text_chat', 'text_reasoning'].includes(subject.productFeature) || subject.imageCount === 0 ||
                   supportsConversationImageInput(profile.adapterKey, imageEvidence)),
@@ -262,6 +270,16 @@ export class RegistryFeatureCandidateSource implements FeatureCandidateSourcePor
   }
 }
 
+function wwwVideoSubjectSupported(subject: ResolvedFeatureSubjectV1): boolean {
+  if (subject.productFeature === 'text_to_video') return subject.imageCount === 0 && subject.videoCount === 0;
+  if (subject.productFeature === 'video_edit') return subject.imageCount === 0 && subject.videoCount === 1;
+  if (subject.productFeature !== 'image_to_video' || subject.videoCount !== 0 || subject.imageCount < 1) return false;
+  const mode = subject.parameterValues.generation_mode;
+  if (mode === 'first_frame' || mode === 'last_frame') return subject.imageCount === 1;
+  if (mode === 'first_last_frame') return subject.imageCount === 2;
+  return mode === undefined || mode === 'reference_images';
+}
+
 function supportsRequestedImageCount(
   subject: ResolvedFeatureSubjectV1,
   feature: ProductFeature,
@@ -271,6 +289,10 @@ function supportsRequestedImageCount(
   packageId: string
 ): boolean {
   if (subject.imageCount <= 1) return true;
+  if (packageId === 'provider-package-unicompapi-www' && feature === 'image_to_video') {
+    const contract = listWwwVideoContracts().find(c => parameterSchemaId === `parameters.unicompapi-www.${c.modelKey}.image_to_video`);
+    return Boolean(contract && subject.imageCount <= contract.imageLimits.maximum);
+  }
   if (feature !== 'reference_to_image' && feature !== 'image_to_video') return false;
   if (
     feature === 'image_to_video' &&
