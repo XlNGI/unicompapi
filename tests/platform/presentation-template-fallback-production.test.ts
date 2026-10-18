@@ -65,7 +65,7 @@ describe('model design first with one audited local template fallback', () => {
   it.each(['timeout', 'hang', 'invalid', 'missing-tree', 'unfit'] as const)('falls back for %s while retaining all content and publishing one verified Work', async mode => {
     const data = await harness(mode), result = await data.result;
     expect(result.presentationDesign?.path).toBe('legacy-fallback'); expect(data.writes).toHaveLength(1); expect(data.writes[0].designIR).toBeUndefined();
-    expect(data.request).toHaveBeenCalledTimes(mode === 'unfit' ? 3 : 1);
+    expect(data.request).toHaveBeenCalledTimes(['unfit', 'invalid', 'missing-tree'].includes(mode) ? 3 : 1);
     if (mode === 'hang') expect(data.request.mock.calls[0][0].signal.aborted).toBe(true);
     const attempt = parsePresentationDesignAttempt(await data.storage.readJson(presentationAttemptPath(result.execution.id, 0)));
     expect(attempt.plan.snapshot.designPath).toBe('legacy-fallback'); expect(attempt.plan.designIR).toBeUndefined();

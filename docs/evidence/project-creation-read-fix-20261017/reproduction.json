@@ -1,0 +1,20 @@
+{
+  "originalCommit": "c2f8ac696da3fb39dd368233a0142e458e80b9cf",
+  "originalSourceSha256": "3ffe9955a5cc489b86c18561bb69f510f03f71ad074acc327b8337836c83f24c",
+  "before": {
+    "ok": false,
+    "error": {
+      "code": "storage_error",
+      "message": "thread_file_read_disabled"
+    }
+  },
+  "after": {
+    "ok": true,
+    "value": {
+      "items": [],
+      "readAtSequence": 0,
+      "hasMore": false
+    }
+  },
+  "boundary": "exact HEAD adapter transpiled in memory; no session, no file writes outside evidence, no network"
+}

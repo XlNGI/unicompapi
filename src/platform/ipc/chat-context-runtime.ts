@@ -1,4 +1,6 @@
 import { ConversationNativeSearch } from '../providers/conversation-native-search';
+import { readRegisteredOfficeDocument } from '../documents/registered-office-reader';
+import { parseRetainedDocumentMessageResult } from '../../domain/entities/document-generation';
 import { randomUUID, createHash } from 'node:crypto';
 import { ExecutionBudgetError, type ExecutionStopReason } from '../../application/execution-budget';
 import { ConversationCompletionCoordinator } from '../../application/conversation-completion-coordinator';
@@ -84,7 +86,6 @@ import {
 } from '../repositories';
 import { NodeProjectStorage } from '../storage';
 import { ConversationAttachmentContextService } from '../documents/conversation-attachment-context';
-import { ConversationDocumentPageContextService } from '../documents/conversation-document-page-context';
 import { ConversationDocumentToolSessionService } from '../documents/conversation-document-tool-session';
 import { PlatformDocumentDraftCompiler, PlatformDocumentGenerationExecutor } from '../documents/document-generation-application-adapters';
 import { DocumentGenerationRunner } from '../documents/document-generation-runner';
@@ -411,9 +412,6 @@ export function createChatContextRuntime(
       projectId: session.projectId,
       summarizer: classifier
     });
-    const documentPages = new ConversationDocumentPageContextService({
-      rootDirectory: session.rootDirectory, projectId: session.projectId
-    });
     const mutationRenderer = createConfiguredOfficeRenderAdapter();
     const documentTools = new ConversationDocumentToolSessionService({
       rootDirectory: session.rootDirectory, projectId: session.projectId, conversations: conversationFacts,
@@ -471,7 +469,6 @@ export function createChatContextRuntime(
         classifierTimeoutGraceMs: conversationSemanticLimits.timeoutGraceMs,
         // Provider availability must never switch new production tasks back to
         // legacy business routing. Saved workflows remain readable offline.
-        routingMode: 'agent_first'
       }),
       executionTimestamp, undefined, undefined, createPresentationWorkflowScope({ rootDirectory: session.rootDirectory, projectId: session.projectId, conversations: authoritativeConversations })
     );
@@ -496,7 +493,6 @@ export function createChatContextRuntime(
         conversationFacts,
         responseDrafts,
         contextRepository,
-        documentPages,
         attachments,
         documentTools
       ),
@@ -532,6 +528,7 @@ export function createChatContextRuntime(
     const executionCoordinator = new ConversationExecutionCoordinator();
     const ownedResponseIds = new Set<string>();
     continuationRuntime = new ConversationAgentContinuationRuntime({ storage, projectId: session.projectId, sessions, sessionService,
+      classifierTimeoutMs: conversationSemanticLimits.timeoutMs, classifierTimeoutGraceMs: conversationSemanticLimits.timeoutGraceMs,
       agentRuns, conversations: transcriptService, now: executionTimestamp, classifier, supportsGeneration: true, supportsMutation: Boolean(mutationRenderer),
       isCurrent: () => { const active = dependencies.getSession(); return active?.projectId === session.projectId && active.rootDirectory === session.rootDirectory; },
       replayExecution: async id => {
@@ -627,25 +624,26 @@ export function createChatContextRuntime(
       }
       const deliveredWorkId = workIds.filter(id => verified.some(task => task.registeredWork!.id === id)).at(-1);
       if (!deliveredWorkId || !['completed', 'failed', 'cancelled', 'interrupted'].includes(responseExecution.state)) return;
-      let document: Awaited<ReturnType<RegisteredPresentationReader['read']>>;
+      const task = verified.find(item => item.registeredWork!.id === deliveredWorkId)!;
+      let document: Awaited<ReturnType<RegisteredPresentationReader['read']>> | Awaited<ReturnType<typeof readRegisteredOfficeDocument>>;
       try {
         // Re-read the current local file and its Hash. A saved Work alone is not
         // authority to expose a usable retained artifact after a failed reply.
-        document = await new RegisteredPresentationReader({ rootDirectory: session.rootDirectory, projectId: session.projectId })
-          .read(deliveredWorkId);
+        document = task.runtime.documentKind === 'ppt'
+          ? await new RegisteredPresentationReader({ rootDirectory: session.rootDirectory, projectId: session.projectId }).read(deliveredWorkId)
+          : await readRegisteredOfficeDocument({ rootDirectory: session.rootDirectory, projectId: session.projectId, workId: deliveredWorkId, kind: task.runtime.documentKind });
       } catch (error) {
         if (completionRequired) throw error;
         return;
       }
-      const task = verified.find(item => item.registeredWork!.id === deliveredWorkId)!;
       const receipt = [...task.runtime.observations].reverse().find(item => item.ok &&
         item.data?.registeredWorkId === deliveredWorkId);
       // Only a successful Host publication receipt can supply the page goal.
       const goal = receipt?.data?.planningTargetTotalPages;
       const target = Number.isSafeInteger(goal) && Number(goal) > 0 && Number(goal) <= presentationDocumentPageLimits.maximumPages ? Number(goal) : undefined;
-      const result = { workId: document.work.id, fileName: document.fileName, sizeBytes: document.file.sizeBytes!, kind: 'ppt' as const };
-      const retained = { ...result, actualPageCount: document.pages.length,
-        ...(target === undefined ? {} : { planningTargetTotalPages: target }) };
+      const result = { workId: document.work.id, fileName: document.fileName, sizeBytes: document.file.sizeBytes!, kind: task.runtime.documentKind };
+      const retained = parseRetainedDocumentMessageResult({ ...result,
+        ...('pages' in document ? { actualPageCount: document.pages.length, ...(target === undefined ? {} : { planningTargetTotalPages: target }) } : {}) });
       if (turnCoordinator) {
         const active = dependencies.getSession();
         if (active?.projectId !== session.projectId || active.rootDirectory !== session.rootDirectory) {
@@ -754,7 +752,7 @@ export function createChatContextRuntime(
         const root = run ? await sessions.findByRunId(run.id) : undefined;
         const pinnedSources = new Set(root?.inputReferences.filter(reference => reference.kind === 'message').map(reference => reference.id));
         const plannedDocument = root && (await workflowService.list(root.conversationId)).some(workflow =>
-          pinnedSources.has(workflow.sourceMessageId) && workflow.plan.kind === 'document' && workflow.plan.documentKind === 'ppt' &&
+          pinnedSources.has(workflow.sourceMessageId) && workflow.plan.kind === 'document' && workflow.plan.documentKind !== 'auto' &&
           ['ready', 'executing', 'completed'].includes(workflow.status));
         const acceptance = await completionAcceptances?.getByInvocationAttemptId(execution.providerInvocationAttemptId);
         const events = await responseExecutions.listEvents(execution.id);
@@ -1156,7 +1154,6 @@ export function createChatContextRuntime(
         return continuationRuntime.controller.validate?.(input);
       } },
       attachments,
-      documentPages,
       documentTools,
       nativeSearch,
       ready: responseRecovery
@@ -1177,7 +1174,6 @@ export function createChatContextRuntime(
         contexts: contextRepository,
         executions: responseExecutions,
         attachments,
-        documentPages,
         documentTools,
         executionCoordinator,
         projectAssistantMessage: async input => {

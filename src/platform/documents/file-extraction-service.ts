@@ -1,6 +1,7 @@
 import { open, readFile, stat } from 'node:fs/promises';
 import path from 'node:path';
 import ExcelJS from 'exceljs';
+import { officeCellText } from './office-cell-text';
 import JSZip from 'jszip';
 import mammoth from 'mammoth';
 import type * as PdfJs from 'pdfjs-dist';
@@ -419,7 +420,7 @@ async function extractXlsx(
       rows.push(
         values
           .slice(1)
-          .map((value) => (value === undefined || value === null ? '' : String(value)))
+          .map(value => officeCellText(value))
           .join('\t')
       );
     });

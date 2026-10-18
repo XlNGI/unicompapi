@@ -1,0 +1,89 @@
+{
+  "generatedAt": "2026-10-17T14:08:48.658Z",
+  "status": "passed",
+  "verification": {
+    "typecheck": {
+      "command": "pnpm typecheck",
+      "exitCode": 0
+    },
+    "lint": {
+      "command": "pnpm lint",
+      "exitCode": 0
+    },
+    "build": {
+      "command": "pnpm build",
+      "exitCode": 0
+    },
+    "nodeUi": {
+      "command": "node --test tests/*.test.mjs tests/ui/*.test.mjs",
+      "passed": 401,
+      "failed": 0,
+      "skipped": 0
+    },
+    "vitest": {
+      "groups": [
+        {
+          "files": 5,
+          "passed": 42
+        },
+        {
+          "files": 5,
+          "passed": 99
+        }
+      ],
+      "overlap": 7,
+      "uniqueFiles": 9,
+      "uniquePassed": 134,
+      "failed": 0,
+      "skipped": 0
+    },
+    "electron": [
+      {
+        "mode": "thread",
+        "passed": true,
+        "externalRequests": 0
+      },
+      {
+        "mode": "legacy",
+        "passed": true,
+        "externalRequests": 0
+      }
+    ],
+    "gitDiffCheck": {
+      "exitCode": 0
+    }
+  },
+  "sourceHashes": [
+    {
+      "file": "src/platform/ipc/thread-file-read-adapter.ts",
+      "sha256": "ba34603204ed845e422dc6fc538cc7d8104e6b960bbc3a333a2c2229825911b9"
+    },
+    {
+      "file": "tests/platform/thread-file-read-adapter.test.ts",
+      "sha256": "f6649269b522dd2da43bbc483e1d8641a7d0e9d75b3656b52ae64cf8c39a826b"
+    },
+    {
+      "file": "scripts/verify-project-creation-electron.cjs",
+      "sha256": "a59bbf902aea7d988433841e2fd0b1c001c888a45f31db7203b0240824c48138"
+    }
+  ],
+  "logsSha256": "4da7d1b2bf5035261b7c84f64017c93493c32f99c61846e9d71b54ea2a46a61e",
+  "limits": [
+    "Main-process fix loads on next pnpm dev; this task did not restart the user application",
+    "No full Vitest run",
+    "No real Provider calls or charges",
+    "No macOS hardware acceptance",
+    "User project manifest and catalog inspected read-only; no project repairs or data migration",
+    "Intermediate fixture and harness failures are preserved separately from final results"
+  ],
+  "delivery": {
+    "committed": false,
+    "merged": false,
+    "pushed": false
+  },
+  "cleanup": {
+    "testElectronProcessesRemaining": 0,
+    "temporaryProfiles": "retained",
+    "reason": "Automatic approval rejected recursive temporary-directory cleanup: blocked by policy"
+  }
+}

@@ -29,7 +29,7 @@ export class AgentContextAssembler {
 
   constructor(builder?: ConversationContextBuilder) {
     this.builder = builder ?? new ConversationContextBuilder({
-      systemRules: agentSystemRules
+      systemRules: agentSystemRules, retainDocumentBrief: true
     });
   }
 

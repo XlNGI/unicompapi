@@ -1,0 +1,394 @@
+{
+  "generatedAt": "2026-10-17T15:45:10.175Z",
+  "status": "verified",
+  "rows": [
+    {
+      "text": "我现在要制作一个ppt，先讨论内容",
+      "at": "2026-10-17T15:26:46.850Z",
+      "persistedPlan": {
+        "kind": "chat",
+        "status": "completed"
+      },
+      "localReproduction": {
+        "route": "local",
+        "kind": "chat",
+        "classifierCalls": 0,
+        "defersDocumentWrites": true
+      },
+      "request": {
+        "messageCount": 7,
+        "systemInstructionMessages": 6,
+        "conversationMessages": [
+          {
+            "role": "user",
+            "characters": 17
+          }
+        ],
+        "contextCount": 0,
+        "attachmentCount": 0,
+        "toolCount": 0,
+        "requestHash": "7e9dbcf1752a4d7d8b3d2f0d038edfcd27410570dc784a4c98331e5c0d8b0a49",
+        "truncated": true
+      },
+      "result": {
+        "modelCalls": 1,
+        "finishReason": "stop",
+        "toolCalls": 0,
+        "contentCharacters": 313,
+        "registeredWorkCount": 0,
+        "documentRuntime": {
+          "status": "paused",
+          "stage": "planning",
+          "step": 0,
+          "toolCallCount": 0
+        }
+      },
+      "planningBoundary": "not_started",
+      "trace": [
+        {
+          "code": "tool_authorization",
+          "status": "completed",
+          "facts": {
+            "purpose": "content",
+            "count": 0
+          },
+          "at": "2026-10-17T15:26:47.145Z"
+        },
+        {
+          "code": "plan_validation",
+          "status": "completed",
+          "facts": {
+            "count": 0,
+            "purpose": "tool"
+          },
+          "at": "2026-10-17T15:26:47.645Z"
+        },
+        {
+          "code": "tool_authorization",
+          "status": "completed",
+          "facts": {
+            "count": 0,
+            "purpose": "tool",
+            "tool": "write_document"
+          },
+          "at": "2026-10-17T15:26:47.645Z"
+        },
+        {
+          "code": "model_request",
+          "status": "started",
+          "facts": {
+            "purpose": "content"
+          },
+          "at": "2026-10-17T15:26:47.807Z"
+        },
+        {
+          "code": "plan_validation",
+          "status": "completed",
+          "facts": {
+            "count": 0,
+            "purpose": "tool"
+          },
+          "at": "2026-10-17T15:26:47.854Z"
+        },
+        {
+          "code": "tool_authorization",
+          "status": "completed",
+          "facts": {
+            "count": 0,
+            "purpose": "tool",
+            "tool": "write_document"
+          },
+          "at": "2026-10-17T15:26:47.854Z"
+        },
+        {
+          "code": "model_request",
+          "status": "started",
+          "facts": {
+            "count": 2385,
+            "purpose": "content"
+          },
+          "at": "2026-10-17T15:26:47.937Z"
+        },
+        {
+          "code": "model_request",
+          "status": "completed",
+          "facts": {
+            "purpose": "content"
+          },
+          "at": "2026-10-17T15:26:49.640Z"
+        },
+        {
+          "code": "model_response",
+          "status": "started",
+          "facts": {
+            "contentCharacters": 0,
+            "purpose": "content"
+          },
+          "at": "2026-10-17T15:26:49.687Z"
+        },
+        {
+          "code": "model_response",
+          "status": "progress",
+          "facts": {
+            "contentCharacters": 10,
+            "purpose": "content"
+          },
+          "at": "2026-10-17T15:26:55.051Z"
+        },
+        {
+          "code": "model_response",
+          "status": "progress",
+          "facts": {
+            "contentCharacters": 58,
+            "purpose": "content"
+          },
+          "at": "2026-10-17T15:26:56.116Z"
+        },
+        {
+          "code": "model_response",
+          "status": "progress",
+          "facts": {
+            "contentCharacters": 128,
+            "purpose": "content"
+          },
+          "at": "2026-10-17T15:26:57.124Z"
+        },
+        {
+          "code": "model_response",
+          "status": "progress",
+          "facts": {
+            "contentCharacters": 193,
+            "purpose": "content"
+          },
+          "at": "2026-10-17T15:26:58.124Z"
+        },
+        {
+          "code": "model_response",
+          "status": "progress",
+          "facts": {
+            "contentCharacters": 270,
+            "purpose": "content"
+          },
+          "at": "2026-10-17T15:26:59.136Z"
+        },
+        {
+          "code": "model_response",
+          "status": "completed",
+          "facts": {
+            "contentCharacters": 313,
+            "purpose": "content"
+          },
+          "at": "2026-10-17T15:27:00.118Z"
+        }
+      ]
+    },
+    {
+      "text": "随便生成吧，现在是测试",
+      "at": "2026-10-17T15:28:21.581Z",
+      "persistedPlan": {
+        "kind": "chat",
+        "status": "completed"
+      },
+      "localReproduction": {
+        "route": "local",
+        "kind": "chat",
+        "classifierCalls": 0,
+        "defersDocumentWrites": true
+      },
+      "request": {
+        "messageCount": 9,
+        "systemInstructionMessages": 6,
+        "conversationMessages": [
+          {
+            "role": "user",
+            "characters": 17
+          },
+          {
+            "role": "assistant",
+            "characters": 313
+          },
+          {
+            "role": "user",
+            "characters": 11
+          }
+        ],
+        "contextCount": 0,
+        "attachmentCount": 0,
+        "toolCount": 0,
+        "requestHash": "073f2b0d110d97bb4693e9da7064470bc439f4d624782f6cbc0d467205dbb4f9",
+        "truncated": true
+      },
+      "result": {
+        "modelCalls": 1,
+        "finishReason": "stop",
+        "toolCalls": 0,
+        "contentCharacters": 70,
+        "registeredWorkCount": 0,
+        "documentRuntime": {
+          "status": "paused",
+          "stage": "planning",
+          "step": 0,
+          "toolCallCount": 0
+        }
+      },
+      "planningBoundary": "not_started",
+      "trace": [
+        {
+          "code": "tool_authorization",
+          "status": "completed",
+          "facts": {
+            "purpose": "content",
+            "count": 0
+          },
+          "at": "2026-10-17T15:28:21.827Z"
+        },
+        {
+          "code": "plan_validation",
+          "status": "completed",
+          "facts": {
+            "count": 0,
+            "purpose": "tool"
+          },
+          "at": "2026-10-17T15:28:22.234Z"
+        },
+        {
+          "code": "tool_authorization",
+          "status": "completed",
+          "facts": {
+            "count": 0,
+            "purpose": "tool",
+            "tool": "write_document"
+          },
+          "at": "2026-10-17T15:28:22.234Z"
+        },
+        {
+          "code": "model_request",
+          "status": "started",
+          "facts": {
+            "purpose": "content"
+          },
+          "at": "2026-10-17T15:28:22.382Z"
+        },
+        {
+          "code": "plan_validation",
+          "status": "completed",
+          "facts": {
+            "count": 0,
+            "purpose": "tool"
+          },
+          "at": "2026-10-17T15:28:22.420Z"
+        },
+        {
+          "code": "tool_authorization",
+          "status": "completed",
+          "facts": {
+            "count": 0,
+            "purpose": "tool",
+            "tool": "write_document"
+          },
+          "at": "2026-10-17T15:28:22.420Z"
+        },
+        {
+          "code": "model_request",
+          "status": "started",
+          "facts": {
+            "count": 3328,
+            "purpose": "content"
+          },
+          "at": "2026-10-17T15:28:22.510Z"
+        },
+        {
+          "code": "model_request",
+          "status": "completed",
+          "facts": {
+            "purpose": "content"
+          },
+          "at": "2026-10-17T15:28:25.047Z"
+        },
+        {
+          "code": "model_response",
+          "status": "started",
+          "facts": {
+            "contentCharacters": 0,
+            "purpose": "content"
+          },
+          "at": "2026-10-17T15:28:25.088Z"
+        },
+        {
+          "code": "model_response",
+          "status": "progress",
+          "facts": {
+            "contentCharacters": 5,
+            "purpose": "content"
+          },
+          "at": "2026-10-17T15:28:30.672Z"
+        },
+        {
+          "code": "model_response",
+          "status": "progress",
+          "facts": {
+            "contentCharacters": 70,
+            "purpose": "content"
+          },
+          "at": "2026-10-17T15:28:39.779Z"
+        },
+        {
+          "code": "model_response",
+          "status": "completed",
+          "facts": {
+            "contentCharacters": 70,
+            "purpose": "content"
+          },
+          "at": "2026-10-17T15:28:39.939Z"
+        }
+      ]
+    }
+  ],
+  "projectFilesUnchanged": true,
+  "fileHashes": [
+    {
+      "file": "project.json",
+      "sha256": "cc3db986e7e293941ecbd1ef38ccf69cbe544530c41154e157a9bd9bec8e76e0"
+    },
+    {
+      "file": "entities/conversations.json",
+      "sha256": "1da679d5ba0510f2c7361080c0147ef9dd961aa71df43d0b0e08cb6a63354109"
+    },
+    {
+      "file": "entities/conversation-workflows.json",
+      "sha256": "f850a31666ae2207a7d6797fdf1713527f07d2c8bbf17c281b6568193b6195b6"
+    },
+    {
+      "file": "entities/project-metadata.json",
+      "sha256": "432094ad5c868f160631acb95094529e7000b671bbd4133ce8c2ad82357543e7"
+    },
+    {
+      "file": "entities/conversation-production-trace.json",
+      "sha256": "8343138012f55a6dd267d53df5632a0b10e7ad527d3e4daee500774ae517e576"
+    },
+    {
+      "file": "entities/conversation-response-executions.json",
+      "sha256": "57b20fb2113b3c60c7e9264ad54dd3a7fb227cc2c391f303538b865028ebfda6"
+    },
+    {
+      "file": "entities/document-task-runtimes.json",
+      "sha256": "e100e02bd6d15a954a14799a88999f67bec9895aa2535bb8d5f063a8227988f1"
+    },
+    {
+      "file": "entities/provider-invocations.json",
+      "sha256": "0073415a8c5347b2235952ef1c6cd5ee7d733bd3dcb11cd9d88e6c091810a479"
+    }
+  ],
+  "checks": {
+    "threadLegacyTextMatch": true,
+    "classifierCallsAcrossOfflineReproduction": 0,
+    "availableToolsAcrossBothActualRequests": 0,
+    "newModelRequests": 0
+  },
+  "limits": [
+    "No production code changes, credential reads or new model calls",
+    "Raw HTTP request body not saved; role breakdown reconstructed and matched to persisted messageCount",
+    "Visible reply does not prove model internal reasoning",
+    "Existing project content and private paths excluded except the two user-supplied sentences"
+  ]
+}

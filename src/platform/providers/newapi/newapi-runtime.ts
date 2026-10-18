@@ -30,6 +30,9 @@ import {
   matchOpenAiCompatiblePackage
 } from './openai-compatible-identity';
 import { emitProductionDiagnostic } from '../../conversation-production-trace';
+import { UNICOMPAPI_WWW_PROVIDER_PACKAGE_ID, UNICOMPAPI_WWW_BASE_URL } from './unicompapi-contracts';
+
+export type WwwVideoOperation = 'asset' | 'quote' | 'submit' | 'query' | 'content' | 'request_lookup';
 
 // A 15 MiB controlled image expands to 20 MiB in Base64; keep room for JSON fields.
 export const NEWAPI_MAXIMUM_IMAGE_REQUEST_BYTES = 24 * 1024 * 1024;
@@ -468,6 +471,64 @@ export class NewApiSharedRuntime {
     };
   }
 
+  /** WWW has a separate media protocol. Paths, query keys and upload headers are host controlled. */
+  async requestWwwVideo(input: {
+    readonly connection: ProviderConnection;
+    readonly credentials: StructuredCredentialRecord;
+    readonly operation: WwwVideoOperation;
+    readonly modelKey?: string;
+    readonly h3?: boolean;
+    readonly remoteId?: string;
+    readonly assetId?: string;
+    readonly uploadProfile?: string;
+    readonly mimeType?: 'image/png' | 'image/jpeg' | 'video/mp4';
+    readonly body?: Uint8Array;
+    readonly idempotencyKey?: string;
+    readonly signal?: AbortSignal;
+    readonly beforeRequestStarted?: () => Promise<void>;
+    readonly onResponseRequestId?: NewApiResponseRequestIdObserver;
+  }): Promise<{ readonly body: Uint8Array; readonly contentType?: string }> {
+    if (input.connection.packageId !== UNICOMPAPI_WWW_PROVIDER_PACKAGE_ID || input.connection.endpoint !== UNICOMPAPI_WWW_BASE_URL) {
+      throw new NewApiRuntimeError('endpoint_not_allowed', 'not_retryable');
+    }
+    const collection = input.h3 ? ['h3', 'tasks'] : ['videos'];
+    const operation = input.operation;
+    if (!['asset', 'quote', 'submit', 'query', 'content', 'request_lookup'].includes(operation)) {
+      throw new NewApiRuntimeError('invalid_request', 'not_retryable');
+    }
+    let segments: string[];
+    let query: Record<string, string> | undefined;
+    if (operation === 'asset') segments = ['assets'];
+    else if (operation === 'request_lookup') { segments = ['requests']; query = { idempotency_key: input.idempotencyKey ?? '' }; }
+    else if (operation === 'quote' || operation === 'submit') segments = operation === 'quote' && !input.h3 ? [...collection, 'quote'] : collection;
+    else {
+      segments = [...collection, remoteId(input.remoteId ?? '')];
+      if (operation === 'content') {
+        segments.push('content'); query = { asset_id: remoteId(input.assetId ?? '') };
+      } else if (input.h3) query = { refresh: 'true' };
+    }
+    if (input.uploadProfile && !['seedance-reference', 'aliyun-wan-reference', 'happyhorse-edit-reference'].includes(input.uploadProfile)) {
+      throw new NewApiRuntimeError('invalid_request', 'not_retryable');
+    }
+    if (operation === 'asset' && (typeof input.modelKey !== 'string' || !/^[A-Za-z0-9._-]{1,100}$/.test(input.modelKey))) {
+      throw new NewApiRuntimeError('invalid_request', 'not_retryable');
+    }
+    const response = await this.request({
+      ...input, adapterId: NEWAPI_VIDEO_ADAPTER_ID, protocolId: NEWAPI_VIDEO_PROTOCOL_ID,
+      operation: operation === 'content' ? 'video_result' : operation === 'query' || operation === 'request_lookup' ? 'video_query' : 'video_submit',
+      method: ['query', 'content', 'request_lookup'].includes(operation) ? 'GET' : 'POST', pathSegments: segments, query,
+      controlledHeaders: operation === 'asset' ? { 'X-File-Name': input.mimeType === 'video/mp4' ? 'reference.mp4' : input.mimeType === 'image/jpeg' ? 'reference.jpg' : 'reference.png',
+        'X-Model-Id': input.modelKey!,
+        ...(input.uploadProfile ? { 'X-Image-Profile': input.uploadProfile } : {}) } : undefined,
+      contentType: operation === 'asset' ? input.mimeType : 'application/json',
+      accept: operation === 'content' ? 'video/mp4' : 'application/json',
+      maximumRequestBytes: operation === 'asset' ? 100_000_000 : 1024 * 1024,
+      maximumResponseBytes: operation === 'content' ? 512 * 1024 * 1024 : 2 * 1024 * 1024,
+      requireReadyConnection: true, expectedResponse: operation === 'content' ? 'binary' : 'json', notFoundKind: 'operation'
+    });
+    return { body: requireBody(response), contentType: normalizedContentType(response.headers) };
+  }
+
   dispose(): void {
     if (this.disposed) return;
     this.disposed = true;
@@ -500,6 +561,8 @@ export class NewApiSharedRuntime {
     readonly expectedResponse: 'json' | 'stream' | 'binary';
     readonly notFoundKind: 'model' | 'operation';
     readonly idempotencyKey?: string;
+    readonly query?: Readonly<Record<string, string>>;
+    readonly controlledHeaders?: Readonly<Record<string, string>>;
   }): Promise<NewApiHttpTransportResponse & {
     readonly requestId?: string;
     readonly cancel?: () => void;
@@ -518,6 +581,7 @@ export class NewApiSharedRuntime {
     const url = input.pathRoot === 'origin'
       ? resolveOriginPath(baseUrl, input.pathSegments)
       : resolvePath(baseUrl, input.pathSegments);
+    for (const [key, value] of Object.entries(input.query ?? {})) url.searchParams.set(key, value);
     validateBounds(input.body, input.maximumRequestBytes, input.maximumResponseBytes);
     if (input.idempotencyKey !== undefined && !/^[A-Za-z0-9_-]{8,128}$/.test(input.idempotencyKey)) throw new NewApiRuntimeError('invalid_request', 'not_retryable');
     const requestTimeoutMs = this.options.defaultTimeoutMs ?? 120_000;
@@ -591,7 +655,8 @@ export class NewApiSharedRuntime {
           accept: input.accept,
           authorization: `Bearer ${credential}`,
           ...(input.contentType ? { 'content-type': input.contentType } : {}),
-          ...(input.idempotencyKey ? { 'Idempotency-Key': input.idempotencyKey } : {})
+          ...(input.idempotencyKey ? { 'Idempotency-Key': input.idempotencyKey } : {}),
+          ...input.controlledHeaders
         },
         ...(input.body ? { body: Uint8Array.from(input.body) } : {}),
         signal: controller.signal,

@@ -32,8 +32,10 @@ import {
 } from './newapi';
 import {
   UNICOMPAPI_PROVIDER_PACKAGE_ID,
+  UNICOMPAPI_WWW_PROVIDER_PACKAGE_ID,
   UNICOMPAPI_PROVIDER_PACKAGE_VERSION
 } from './newapi/unicompapi-contracts';
+import type { ControlledWwwVideoPort } from './newapi/www-video-adapter';
 import {
   MINIMAX_H3_PROVIDER_PACKAGE_ID,
   MINIMAX_H3_PROVIDER_PACKAGE_VERSION,
@@ -101,6 +103,7 @@ export interface VideoFeatureSubmissionRuntimes {
   readonly providerRegistry: JsonProviderRegistryStore;
   readonly providerPackages: ProviderPackageRegistry;
   readonly materials: ControlledImageMaterialPort;
+  readonly videoMaterials?: ControlledWwwVideoPort;
   readonly usage: NewApiVideoUsageObservationSinkPort
     & ViduUsageObservationSinkPort
     & MiniMaxVideoUsageObservationSinkPort
@@ -223,7 +226,7 @@ export function createVideoFeatureDispatchBridge(
         acceptedPackages: [{
           packageId: UNICOMPAPI_PROVIDER_PACKAGE_ID,
           packageVersion: UNICOMPAPI_PROVIDER_PACKAGE_VERSION
-        }],
+        }, { packageId: UNICOMPAPI_WWW_PROVIDER_PACKAGE_ID, packageVersion: UNICOMPAPI_PROVIDER_PACKAGE_VERSION }],
         adapterKey: NEWAPI_VIDEO_ADAPTER_ID,
         adapterVersion: NEWAPI_ADAPTER_VERSION,
         protocolId: NEWAPI_VIDEO_PROTOCOL_ID,
@@ -299,7 +302,7 @@ export function createMiniMaxVideoAdapterFromRuntimes(
 export function createNewApiVideoAdapterFromRuntimes(
   options: Pick<
     VideoFeatureSubmissionRuntimes,
-    'newApiRuntime' | 'credentialVault' | 'providerRegistry' | 'materials' | 'usage'
+    'newApiRuntime' | 'credentialVault' | 'providerRegistry' | 'materials' | 'usage' | 'videoMaterials'
   > & {
     readonly newApiRuntime: NewApiSharedRuntime;
   }
@@ -321,7 +324,9 @@ export function createNewApiVideoAdapterFromRuntimes(
     {
       nextProviderUsageObservationId: () =>
         toProviderUsageObservationId(`usage-${randomUUID()}`)
-    }
+    },
+    undefined,
+    options.videoMaterials
   );
 }
 

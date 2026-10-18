@@ -113,8 +113,76 @@ function metadata(input: {
 }
 
 const internalInput: CanonicalToolInput = { type: 'object', fields: {}, additionalProperties: false };
+function officeGenerationContract(toolId: 'generate_docx' | 'generate_xlsx') {
+  return {
+    toolId, description: `Generate one verified ${toolId === 'generate_docx' ? 'Word document' : 'Excel workbook'} from structured outline JSON or Markdown. Preserve supplied facts. The Host owns the format, output path, authorization and publication.`,
+    exposure: 'provider' as const,
+    input: { type: 'object' as const, additionalProperties: false as const, fields: {
+      title: { type: 'string' as const, maxLength: 200, required: true },
+      content: { type: 'string' as const, maxLength: 12_000, required: true }
+    } },
+    ...metadata({ requiresWrite: true, requiresExistingDocument: false, budgetUnits: 8, traceType: 'write_document' }),
+    execution: { cancellable: true, timeoutMs: 180_000, budgetUnits: 8,
+      idempotency: { mode: 'required' as const, scope: 'task_call' as const, keyFields: ['title', 'content'] } },
+    effects: { modifiesDocumentIR: false, modifiesArtifact: true, producesIRPatch: false,
+      producesObservation: true, producesDiagnostics: true, producesArtifactRefs: true },
+    preconditions: { requiresExistingDocument: false, requiresDocumentIR: false, requiresWrite: true,
+      requiresRevision: false, requiresAuthorization: true, allowedOperations: ['create' as const] },
+    diagnostics: { traceType: 'write_document' as const, failureCodes: [...commonFailureCodes, 'invalid_outline', 'generation_failed', 'verification_failed'] }
+  };
+}
 /** Tool IDs, metadata and model arguments are authored only in this catalog. */
 const canonicalToolCatalog = [
+  officeGenerationContract('generate_docx'),
+  officeGenerationContract('generate_xlsx'),
+  {
+    toolId: 'revise_presentation', exposure: 'provider',
+    description: 'Revise the verified existing PPT. Preserve facts and non-target pages. Read first. Only when the Host observation explicitly allows content reorganization, contentOrganization may contain JSON {schemaVersion:1,sections:[{headingRef,blockRefs,takeawayRef?,actionRef?}]}. Use observed references only, cover every source block exactly once and every heading at least once; optional takeaway/action references must each occur exactly once. Never author new facts, paths or permissions.',
+    input: { type: 'object', additionalProperties: false, fields: {
+      request: { type: 'string', maxLength: 2_000, required: true },
+      scope: { type: 'string', maxLength: 8, enum: ['document', 'page'], required: true },
+      ordinal: { type: 'integer', minimum: 1, maximum: 40 },
+      contentOrganization: { type: 'string', maxLength: 12_000 }
+    }, conditions: [
+      { when: { field: 'scope', values: ['page'], includeAbsent: false }, required: ['ordinal'], forbidden: ['contentOrganization'] },
+      { when: { field: 'scope', values: ['document'], includeAbsent: false }, forbidden: ['ordinal'] }
+    ] },
+    ...metadata({ requiresWrite: true, requiresExistingDocument: true, budgetUnits: 8, traceType: 'patch' }),
+    preconditions: { requiresExistingDocument: true, requiresDocumentIR: true, requiresWrite: true, requiresRevision: true,
+      requiresAuthorization: true, allowedOperations: ['edit'] },
+    execution: { cancellable: true, timeoutMs: 180_000, budgetUnits: 8,
+      idempotency: { mode: 'required', scope: 'task_call', keyFields: ['request', 'scope', 'ordinal'] } },
+    effects: { modifiesDocumentIR: true, modifiesArtifact: true, producesIRPatch: false, producesObservation: true,
+      producesDiagnostics: true, producesArtifactRefs: true },
+    diagnostics: { traceType: 'patch', failureCodes: [...commonFailureCodes, 'revision_scope_violation', 'revision_conflict', 'design_revision_unchanged',
+      'read_current_document_first', 'source_style_unavailable', 'visual_plan_unavailable', 'design_revision_failed', 'content_reorganization_limit',
+      'content_reorganization_invalid', 'identity_unresolved', 'revision_failed', 'verification_failed', 'generation_failed'] }
+  },
+  {
+    toolId: 'revise_office', exposure: 'provider',
+    description: 'Apply a bounded edit plan to the verified Word or Excel file after reading. For multiple edits use operation=apply_changes with changes as a JSON array of at most 16 ordinary replace_text/update_cells/clear_section argument objects. All changes publish one version. Indices are one-based; row is an observed table data-row ordinal. The Host owns scope and version.',
+    input: { type: 'object', additionalProperties: false, fields: {
+      operation: { type: 'string', maxLength: 16, enum: ['replace_text', 'update_cells', 'clear_section', 'apply_changes'], required: true },
+      sectionOrdinal: { type: 'integer', minimum: 1, maximum: 100 },
+      blockOrdinal: { type: 'integer', minimum: 1, maximum: 100 },
+      row: { type: 'integer', minimum: 1, maximum: 50_000 }, column: { type: 'integer', minimum: 1, maximum: 10_000 },
+      text: { type: 'string', maxLength: 8_000 }, changes: { type: 'string', maxLength: 12_000 }
+    }, conditions: [
+      { when: { field: 'operation', values: ['replace_text'], includeAbsent: false }, required: ['sectionOrdinal', 'blockOrdinal', 'text'], forbidden: ['row', 'column', 'changes'] },
+      { when: { field: 'operation', values: ['update_cells'], includeAbsent: false }, required: ['sectionOrdinal', 'blockOrdinal', 'row', 'column', 'text'], forbidden: ['changes'] },
+      { when: { field: 'operation', values: ['clear_section'], includeAbsent: false }, required: ['sectionOrdinal'], forbidden: ['blockOrdinal', 'row', 'column', 'text', 'changes'] },
+      { when: { field: 'operation', values: ['apply_changes'], includeAbsent: false }, required: ['changes'], forbidden: ['sectionOrdinal', 'blockOrdinal', 'row', 'column', 'text'] }
+    ] },
+    ...metadata({ requiresWrite: true, requiresExistingDocument: true, budgetUnits: 8, traceType: 'patch' }),
+    preconditions: { requiresExistingDocument: true, requiresDocumentIR: true, requiresWrite: true, requiresRevision: true,
+      requiresAuthorization: true, allowedOperations: ['edit'] },
+    execution: { cancellable: true, timeoutMs: 180_000, budgetUnits: 8,
+      idempotency: { mode: 'required', scope: 'task_call', keyFields: ['operation', 'sectionOrdinal', 'blockOrdinal', 'row', 'column', 'text'] } },
+    effects: { modifiesDocumentIR: true, modifiesArtifact: true, producesIRPatch: true, producesObservation: true,
+      producesDiagnostics: true, producesArtifactRefs: true },
+    diagnostics: { traceType: 'patch', failureCodes: [...commonFailureCodes, 'revision_scope_violation', 'revision_conflict', 'read_current_document_first',
+      'unsupported_operation', 'invalid_patch', 'target_not_found', 'kind_mismatch', 'revision_failed', 'verification_failed', 'generation_failed'] }
+  },
   {
     toolId: 'extract_source', description: 'Controlled extract_source operation', exposure: 'internal', input: internalInput,
     ...metadata({ requiresWrite: false, requiresExistingDocument: false, budgetUnits: 1, traceType: 'read_sources' })

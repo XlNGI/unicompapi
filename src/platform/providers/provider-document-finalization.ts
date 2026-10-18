@@ -7,6 +7,7 @@ export interface DocumentGenerationFinalizationState {
   readonly readBackConfirmed: boolean;
   readonly actualTotalPages?: number;
   readonly planningTotalPages?: number;
+  readonly documentKind?: 'word' | 'excel';
 }
 
 export interface DocumentFinalizationToolBridge extends ControlledProviderToolBridge {
@@ -51,6 +52,11 @@ export function createDocumentGenerationFinalizer(bridge?: ControlledProviderToo
     finalExplanation(): string | undefined {
       const state = documentGenerationFinalization(bridge);
       if (!state || state.phase !== 'final') return undefined;
+      if (state.documentKind) {
+        const label = state.documentKind === 'word' ? 'Word 文档' : 'Excel 工作簿';
+        return !state.readBackConfirmed ? `\n\n系统交付记录：${label}已生成并登记，但当前文件读回未确认；请核对文件后再继续修改。`
+          : hostExplanationNeeded ? `\n\n系统文件核验：${label}已生成并登记，文件读回已确认，重复工具请求已停止。` : undefined;
+      }
       if (!state.readBackConfirmed || !Number.isSafeInteger(state.actualTotalPages) || state.actualTotalPages! < 1) {
         return '\n\n系统交付记录：PPT 已生成并登记，但当前文件读回未确认；请核对文件后再继续修改。';
       }

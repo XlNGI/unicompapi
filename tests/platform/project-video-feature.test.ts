@@ -143,7 +143,8 @@ describe('ProjectVideoFeatureSubjectResolver', () => {
     expect(
       contracts.every((contract) =>
         contract.parameterSchema.productFeature === 'image_to_video' ||
-        contract.parameterSchema.productFeature === 'text_to_video'
+        contract.parameterSchema.productFeature === 'text_to_video' ||
+        contract.parameterSchema.productFeature === 'video_edit'
       )
     ).toBe(true);
     expect(contracts.some((contract) =>

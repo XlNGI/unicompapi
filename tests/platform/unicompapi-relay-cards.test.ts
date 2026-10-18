@@ -21,7 +21,7 @@ describe('UniCompAPI relay connection cards', () => {
     expect(() => registry.resolveEndpoint(www, UNICOMPAPI_OFFICIAL_BASE_URL, false)).toThrow();
     expect(original.endpointPolicy.policyId).not.toBe(www.endpointPolicy.policyId);
     expect(original.credentialSchema.schemaId).not.toBe(www.credentialSchema.schemaId);
-    expect(www.adapters.map(adapter => adapter.adapterId)).toEqual(['newapi.chat']);
+    expect(www.adapters.map(adapter => adapter.adapterId)).toEqual(['newapi.chat', 'newapi.video']);
   });
   it('retains the WWW request identifier and sends one controlled idempotency key without a retry', async () => {
     const requests: { url: string; headers: Readonly<Record<string, string>> }[] = [];

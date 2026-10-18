@@ -1,5 +1,6 @@
 import { app, net, safeStorage } from 'electron';
 import path from 'node:path';
+import { ProjectWwwVideoMaterialResolver } from '../../src/platform/providers/newapi/controlled-www-video';
 import {
   ImageOperationRouter,
   JsonLineImageResultReceiptLogger,
@@ -179,6 +180,7 @@ export class ElectronViduComposition {
         credentialVault: this.credentialVault,
         providerRegistry: this.registry,
         materials,
+        videoMaterials: new ProjectWwwVideoMaterialResolver(options.getSession),
         usage: currentSessionUsageSink(options.getSession)
       });
     }

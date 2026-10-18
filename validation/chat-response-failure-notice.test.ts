@@ -31,9 +31,11 @@ describe('chat response failure notice', () => {
     expect(notice).not.toContain('超时');
   });
 
-  it('keeps the existing generic unavailable guidance when no safe code is available', () => {
+  it('keeps an unknown unavailable cause neutral when no safe code is available', () => {
     const notice = failedResponseNotice(failedMessage('unavailable'));
 
-    expect(notice).toBe('模型连接超时或服务暂时不可用，请稍后重试或切换模型。');
+    expect(notice).toContain('当前回复未能完成');
+    expect(notice).toContain('具体原因尚未确认');
+    expect(notice).not.toMatch(/模型连接超时|切换模型|请稍后重试/);
   });
 });

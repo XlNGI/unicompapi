@@ -624,9 +624,11 @@ function isExplicitProviderRejection(safeCode: string): boolean {
   const normalized = safeCode.trim().toLowerCase();
   const suffix = normalized.split('.').at(-1);
   return [
+    'generation_not_submitted', // WWW upload/quote preflight ended before its generation POST.
     'authentication_failed',
     'credential_unavailable',
     'credit_insufficient',
+    'insufficient_balance',
     'account_unavailable',
     'permission_denied',
     'model_not_found',

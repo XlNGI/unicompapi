@@ -1,0 +1,228 @@
+{
+  "schemaVersion": 1,
+  "recordedAt": "2026-10-15T09:26:54.697Z",
+  "branch": "feature/www-video-contract-binding",
+  "status": "implementation_and_bindings_verified_real_service_acceptance_partial",
+  "checks": {
+    "typecheck": "passed",
+    "lint": "passed",
+    "productionBuild": "passed",
+    "platformAudit": "passed",
+    "nodeUi": {
+      "passed": 401,
+      "failed": 0,
+      "skipped": 0
+    },
+    "vitest": {
+      "files": 353,
+      "passed": 3701,
+      "failed": 0,
+      "skipped": 0
+    },
+    "totalTestsPassed": 4102,
+    "nativePreloadIpcMock": {
+      "cases": 13,
+      "status": "passed",
+      "externalRequests": 0
+    },
+    "productionReactUi": {
+      "checks": 5,
+      "status": "passed",
+      "externalRequests": 0
+    },
+    "firstFullVitest": {
+      "passed": 3686,
+      "total": 3689,
+      "failed": 3,
+      "resolved": true,
+      "log": "vitest-full.log.gz"
+    }
+  },
+  "bindings": {
+    "count": 9,
+    "persisted": true,
+    "enabled": true,
+    "authority": "relay",
+    "profileState": "declared",
+    "receipt": "bindings-applied.json",
+    "models": [
+      {
+        "model": "MiniMax-H3",
+        "contractId": "relay.unicompapi-www.MiniMax-H3.video",
+        "revision": 1,
+        "features": [
+          "text_to_video"
+        ]
+      },
+      {
+        "model": "doubao-seedance-2-0-260128",
+        "contractId": "relay.unicompapi-www.doubao-seedance-2-0-260128.video",
+        "revision": 1,
+        "features": [
+          "text_to_video",
+          "image_to_video"
+        ]
+      },
+      {
+        "model": "happyhorse-1.1-t2v",
+        "contractId": "relay.unicompapi-www.happyhorse-1.1-t2v.video",
+        "revision": 1,
+        "features": [
+          "text_to_video"
+        ]
+      },
+      {
+        "model": "happyhorse-1.1-i2v",
+        "contractId": "relay.unicompapi-www.happyhorse-1.1-i2v.video",
+        "revision": 1,
+        "features": [
+          "image_to_video"
+        ]
+      },
+      {
+        "model": "happyhorse-1.1-r2v",
+        "contractId": "relay.unicompapi-www.happyhorse-1.1-r2v.video",
+        "revision": 1,
+        "features": [
+          "image_to_video"
+        ]
+      },
+      {
+        "model": "wan3.0-video",
+        "contractId": "relay.unicompapi-www.wan3.0-video.video",
+        "revision": 1,
+        "features": [
+          "text_to_video",
+          "image_to_video"
+        ]
+      },
+      {
+        "model": "wan3.0-video-ali",
+        "contractId": "relay.unicompapi-www.wan3.0-video-ali.video",
+        "revision": 1,
+        "features": [
+          "text_to_video",
+          "image_to_video"
+        ]
+      },
+      {
+        "model": "wan3.0-video-prime-ali",
+        "contractId": "relay.unicompapi-www.wan3.0-video-prime-ali.video",
+        "revision": 1,
+        "features": [
+          "text_to_video",
+          "image_to_video"
+        ]
+      },
+      {
+        "model": "happyhorse-1.0-video-edit",
+        "contractId": "relay.unicompapi-www.happyhorse-1.0-video-edit.video",
+        "revision": 1,
+        "features": [
+          "video_edit"
+        ]
+      }
+    ]
+  },
+  "realAcceptance": {
+    "maximumCnyMicro": 5000000,
+    "actualConfirmedCnyMicro": 2092500,
+    "successful": [
+      {
+        "model": "wan3.0-video-ali",
+        "feature": "text_to_video",
+        "workId": "work-video-result-873c60ed-b2d9-4364-be29-257deeb387f1",
+        "checksumSha256": "2f6f102e1cadc3d407ca9dc8e2de6b918b2a9e3e8d7da0f0f5e9668a538af24e",
+        "metadata": {
+          "mimeType": "video/mp4",
+          "container": "mp4",
+          "durationMs": 2000,
+          "width": 854,
+          "height": 480,
+          "sizeBytes": 568476
+        },
+        "recovery": "original task only; zero paid POST",
+        "state": "passed",
+        "artifact": "outputs/www-video-contracts/live-e2e/accepted-video.mp4",
+        "bytes": 568476
+      },
+      {
+        "model": "wan3.0-video-ali",
+        "feature": "image_to_video",
+        "workId": "work-video-result-1fa55335-43ee-4518-ad20-b7c78ea75f16",
+        "checksumSha256": "56f4ea0eabd06fb85fb68a203d179234e29c968937f94cc77d96ce0d7300e4fe",
+        "state": "passed",
+        "artifact": "outputs/www-video-contracts/live-wan3.0-video-ali-image_to_video/accepted-video.mp4",
+        "bytes": 847603
+      },
+      {
+        "model": "happyhorse-1.1-t2v",
+        "feature": "text_to_video",
+        "workId": "work-video-result-5ae0d8a4-3c8d-4fd7-b6fc-6254ea14bd02",
+        "checksumSha256": "d22c3852eaccac38a1baa46eee65ea2bc4ad776d46be9d6e6c2992c2fedde663",
+        "state": "passed",
+        "artifact": "outputs/www-video-contracts/live-happyhorse-1.1-t2v-text_to_video/accepted-video.mp4",
+        "bytes": 382255
+      }
+    ],
+    "unknownOriginals": [
+      {
+        "model": "happyhorse-1.1-i2v",
+        "feature": "image_to_video",
+        "idempotencyKey": "www-video-144f6ebc39e50602609096fb0665f6fca4e1e0ba58ac528157c8017df0080948",
+        "reservedCnyMicro": 2907500,
+        "quotedAmount": 1012500,
+        "actualChargedCnyMicro": 0,
+        "state": "submission_unknown",
+        "createdAt": "2026-10-15T09:09:37.817Z",
+        "taskId": "4f2f5286-8d19-42e6-9a85-e95465728e13",
+        "settlementPending": false
+      }
+    ],
+    "latestOriginalInspection": {
+      "inspectedAt": "2026-10-15T09:22:03.980Z",
+      "operation": "query",
+      "method": "GET",
+      "model": "happyhorse-1.1-i2v",
+      "taskId": "4f2f5286-8d19-42e6-9a85-e95465728e13",
+      "status": "submission_unknown",
+      "billing": {
+        "currency": "CNY_MICRO",
+        "price_version": "pv_86a0eeb6b26fe8555ac0da4e41d391d314e8ea655d8e39dd24045138368215f7",
+        "quoted_amount": 1012500,
+        "charged_amount": 0,
+        "reserved_amount": 1012500,
+        "settlement_pending": false
+      },
+      "errorCode": "MEDIA_RESULT_UNKNOWN",
+      "paidGenerationPosts": 0
+    },
+    "providerReservedCnyMicro": 1012500,
+    "localRemainingBudgetLockedCnyMicro": 2907500,
+    "noAdditionalPaidSubmissionWhileUnresolved": true,
+    "paidPosts": 4,
+    "originalRecoveryPaidPosts": 0,
+    "outboundScope": "Synthetic cup prompt, generated local reference image/video and documented parameters only; no enterprise project content",
+    "provider": "https://www.unicompapi.com",
+    "untested": [
+      "MiniMax-H3",
+      "doubao-seedance-2-0-260128",
+      "happyhorse-1.1-r2v",
+      "wan3.0-video",
+      "wan3.0-video-prime-ali",
+      "happyhorse-1.0-video-edit"
+    ]
+  },
+  "limits": [
+    "HappyHorse i2v original unresolved; not a real-service pass",
+    "H3 and HappyHorse edit minimum sample exceed RMB 5 total budget",
+    "Other real model/mode combinations remain unverified",
+    "/v1/requests lookup for an existing media task returned operation_not_found",
+    "macOS native acceptance not run",
+    "Existing visible application not restarted; installed packages not replaced",
+    "Source and evidence uncommitted; no merge, push, publish"
+  ],
+  "logsRoundtripVerified": 29,
+  "snapshotContext": "Implementation acceptance snapshot. Later user-authorized branch upload is recorded in git-delivery.json; uncommitted wording in the original limits describes the acceptance time.",
+  "gitDeliveryRecord": "git-delivery.json"
+}

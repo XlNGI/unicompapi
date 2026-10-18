@@ -1,6 +1,6 @@
 import type { DocumentWorkspaceKind } from './document-generation';
 
-export const conversationIntentKinds = ['chat', 'document', 'unknown'] as const;
+export const conversationIntentKinds = ['chat', 'document', 'cancel', 'unknown'] as const;
 export type ConversationIntentKind = (typeof conversationIntentKinds)[number];
 
 export const conversationIntentActions = [
@@ -134,7 +134,7 @@ export function parseConversationIntentPlan(
   if (typeof value.needsConfirmation !== 'boolean') {
     throw new TypeError('Conversation intent plan needsConfirmation is invalid');
   }
-  if (kind === 'chat' && (action !== undefined || documentKind !== undefined || deliverables !== undefined || steps !== undefined || value.targetHint !== undefined)) {
+  if ((kind === 'chat' || kind === 'cancel') && (action !== undefined || documentKind !== undefined || deliverables !== undefined || steps !== undefined || value.targetHint !== undefined)) {
     throw new TypeError('chat intent cannot contain document execution fields');
   }
   if (kind === 'document' && action === undefined) {

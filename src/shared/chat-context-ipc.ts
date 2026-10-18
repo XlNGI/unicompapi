@@ -195,9 +195,9 @@ export interface MessageDto {
   readonly retainedDocumentResult?: {
     readonly workId: string;
     readonly fileName: string;
-    readonly kind: 'ppt';
+    readonly kind: 'word' | 'excel' | 'ppt';
     readonly sizeBytes: number;
-    readonly actualPageCount: number;
+    readonly actualPageCount?: number;
     readonly planningTargetTotalPages?: number;
   };
   readonly attachments: readonly ConversationAttachmentDto[];
@@ -558,7 +558,7 @@ export type ConversationAgentResponseStartDto = ConversationResponseStartDto | {
 
 export interface ConversationIntentPlanDto {
   readonly schemaVersion: 1;
-  readonly kind: 'chat' | 'document' | 'unknown';
+  readonly kind: 'chat' | 'document' | 'cancel' | 'unknown';
   readonly action?: 'answer' | 'create' | 'revise' | 'analyze';
   readonly documentKind?: 'word' | 'excel' | 'ppt' | 'auto';
   readonly deliverables?: readonly ('word' | 'excel' | 'ppt')[];

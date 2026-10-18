@@ -1,3 +1,4 @@
+import { fixtureSemanticClassifier } from '../fixtures/conversation-semantic-classifier';
 import { mkdtemp, rm, writeFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
@@ -23,7 +24,7 @@ async function fixture() {
     nextConversationId: () => toConversationId(`attachment-conversation-${++id}`),
     nextMessageId: () => toMessageId(`attachment-message-${++id}`)
   });
-  const workflowService = new ConversationWorkflowService(workflows, new ConversationIntentOrchestrator());
+  const workflowService = new ConversationWorkflowService(workflows, new ConversationIntentOrchestrator({ classifier: fixtureSemanticClassifier }));
   const summarizeSource = vi.fn(async () => '事实摘要：应收账款为三万元。');
   const attachments = new ConversationAttachmentContextService({ rootDirectory: root, projectId, summarizer: { summarizeSource } });
   const prepareSummary = vi.spyOn(attachments, 'prepareSummary');

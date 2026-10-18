@@ -18,7 +18,7 @@ export const executionTimeoutScopes = ['execution', 'prepare', 'model', 'tool', 
 export interface ProductionEventFacts {
   readonly purpose?: 'planning' | 'content' | 'repair' | 'tool' | 'source_summary';
   readonly documentKind?: 'word' | 'excel' | 'ppt';
-  readonly planKind?: 'chat' | 'document' | 'unknown';
+  readonly planKind?: 'chat' | 'document' | 'cancel' | 'unknown';
   readonly action?: 'answer' | 'create' | 'revise' | 'analyze';
   readonly sourcePolicy?: 'none' | 'internal' | 'web' | 'mixed';
   readonly errorCode?: 'TOOL_PRECONDITION_FAILED' | 'OUTLINE_INVALID';
@@ -111,7 +111,7 @@ export function parseProductionEventFacts(input: unknown): ProductionEventFacts 
   if (typeof input !== 'object' || input === null || Array.isArray(input)) throw new TypeError('Invalid production facts');
   const enums: Record<string, readonly string[]> = {
     purpose: ['planning', 'content', 'repair', 'tool', 'source_summary'], documentKind: ['word', 'excel', 'ppt'],
-    planKind: ['chat', 'document', 'unknown'], action: ['answer', 'create', 'revise', 'analyze'],
+    planKind: ['chat', 'document', 'cancel', 'unknown'], action: ['answer', 'create', 'revise', 'analyze'],
     sourcePolicy: ['none', 'internal', 'web', 'mixed'],
     errorCode: ['TOOL_PRECONDITION_FAILED', 'OUTLINE_INVALID'],
     tool: ['read_sources', 'search', 'analyze', 'write_document', 'render', 'check', 'publish', 'patch'],

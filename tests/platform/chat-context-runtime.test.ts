@@ -1,3 +1,4 @@
+import { fixtureSemanticClassifier } from '../fixtures/conversation-semantic-classifier';
 import { mkdtemp, readFile, rm } from 'node:fs/promises';
 import { createHash } from 'node:crypto';
 import os from 'node:os';
@@ -133,7 +134,7 @@ async function createLocalDocumentRecoveryFixture(options: {
         : { type: 'stream_completed' }), occurredAt: t0
     }));
   }
-  const workflows = new ConversationWorkflowService(new JsonConversationWorkflowRepository(storage, projectId), new ConversationIntentOrchestrator());
+  const workflows = new ConversationWorkflowService(new JsonConversationWorkflowRepository(storage, projectId), new ConversationIntentOrchestrator({ classifier: fixtureSemanticClassifier }));
   const workflow = await workflows.create({ projectId, conversationId, sourceMessageId: sourceId, rawText: '做一份 Word 和 PPT' });
   await workflows.beginExecution({ workflowId: workflow.id, expectedRevision: workflow.revision, executionId: 'response-previous-word' });
   const next = await workflows.finishDocumentExecution('response-previous-word', 'completed', { messageId: previousAssistantId, workId: previousWorkId });
@@ -356,7 +357,7 @@ describe('chat-context composition runtime', () => {
       }
     }), createConversationResponseStreamEvent({ id: toConversationResponseStreamEventId('event-recover'), responseExecutionId: executionId,
       sequence: 1, type: 'execution_created', occurredAt: t0 }));
-    const workflows = new ConversationWorkflowService(new JsonConversationWorkflowRepository(storage, projectId), new ConversationIntentOrchestrator());
+    const workflows = new ConversationWorkflowService(new JsonConversationWorkflowRepository(storage, projectId), new ConversationIntentOrchestrator({ classifier: fixtureSemanticClassifier }));
     const workflow = await workflows.create({ projectId, conversationId, sourceMessageId: sourceId, rawText: '做一份 Word 和 PPT' });
     await workflows.beginExecution({ workflowId: workflow.id, expectedRevision: workflow.revision, executionId });
     const runtime = createChatContextRuntime({ userDataDirectory: userData,

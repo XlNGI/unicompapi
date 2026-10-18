@@ -205,7 +205,7 @@ export interface ProviderConnectionSummaryDto {
 }
 
 export interface ProviderModelSummaryDto {
-  readonly apiContract?: { readonly contractId: string; readonly revision: number; readonly authority: 'model_vendor'; readonly state: 'declared'; readonly rules?: ModelApiContractBindingV1['rules'] };
+  readonly apiContract?: { readonly contractId: string; readonly revision: number; readonly authority: 'model_vendor' | 'relay'; readonly state: 'declared'; readonly rules?: ModelApiContractBindingV1['rules'] };
   readonly modelId: string;
   readonly providerId: string;
   readonly connectionId: string;
@@ -424,7 +424,7 @@ export interface ProviderApi {
 export interface ModelApiContractSummaryDto {
   readonly contractId: string;
   readonly revision: number;
-  readonly authority: 'model_vendor';
+  readonly authority: 'model_vendor' | 'relay';
   readonly vendor: string;
   readonly modelNames: readonly string[];
   readonly sourceUrls: readonly string[];

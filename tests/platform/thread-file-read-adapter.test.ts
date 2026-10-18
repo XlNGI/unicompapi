@@ -1,4 +1,4 @@
-import { mkdtemp, rm } from 'node:fs/promises';
+import { mkdtemp, mkdir, readFile, readdir, rm, writeFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { describe, expect, it, vi } from 'vitest';
@@ -8,12 +8,70 @@ import { ThreadFileReadAdapter } from '../../src/platform/ipc/thread-file-read-a
 import { projectArtifactItem } from '../../src/application/conversation-thread-adapter';
 import { createChatContextRuntime } from '../../src/platform/ipc/chat-context-runtime';
 import type { StorageProjectSession } from '../../src/platform/ipc/storage-ipc-controller';
+import { ProjectSessionController, StorageProjectSessionRegistry } from '../../src/platform/ipc/project-session-controller';
 
 const t0 = toIsoTimestamp('2026-10-08T00:00:00.000Z');
 const t1 = toIsoTimestamp('2026-10-08T00:00:01.000Z');
 const threadId = toThreadId('thread-file-adapter');
 
 describe('ThreadFileReadAdapter', () => {
+  it('returns an empty list before a project is open, including the directory-dialog focus refresh', async () => {
+    const root = await mkdtemp(path.join(os.tmpdir(), 'unicomp-new-project-read-'));
+    const userData = await mkdtemp(path.join(os.tmpdir(), 'unicomp-new-project-user-'));
+    const registry = new StorageProjectSessionRegistry();
+    const runtime = createChatContextRuntime({ userDataDirectory: userData, getSession: () => registry.get(),
+      threadFileReadEnabled: true, threadFileWriteEnabled: true });
+    const request = { includeArchived: true, includeDeleted: false, limit: 100 };
+    const expectedEmpty = { ok: true, value: { items: [], readAtSequence: 0, hasMore: false } };
+    try {
+      expect(await runtime.threadReads.listThreadSummaries(request)).toEqual(expectedEmpty);
+      expect(await readdir(root)).toEqual([]);
+      const controller = new ProjectSessionController({ registry, chooseProjectDirectory: async () => {
+        expect(await runtime.threadReads.listThreadSummaries(request)).toEqual(expectedEmpty);
+        return root;
+      } });
+      const created = await controller.createProject({ name: '新建项目本地保存' });
+      expect(created.ok).toBe(true);
+      const manifest = JSON.parse(await readFile(path.join(root, 'project.json'), 'utf8'));
+      expect(manifest.id).toBe(registry.get()?.projectId);
+      expect(manifest.name).toBe('新建项目本地保存');
+      expect(await runtime.threadReads.listThreadSummaries(request)).toEqual(expectedEmpty);
+      const conversation = await runtime.conversations.create({ title: '本地对话', bindToCurrentProject: true });
+      expect(conversation.ok).toBe(true);
+      if (!conversation.ok) throw new Error('Conversation creation failed');
+      const saved = await runtime.conversations.addUserMessage({ conversationId: conversation.value.conversationId,
+        expectedRevision: conversation.value.revision, content: '第一条本地消息' });
+      expect(saved.ok).toBe(true);
+      await runtime.conversations.waitForOperations();
+      const restarted = createChatContextRuntime({ userDataDirectory: userData, getSession: () => registry.get(),
+        threadFileReadEnabled: true, threadFileWriteEnabled: true });
+      try {
+        const summaries = await restarted.threadReads.listThreadSummaries(request);
+        expect(summaries.ok && summaries.value.items.map(item => item.conversationId)).toEqual([conversation.value.conversationId]);
+        const restored = await restarted.conversations.get({ conversationId: conversation.value.conversationId });
+        expect(restored.ok && restored.value.messages.map(message => message.content)).toEqual(['第一条本地消息']);
+      } finally { await restarted.waitForMutations(); }
+      registry.clear();
+      expect(await runtime.threadReads.listThreadSummaries(request)).toEqual(expectedEmpty);
+    } finally {
+      await runtime.waitForMutations();
+      await rm(root, { recursive: true, force: true });
+      await rm(userData, { recursive: true, force: true });
+    }
+  });
+
+  it('keeps real project read failures visible instead of treating them as an empty project', async () => {
+    const root = await mkdtemp(path.join(os.tmpdir(), 'unicomp-project-read-failure-'));
+    try {
+      await mkdir(path.join(root, 'entities', 'threads'), { recursive: true });
+      await writeFile(path.join(root, 'entities', 'threads', 'index.v1.json'), '{invalid json');
+      const adapter = new ThreadFileReadAdapter({ getRepository: () => new ThreadFileRepository(root),
+        projectId: () => 'project-unreadable' });
+      await expect(adapter.listThreadSummaries({ includeArchived: true, includeDeleted: false, limit: 100 }))
+        .resolves.toMatchObject({ ok: false, error: { code: 'storage_error' } });
+    } finally { await rm(root, { recursive: true, force: true }); }
+  });
+
   it('hydrates Runtime controls only for the selected in-scope Thread and rejects a project switch during the read', async () => {
     const root = await mkdtemp(path.join(os.tmpdir(), 'unicomp-thread-controls-'));
     try {

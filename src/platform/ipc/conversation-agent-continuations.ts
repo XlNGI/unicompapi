@@ -13,12 +13,14 @@ import { ConversationWorkflowService } from '../../application/conversation-work
 import type { ConversationContextReader } from '../../application/conversation-context-reader';
 import type { ModelHistoryReader } from '../../application/model-history-reader';
 import { ConversationIntentOrchestrator, type ConversationIntentClassifierPort, type ConversationSemanticContext } from '../../application/conversation-intent-orchestrator';
+import { collectConversationDocumentBrief } from '../../application/conversation-document-brief';
 import type { ConversationApplicationService } from '../../application/conversation-service';
 import { JsonConversationWorkflowRepository } from '../repositories/json-conversation-workflow-repository';
 import type { ProjectStorageAdapter } from '../storage/storage-adapter';
 import type { ConversationResponseControllerRuntime } from './conversation-response-controller';
 import type { ConversationAgentSessionDto, ConversationAgentResponseStartDto, StartResponseRequest } from '../../shared/chat-context-ipc';
 import type { ExecutionBudgetPolicy } from '../../application/execution-budget';
+import { conversationAttachmentBatch } from '../documents/conversation-attachment-context';
 
 const digest = (value: unknown): string => createHash('sha256').update(JSON.stringify(value)).digest('hex');
 const messageReference = (message: Message): ControlledConversationInputReferenceV1 => ({ kind: 'message', id: message.id,
@@ -38,6 +40,8 @@ export class ConversationAgentContinuationRuntime {
     readonly agentRuns: ConversationAgentRunRepository; readonly conversations: ConversationApplicationService;
     readonly isCurrent: () => boolean; readonly now: () => string;
     readonly classifier?: ConversationIntentClassifierPort;
+    readonly classifierTimeoutMs?: number;
+    readonly classifierTimeoutGraceMs?: number;
     readonly supportsGeneration: boolean;
     readonly supportsMutation?: boolean;
     readonly replayExecution: (responseExecutionId: string) => Promise<ConversationAgentResponseStartDto>;
@@ -49,7 +53,8 @@ export class ConversationAgentContinuationRuntime {
   }) {
     this.workflowRepository = new JsonConversationWorkflowRepository(options.storage, options.projectId, options.now);
     this.workflows = new ConversationWorkflowService(this.workflowRepository, new ConversationIntentOrchestrator({
-      routingMode: 'local_compat', ...(options.classifier ? { classifier: { classify: async input => {
+      classifierTimeoutMs: options.classifierTimeoutMs, classifierTimeoutGraceMs: options.classifierTimeoutGraceMs,
+      ...(options.classifier ? { classifier: { classify: async input => {
         const scope = this.planning.getStore();
         if (!scope) throw new ConversationAgentSessionError('lease_lost');
         const { sessionId, runId } = scope;
@@ -261,14 +266,15 @@ export class ConversationAgentContinuationRuntime {
           request?.action === 'continue' && item.status === 'ready'));
       const leaseSignal = await this.options.sessionService.signalForRun(session.id);
       const signal = leaseSignal ? AbortSignal.any([leaseSignal, input.signal]) : input.signal;
-      const context = { ...(await this.semanticContext(input.conversation, session)), semanticCandidate: {
+      const context = { ...(await this.semanticContext(input.conversation, message)), semanticCandidate: {
         candidateId: input.input.candidateId, productFeature: input.input.productFeature
       } };
       if (!workflow) {
         workflow = await this.planning.run({ sessionId: session.id, runId: reservedRunId ?? session.id }, async () => {
           if (previous?.status === 'ready' && request?.action === 'continue') return previous;
+          if (previous && request?.action === 'authorize') return this.workflows.confirm({ workflowId: previous.id, expectedRevision: previous.revision });
           if (previous && request) return this.workflows.answer({ workflowId: previous.id, expectedRevision: previous.revision,
-            rawText: request.action === 'authorize' ? '确认执行' : message.content, sourceMessageId: message.id, context, signal });
+            rawText: message.content, sourceMessageId: message.id, context, signal });
           if (!request || request.action !== 'continue') return this.workflows.create({ projectId: this.options.projectId,
             conversationId: input.conversation.id, sourceMessageId: message.id, rawText: message.content, context, signal });
           return undefined;
@@ -280,6 +286,12 @@ export class ConversationAgentContinuationRuntime {
         if (latest.childSegments.some(segment => segment.planningBoundary === 'submitted')) await this.options.sessionService.freeze(session.id, []);
         else await this.options.sessionService.settle(session.id, 'failed');
         throw new ConversationAgentSessionError('continuation_invalid');
+      }
+      if (workflow?.status === 'cancelled') {
+        const cancelled = await this.options.sessionService.settle(session.id, 'cancelled');
+        await this.options.conversations.ensureWorkflowReply(workflow);
+        this.discardPreparation(session.id);
+        return { agentSession: this.toDto(cancelled), waiting: true, parentRunId: session.id, workflow };
       }
       if (workflow && ['needs_clarification', 'needs_confirmation'].includes(workflow.status)) {
         const waiting = await this.options.sessionService.wait(session.id, { reason: workflow.status === 'needs_confirmation' ? 'authorization' : 'clarification',
@@ -331,22 +343,29 @@ export class ConversationAgentContinuationRuntime {
     this.assertCurrent();
     return conversation;
   }
-  private async semanticContext(conversation: Conversation, session: ConversationAgentSessionV1): Promise<ConversationSemanticContext> {
+  private async semanticContext(conversation: Conversation, current: Message): Promise<ConversationSemanticContext> {
     if (this.options.modelHistory && !this.options.conversations.writesTranscript) {
       conversation = await this.options.modelHistory.readConversation({ threadId: toThreadId(conversation.id) });
     }
-    let threadItems: readonly { readonly itemId: { readonly namespace: string; readonly value: string }; readonly type: string; readonly content?: string }[] | undefined;
-    if (!this.options.modelHistory && this.options.contextReader) {
-      try { threadItems = (await this.options.contextReader.read(conversation.id)).items; } catch { /* compatibility fallback below */ }
-    }
-    const documents = conversation.messages.flatMap(message => message.state === 'completed' && message.documentResult
-      ? [{ messageId: message.id, kind: message.documentResult.kind, fileName: message.documentResult.fileName }] : []);
-    const pinned = new Set(session.inputReferences.filter(reference => reference.kind === 'message').map(reference => reference.id));
-    const recentUserMessages = threadItems
-      ?.filter(item => item.type === 'user_message' && item.content && pinned.has(item.itemId.value as never))
-      .map(item => item.content!)
-      ?? conversation.messages.filter(message => message.role === 'user' && pinned.has(message.id)).map(message => message.content);
-    return { documents, ...(documents.length ? { latestDocumentKind: documents.at(-1)!.kind } : {}), recentUserMessages };
+    const currentIndex = conversation.messages.findIndex(message => message.id === current.id && message.revision === current.revision);
+    if (currentIndex < 0) throw new ConversationAgentSessionError('reference_changed');
+    const messages = conversation.messages.slice(0, currentIndex + 1);
+    const seenWorks = new Set<string>();
+    const documents = messages.slice().reverse().flatMap(message => {
+      const result = message.state === 'completed' ? message.documentResult : undefined;
+      if (!result || seenWorks.has(result.workId)) return [];
+      seenWorks.add(result.workId);
+      return [{ messageId: message.id, kind: result.kind, fileName: result.fileName }];
+    }).reverse();
+    const brief = collectConversationDocumentBrief(conversation, current.id);
+    const recentConversationMessages = messages.slice(0, -1)
+      .filter(message => message.state === 'completed' && !message.workflowReply)
+      .slice(-16).map(message => ({ role: message.role === 'user' ? 'user' as const : 'assistant' as const,
+        content: (message.displayContent ?? message.content).slice(0, 1_800) }));
+    return { documents, ...(documents.length ? { latestDocumentKind: documents.at(-1)!.kind } : {}),
+      recentUserMessages: brief.entries.map(entry => entry.text), recentConversationMessages,
+      attachmentFiles: conversationAttachmentBatch({ ...conversation, messages }).map(file => ({ fileName: file.fileName ?? '已授权附件' })),
+      contextTruncated: brief.truncated || messages.length - 1 > 16 || messages.some(message => message.content.length > 1_800) };
   }
   private initialPolicy(conversation: Conversation): ExecutionBudgetPolicy {
     const hasPpt = this.options.supportsMutation !== false && conversation.messages.some(message => message.documentResult?.kind === 'ppt');

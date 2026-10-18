@@ -18,6 +18,7 @@ export interface PresentationArtDirectionRequest {
 export type PresentationArtDirectionPlanner = (request: PresentationArtDirectionRequest) => Promise<unknown>;
 
 export interface PresentationArtDirectionResult {
+  readonly outcomeUnknown?: boolean;
   readonly correctionCount?: number;
   readonly input?: PresentationArtDirectionInput;
   readonly designIR?: ProductionPresentationDesignIR;
@@ -33,6 +34,7 @@ export async function planPresentationArtDirection(options: {
   readonly brandingConstraints?: readonly string[];
   readonly availableAssets?: PresentationArtDirectionInput['availableAssets'];
   readonly designFeedback?: PresentationArtDirectionInput['designFeedback'];
+  readonly planningDiagnostics?: readonly string[];
   readonly requireDesignTree?: boolean;
   readonly request?: PresentationArtDirectionPlanner;
   readonly signal: AbortSignal;
@@ -95,7 +97,7 @@ export async function planPresentationArtDirection(options: {
     if (options.designFeedback) {
       const previous = options.designFeedback.previousDesign;
       const targets = new Set(options.designFeedback.targetPages);
-      if (JSON.stringify(canonicalizeLayoutJson(previous.globalDesign)) !== JSON.stringify(canonicalizeLayoutJson(designIR.globalDesign)) ||
+      if ((!options.designFeedback.allowGlobalDesignChange && JSON.stringify(canonicalizeLayoutJson(previous.globalDesign)) !== JSON.stringify(canonicalizeLayoutJson(designIR.globalDesign))) ||
         previous.pages.some((page, index) => !targets.has(page.pageNumber) && JSON.stringify(canonicalizeLayoutJson(page)) !== JSON.stringify(canonicalizeLayoutJson(designIR.pages[index])))) {
         return { input, diagnostics: [{ code: 'design_repair_scope_violation' }] };
       }
@@ -103,7 +105,8 @@ export async function planPresentationArtDirection(options: {
     return { input, designIR, diagnostics: [] };
   } catch (error) {
     options.signal.throwIfAborted();
-    return { input, diagnostics: error instanceof PresentationDesignIRParseError
+    return { input, ...(timedOut || error && typeof error === 'object' && 'outcome' in error && error.outcome === 'unknown' ? { outcomeUnknown: true } : {}),
+      diagnostics: error instanceof PresentationDesignIRParseError
       ? [...(error.diagnostics.some(diagnostic => /(?:^|\.)designTree(?:\.|$|\[)/u.test(diagnostic.path))
           ? [{ code: 'invalid_design_tree' }] : []), ...(error.diagnostics.some(diagnostic => /(?:^|\.)organization(?:\.|$|\[)/u.test(diagnostic.path))
           ? [{ code: 'invalid_content_organization' }] : []), ...error.diagnostics.slice(0, 39).map(({ code }) => ({ code }))]

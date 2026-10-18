@@ -27,8 +27,7 @@ test('chat page uses project conversations and composer-first streaming workflow
     'deleteConversation',
     'listTextCandidates',
     'startResponse',
-    'startWorkflow',
-    'answerWorkflow',
+    'startAgentResponse',
     'confirmWorkflow',
     'cancelWorkflow',
     'getPendingWorkflow',
@@ -41,9 +40,9 @@ test('chat page uses project conversations and composer-first streaming workflow
   assert.match(source, /runtime_not_allowed/);
   assert.doesNotMatch(source, /analyzeLocalConversationIntent|analyzeOfficeRequest/);
   assert.match(source, /activeWorkflow/);
-  assert.match(source, /workflowSubmissionInFlightRef/);
-  assert.match(source, /if \(workflowSubmissionInFlightRef\.current\) return;/);
-  assert.match(source, /needs_clarification/);
+  assert.doesNotMatch(source, /submitWorkflowInput|workflowSubmissionInFlightRef/);
+  assert.match(source, /startingClientCommandIdRef/);
+  assert.match(source, /allowedActions\.includes\('reply'\)/);
   assert.match(source, /needs_confirmation/);
   assert.match(source, /PPT 物理第/);
   assert.match(source, /保留：其他页面与原文件不变/);

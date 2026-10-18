@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { ConversationApplicationService, ConversationContextBuilder } from '../../src/application';
-import { analyzeLocalConversationIntent } from '../../src/application/conversation-intent-orchestrator';
+import { pptFixturePlan } from '../fixtures/conversation-semantic-classifier';
 import { conversationWorkflowReply } from '../../src/application/conversation-workflow-reply';
 import {
   addUserMessage, createConversation, createConversationWorkflow, parseConversation, parseConversationWorkflow,
@@ -30,7 +30,7 @@ function fixture() {
   const workflow = createConversationWorkflow({
     id: toConversationWorkflowId('workflow-reply'), conversationId,
     projectId: toProjectId('project-reply'), sourceMessageId: toMessageId('message-request'),
-    plan: analyzeLocalConversationIntent({ rawText: '我想做一个 PPT' }).plan,
+    plan: { ...pptFixturePlan, parameters: {}, missing: ['document_topic'], confidence: 'low' },
     pendingQuestions: [{ field: 'document_topic', question: '你想做什么主题的 PPT？', required: true }],
     createdAt: now
   });

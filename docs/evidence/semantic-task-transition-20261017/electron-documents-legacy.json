@@ -1,0 +1,96 @@
+{
+  "schemaVersion": 1,
+  "status": "passed",
+  "boundary": "real Electron BrowserWindow + production preload + production IPC + controlled in-process Provider transport",
+  "checks": [
+    "normal Agent response",
+    "persistent execution identity",
+    "cancel start boundary",
+    "Provider tool call through the real Electron IPC path",
+    "Word physical file generation",
+    "Excel physical file generation"
+  ],
+  "requestCount": 33,
+  "artDirectionRequestCount": 3,
+  "abortCount": 0,
+  "toolCalling": {
+    "state": "completed",
+    "toolCallCount": 1,
+    "toolCallId": "mock-generate-pptx-1",
+    "observationReturned": true,
+    "artifactRegistered": true,
+    "generatedWorkCount": 1,
+    "autonomousDesignExecuted": true,
+    "designExecution": {
+      "status": "passed",
+      "authoredPageCount": 3,
+      "nodeCount": 7,
+      "verifiedElementCount": 7
+    },
+    "designPath": "design-aware",
+    "documentResult": {
+      "workId": "work-document-33b7a73c-f467-4f01-be85-7580340ac4be",
+      "fileName": "Electron Tool Calling 验收-20261017185451-3046c9bf-dc5d-4b9a-b0ba-40335137d0a0.pptx",
+      "kind": "ppt",
+      "sizeBytes": 59807
+    },
+    "threadDocumentReceipt": null,
+    "entry": "responses.startAgent",
+    "threadToolFacts": null,
+    "threadArtifact": null
+  },
+  "discussionCases": [
+    {
+      "case": "discussion-sky-content",
+      "state": "completed",
+      "registeredNewWorks": 0,
+      "semanticPlannerCalls": 1,
+      "writeToolsExposed": false,
+      "externalProviderCalls": 0
+    },
+    {
+      "case": "discussion-reject-generation",
+      "state": "completed",
+      "registeredNewWorks": 0,
+      "semanticPlannerCalls": 1,
+      "writeToolsExposed": false,
+      "externalProviderCalls": 0
+    },
+    {
+      "case": "discussion-existing-ppt",
+      "state": "completed",
+      "registeredNewWorks": 0,
+      "semanticPlannerCalls": 1,
+      "writeToolsExposed": false,
+      "externalProviderCalls": 0
+    }
+  ],
+  "office": {
+    "word": {
+      "workId": "work-document-77543700-142d-4ba4-835d-efb2ca262a55",
+      "fileName": "原生 Office 端到端验收-20261017185512-5d4e5cf1-a414-450c-9734-682236db9a40.docx",
+      "kind": "word",
+      "sizeBytes": 8841,
+      "nativeBusinessTool": true,
+      "threadArtifact": false
+    },
+    "excel": {
+      "workId": "work-document-7599e4f3-86b0-4d0c-ba78-6fe6efb00a13",
+      "fileName": "原生 Office 端到端验收-20261017185518-08f15698-87cc-49fc-b318-768d2ecc33e8.xlsx",
+      "kind": "excel",
+      "sizeBytes": 6788,
+      "nativeBusinessTool": true,
+      "threadArtifact": false
+    }
+  },
+  "nativeRevision": {
+    "status": "passed",
+    "targetPage": 2,
+    "untouchedPagesPreserved": true,
+    "fileReadBack": true,
+    "workId": "work-document-9f08a740-c8d8-45f2-82d9-70b6f125618a",
+    "unchangedRequestReusedWork": true
+  },
+  "externalProvider": "blocked: no authorized external credentials used",
+  "externalProviderCalls": 0
+}

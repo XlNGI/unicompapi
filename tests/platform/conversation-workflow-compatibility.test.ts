@@ -1,3 +1,4 @@
+import { fixtureSemanticClassifier } from '../fixtures/conversation-semantic-classifier';
 import { mkdtemp, readFile, rm } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
@@ -18,7 +19,7 @@ async function fixture() {
   const conversationId = toConversationId('conversation-compatibility');
   const storage = new NodeProjectStorage(root);
   const repository = new JsonConversationWorkflowRepository(storage, projectId);
-  const service = new ConversationWorkflowService(repository, new ConversationIntentOrchestrator());
+  const service = new ConversationWorkflowService(repository, new ConversationIntentOrchestrator({ classifier: fixtureSemanticClassifier }));
   const original = await service.create({ projectId, conversationId,
     sourceMessageId: toMessageId('message-compatibility'), rawText: '你好' });
   const documentCommand = { action: 'recreate', requestText: '重新创建一份测试演示文稿', candidates: [], stage: 'choose_target' };

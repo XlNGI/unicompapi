@@ -2,6 +2,7 @@ import { mkdir, readFile, stat, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import JSZip from 'jszip';
 import ExcelJS from 'exceljs';
+import { officeCellText } from './office-cell-text';
 import { readPptxSlideOrder } from './pptx-page-reader';
 import type {
   DocumentOutline,
@@ -123,6 +124,14 @@ export async function readOfficeDocumentStructureFromBuffer(input: {
   readonly kind: DocumentWorkspaceKind;
   readonly displayName: string;
 }): Promise<DocumentStructureSnapshot> {
+  return readStructuredDocument(await readOfficeOutlineFromBuffer(input));
+}
+
+export async function readOfficeOutlineFromBuffer(input: {
+  readonly buffer: Uint8Array;
+  readonly kind: DocumentWorkspaceKind;
+  readonly displayName: string;
+}): Promise<DocumentOutline> {
   if (
     input.buffer.length <= 0 ||
     input.buffer.length > maximumOfficeBytes ||
@@ -134,9 +143,7 @@ export async function readOfficeDocumentStructureFromBuffer(input: {
       `${input.kind} source is not an OOXML package`
     );
   }
-  return readStructuredDocument(
-    await parseOfficeOutline(input.buffer, input.kind, input.displayName)
-  );
+  return parseOfficeOutline(input.buffer, input.kind, input.displayName);
 }
 
 export async function applyOfficeDocumentPatchToBuffer(
@@ -441,11 +448,12 @@ async function parseWordOutline(zip: JSZip, relativePath: string): Promise<Docum
   const entry = zip.file('word/document.xml');
   if (!entry) throw new OfficeDocumentToolError('invalid_package', 'DOCX document.xml is missing');
   const xml = await entry.async('string');
-  const paragraphs = [...xml.matchAll(/<w:p\b[^>]*>([\s\S]*?)<\/w:p>/gu)].map((match) => ({
+  const allParagraphs = [...xml.matchAll(/<w:p\b[^>]*>([\s\S]*?)<\/w:p>/gu)].map((match) => ({
     text: decodeXml([...match[1].matchAll(/<w:t\b[^>]*>([\s\S]*?)<\/w:t>/gu)].map((item) => item[1]).join('')),
     heading: /w:pStyle\b[^>]*w:val=["']Heading([1-3])["']/iu.exec(match[1]),
     title: /w:pStyle\b[^>]*w:val=["']Title["']/iu.test(match[1])
-  })).filter((paragraph) => paragraph.text.trim().length > 0 && !paragraph.title);
+  }));
+  const paragraphs = allParagraphs.filter(paragraph => paragraph.text.trim().length > 0 && !paragraph.title);
   const sections: Array<{ heading: string; level: 1 | 2 | 3; blocks: DocumentOutlineBlock[] }> = [];
   const preamble: string[] = [];
   for (const paragraph of paragraphs) {
@@ -467,7 +475,7 @@ async function parseWordOutline(zip: JSZip, relativePath: string): Promise<Docum
   }
   return {
     kind: 'word',
-    title: path.posix.basename(relativePath, '.docx'),
+    title: allParagraphs.find(paragraph => paragraph.title)?.text || path.posix.basename(relativePath, '.docx'),
     sections: sections.length > 0 ? sections : [{ heading: '正文', level: 1, blocks: [] }]
   };
 }
@@ -482,7 +490,7 @@ async function parseExcelOutline(buffer: Uint8Array, relativePath: string): Prom
   const sections: DocumentOutlineSection[] = workbook.worksheets.map((worksheet) => {
     const rows: string[][] = [];
     worksheet.eachRow((row) => {
-      const values = (row.values as unknown[]).slice(1).map((value) => value == null ? '' : String(value));
+      const values = (row.values as unknown[]).slice(1).map(value => officeCellText(value));
       if (values.some((value) => value.trim().length > 0)) rows.push(values);
     });
     const header = rows[0] ?? ['数据'];

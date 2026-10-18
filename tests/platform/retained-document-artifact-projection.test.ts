@@ -56,7 +56,9 @@ async function fixture() {
       executor: new PlatformDocumentGenerationExecutor(new DocumentGenerationRunner({ rootDirectory, projectId,
         requireRenderForPpt: true, renderPreview: async target => ({ previewCount: (await readPptxDocument(await readFile(target))).length, diagnostics: [] }) })),
       revalidateAuthorization: async () => true } });
-  const selected = await service.select({ conversation, currentUserMessageId: userId, query: conversation.messages[0].content });
+  const selected = await service.select({ conversation, currentUserMessageId: userId, plan: {
+    schemaVersion: 1, kind: 'document', action: 'create', documentKind: 'ppt', parameters: { topic: '合成交付文件' },
+    sourcePolicy: 'none', missing: [], ambiguities: [], confidence: 'high', needsConfirmation: false } });
   if (!selected) throw new Error('Missing synthetic generation selection');
   const session = await service.createSession({ selection: selected, responseExecutionId: executionId });
   const signal = new AbortController().signal;

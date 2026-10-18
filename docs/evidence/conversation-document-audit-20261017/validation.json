@@ -1,0 +1,70 @@
+{
+  "schemaVersion": 1,
+  "date": "2026-10-17",
+  "status": "audit_complete_defects_not_fixed",
+  "baselineHead": "c2f8ac696da3fb39dd368233a0142e458e80b9cf",
+  "scope": "Generic conversation and Word/Excel/PPT capability audit; image feature excluded; no proposal or design implementation",
+  "checks": {
+    "targetedRegression": {
+      "status": "passed",
+      "files": 14,
+      "passed": 322,
+      "failed": 0,
+      "skipped": 0,
+      "exitCode": 0,
+      "command": "pnpm exec vitest run tests/application/conversation-context-builder.test.ts tests/application/conversation-intent-orchestrator.test.ts tests/application/conversation-workflow.test.ts tests/application/conversation-agent-session-service.test.ts tests/platform/conversation-document-tool-session.test.ts tests/platform/conversation-agent-continuations.test.ts tests/application/document-generation-service.test.ts tests/application/presentation-design-revision.test.ts tests/platform/presentation-design-production.test.ts tests/application/presentation-autonomous-planning.test.ts tests/platform/presentation-visual-design-system.test.ts tests/platform/presentation-revision-save.test.ts tests/platform/presentation-template-fallback-production.test.ts tests/platform/presentation-design-preserving-repair-production.test.ts --maxWorkers=1 --minWorkers=1",
+      "rawLogSaved": false,
+      "evidence": "Observed tool command output and final process exit; this is a result summary, not a reconstructed raw log"
+    },
+    "offlineReproduction": {
+      "status": "passed_findings_reproduced",
+      "command": "node docs/evidence/conversation-document-audit-20261017/reproduce.cjs",
+      "exitCode": 0,
+      "result": "reproduction.json",
+      "meaning": "Current defects and capability boundaries reproduced; no product fixes or aesthetic acceptance implied"
+    },
+    "scriptSyntax": {
+      "status": "passed",
+      "command": "node --check docs/evidence/conversation-document-audit-20261017/reproduce.cjs"
+    },
+    "auditScriptLint": {
+      "status": "passed",
+      "command": "pnpm exec eslint docs/evidence/conversation-document-audit-20261017/reproduce.cjs"
+    },
+    "diffCheck": {
+      "status": "passed",
+      "command": "git diff --check"
+    },
+    "localReportLinks": {
+      "status": "passed",
+      "reportLinksChecked": 32,
+      "newPlanLinksChecked": 2,
+      "missing": 0
+    },
+    "businessSourceIntegrity": {
+      "status": "passed",
+      "sourceHashesChecked": 14,
+      "changed": 0,
+      "trackedDiff": ["PLANS.md"],
+      "newFilesScope": "docs/current/conversation-document-audit-20261017.md and docs/evidence/conversation-document-audit-20261017/"
+    }
+  },
+  "mutations": {
+    "businessSourceChanged": false,
+    "existingTestsChanged": false,
+    "userDataChanged": false,
+    "credentialFilesRead": false,
+    "externalProviderRequests": 0,
+    "pptFilesGenerated": 0,
+    "applicationRestarts": 0,
+    "committedMergedOrPushed": false
+  },
+  "limitations": [
+    "Full regression and a new production build were not run for this documentation-only audit",
+    "No new real Provider, live UI, macOS device or subjective aesthetic evaluation",
+    "The user's current unsatisfactory PPT was not inspected page by page",
+    "The authoritative V1.2.1 handoff package path is absent from the current workspace",
+    "Wrong generationRequired decisions were reproduced without executing document tools",
+    "Word and Excel generation exists through independent IPC; their complete native Agent reachability was not established"
+  ]
+}

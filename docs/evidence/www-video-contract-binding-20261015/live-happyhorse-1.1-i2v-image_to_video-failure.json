@@ -1,0 +1,144 @@
+{
+  "live": true,
+  "safeError": "ERR_ASSERTION",
+  "checks": [],
+  "requests": [
+    {
+      "method": "POST",
+      "path": "/v1/assets",
+      "operation": "upload"
+    },
+    {
+      "method": "POST",
+      "path": "/v1/videos/quote",
+      "operation": "post"
+    },
+    {
+      "method": "POST",
+      "path": "/v1/videos",
+      "operation": "post"
+    },
+    {
+      "method": "GET",
+      "path": "/v1/videos/4f2f5286-8d19-42e6-9a85-e95465728e13",
+      "operation": "read"
+    },
+    {
+      "method": "GET",
+      "path": "/v1/videos/4f2f5286-8d19-42e6-9a85-e95465728e13",
+      "operation": "read"
+    },
+    {
+      "method": "GET",
+      "path": "/v1/videos/4f2f5286-8d19-42e6-9a85-e95465728e13",
+      "operation": "read"
+    },
+    {
+      "method": "GET",
+      "path": "/v1/videos/4f2f5286-8d19-42e6-9a85-e95465728e13",
+      "operation": "read"
+    },
+    {
+      "method": "GET",
+      "path": "/v1/videos/4f2f5286-8d19-42e6-9a85-e95465728e13",
+      "operation": "read"
+    },
+    {
+      "method": "GET",
+      "path": "/v1/videos/4f2f5286-8d19-42e6-9a85-e95465728e13",
+      "operation": "read"
+    },
+    {
+      "method": "GET",
+      "path": "/v1/videos/4f2f5286-8d19-42e6-9a85-e95465728e13",
+      "operation": "read"
+    },
+    {
+      "method": "GET",
+      "path": "/v1/videos/4f2f5286-8d19-42e6-9a85-e95465728e13",
+      "operation": "read"
+    },
+    {
+      "method": "GET",
+      "path": "/v1/videos/4f2f5286-8d19-42e6-9a85-e95465728e13",
+      "operation": "read"
+    },
+    {
+      "method": "GET",
+      "path": "/v1/videos/4f2f5286-8d19-42e6-9a85-e95465728e13",
+      "operation": "read"
+    },
+    {
+      "method": "GET",
+      "path": "/v1/videos/4f2f5286-8d19-42e6-9a85-e95465728e13",
+      "operation": "read"
+    },
+    {
+      "method": "GET",
+      "path": "/v1/videos/4f2f5286-8d19-42e6-9a85-e95465728e13",
+      "operation": "read"
+    },
+    {
+      "method": "GET",
+      "path": "/v1/videos/4f2f5286-8d19-42e6-9a85-e95465728e13",
+      "operation": "read"
+    },
+    {
+      "method": "GET",
+      "path": "/v1/videos/4f2f5286-8d19-42e6-9a85-e95465728e13",
+      "operation": "read"
+    },
+    {
+      "method": "GET",
+      "path": "/v1/videos/4f2f5286-8d19-42e6-9a85-e95465728e13",
+      "operation": "read"
+    },
+    {
+      "method": "GET",
+      "path": "/v1/videos/4f2f5286-8d19-42e6-9a85-e95465728e13",
+      "operation": "read"
+    },
+    {
+      "method": "GET",
+      "path": "/v1/videos/4f2f5286-8d19-42e6-9a85-e95465728e13",
+      "operation": "read"
+    },
+    {
+      "method": "GET",
+      "path": "/v1/videos/4f2f5286-8d19-42e6-9a85-e95465728e13",
+      "operation": "read"
+    },
+    {
+      "method": "GET",
+      "path": "/v1/videos/4f2f5286-8d19-42e6-9a85-e95465728e13",
+      "operation": "read"
+    },
+    {
+      "method": "GET",
+      "path": "/v1/videos/4f2f5286-8d19-42e6-9a85-e95465728e13",
+      "operation": "read"
+    },
+    {
+      "method": "GET",
+      "path": "/v1/videos/4f2f5286-8d19-42e6-9a85-e95465728e13",
+      "operation": "read"
+    },
+    {
+      "method": "GET",
+      "path": "/v1/videos/4f2f5286-8d19-42e6-9a85-e95465728e13",
+      "operation": "read"
+    },
+    {
+      "method": "GET",
+      "path": "/v1/videos/4f2f5286-8d19-42e6-9a85-e95465728e13",
+      "operation": "read"
+    },
+    {
+      "method": "GET",
+      "path": "/v1/videos/4f2f5286-8d19-42e6-9a85-e95465728e13",
+      "operation": "read"
+    }
+  ],
+  "externalRequests": 27,
+  "paidPost": 1
+}

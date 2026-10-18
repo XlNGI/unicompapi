@@ -1,3 +1,4 @@
+import { fixtureSemanticClassifier } from '../fixtures/conversation-semantic-classifier';
 import { mkdir, mkdtemp, rm } from 'node:fs/promises';
 import { createHash } from 'node:crypto';
 import os from 'node:os';
@@ -52,7 +53,7 @@ async function fixture(options: { readonly holdResponse?: boolean; readonly leas
   const rootDirectory = await mkdtemp(path.join(os.tmpdir(), 'unicomp-r45-production-'));
   const userDataDirectory = path.join(rootDirectory, 'isolated-profile');
   await mkdir(userDataDirectory);
-  const provider = await providerFixture(userDataDirectory, options.maximumSubmissions);
+  const provider = await providerFixture(userDataDirectory, options.maximumSubmissions === undefined ? undefined : options.maximumSubmissions + 1);
   const storage = new NodeProjectStorage(rootDirectory);
   let executionClock = options.initialClock ?? Date.now();
   const at = () => new Date(executionClock).toISOString();
@@ -70,6 +71,12 @@ async function fixture(options: { readonly holdResponse?: boolean; readonly leas
   let releaseResponse!: () => void;
   const released = new Promise<void>(resolve => { releaseResponse = resolve; });
   const newApiRuntime = new NewApiSharedRuntime({ transport: { send: async request => {
+    const payload = JSON.parse(Buffer.from(request.body ?? []).toString('utf8'));
+    if (payload.messages?.some((message: { role: string; content: string }) => message.role === 'system' && message.content.includes('UniComp 会话语义规划器'))) {
+      const semantic = JSON.parse(payload.messages.find((message: { role: string }) => message.role === 'user').content);
+      const plan = await fixtureSemanticClassifier.classify({ rawText: semantic.currentRequest, context: semantic.context, signal: request.signal ?? new AbortController().signal });
+      return textResponse(provider.modelKey, JSON.stringify(plan));
+    }
     requests.push(request);
     if (options.holdResponse) await released;
     if (options.streamingGate) return { status: 200, headers: { 'content-type': 'text/event-stream' }, stream: {
@@ -440,7 +447,7 @@ describe('R04/R05 production Host continuation boundary', () => {
     await waitForExecution(restarted, next.value.execution.responseExecutionId); expect(f.requests).toHaveLength(1);
   }, 10_000);
 
-  it('releases only the exact unsubmitted acceptance claim so a one-submission policy can admit the explicit new task', async () => {
+  it('releases only the exact unsubmitted acceptance claim so a policy for one semantic call and one response can admit the explicit new task', async () => {
     const f = await fixture({ initialClock: Date.now() - 360_000, maximumSubmissions: 1 });
     const crash = await seedBindingCrash(f, false), authorization = await seedAuthorizationClaim(f, crash.responseId);
     const restarted = f.createRuntime();
@@ -557,7 +564,7 @@ describe('R04/R05 production Host continuation boundary', () => {
     const original = await f.getSession(originalDto.sessionId);
     expect(original.childSegments).toHaveLength(1);
     expect(original.lease).toBeUndefined();
-    expect(original.planningBoundary).toBe('not_started');
+    expect(original.planningBoundary).toBe('received');
     expect(await f.executions.list(f.conversation.id)).toEqual([]);
     expect(f.requests).toEqual([]);
     expect(JSON.stringify(original)).not.toContain(originalDto.resumeToken!);
@@ -802,14 +809,7 @@ describe('R04/R05 production Host continuation boundary', () => {
 
   it('keeps an uncertain planning boundary frozen on restart and beyond expiry without automatic submission', async () => {
     const f = await fixture();
-    const first = await f.runtime.responses.startAgent(await f.request('制作一个 PPT。', 'r45-unknown-wait'));
-    if (!first.ok || !('waiting' in first.value)) throw new Error('Expected saved waiting parent');
-    const original = await f.getSession(first.value.agentSession.sessionId);
-    // Simulate a crash after dispatch was journalled but before its response was durably received.
-    // This deliberately grants no executable lease and uses only the synthetic project's repository.
-    await f.sessions.commit({ sessionId: original.id, expectedRevision: original.revision,
-      session: updateConversationAgentSession(original, { planningBoundary: 'submitted',
-        childSegments: original.childSegments.map(child => ({ ...child, planningBoundary: 'submitted' })) }, toIsoTimestamp(f.at())) });
+    const original = await f.seedPlanningRoot(true);
     await f.runtime.interruptActiveResponses(); await f.runtime.waitForMutations();
     f.setTime(original.budget.deadlineAt + 1);
     const restarted = f.createRuntime();

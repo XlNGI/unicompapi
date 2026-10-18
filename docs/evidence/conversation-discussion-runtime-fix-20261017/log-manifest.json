@@ -1,0 +1,197 @@
+{
+  "schemaVersion": 1,
+  "files": [
+    {
+      "file": "logs/budget-regression-before.log.gz",
+      "origin": "actual_startup_directory",
+      "originalBytes": 1705,
+      "originalSha256": "91fc7ea9abcf0a28d6aae875afb264c47123b60b98bec7b988deab96fe23c784",
+      "compressedSha256": "6001cecf8639537e643b48f4fd972fd68f3c2995d5a5afe30652ad5986fb147e",
+      "decompressedSha256": "91fc7ea9abcf0a28d6aae875afb264c47123b60b98bec7b988deab96fe23c784"
+    },
+    {
+      "file": "logs/build.log.gz",
+      "origin": "actual_startup_directory",
+      "originalBytes": 1104,
+      "originalSha256": "333c64b6b574901f9f40c0a14bf8f259ffd3c022eba800e7b40121e1ce43cb7f",
+      "compressedSha256": "10ad38e04ebbfd77379bd75bb22f5f2eec180f38b49767d8d93c608914d67d9e",
+      "decompressedSha256": "333c64b6b574901f9f40c0a14bf8f259ffd3c022eba800e7b40121e1ce43cb7f"
+    },
+    {
+      "file": "logs/electron-budget-before.log.gz",
+      "origin": "actual_startup_directory",
+      "originalBytes": 1522,
+      "originalSha256": "6394a64680177a3731e0c28f0a813b71390dfdbceb9370c09b47694ed60a8cbf",
+      "compressedSha256": "4823928732962cdfe46a90bdbeb3fbac9a8e75fbf6942e779f8541828cec4d35",
+      "decompressedSha256": "6394a64680177a3731e0c28f0a813b71390dfdbceb9370c09b47694ed60a8cbf"
+    },
+    {
+      "file": "logs/electron-discussion-diagnostic-before.log.gz",
+      "origin": "actual_startup_directory",
+      "originalBytes": 389,
+      "originalSha256": "7438413fefdab0bfba2535665cb0e12fb6d93ab6a7e90e9969fe46578036f7d2",
+      "compressedSha256": "19d30efa6a7a53ae46cc766f6dfaf46e824e3ff8c666c7aeda0a12434665cd3c",
+      "decompressedSha256": "7438413fefdab0bfba2535665cb0e12fb6d93ab6a7e90e9969fe46578036f7d2"
+    },
+    {
+      "file": "logs/electron-fallback-before-compatibility.log.gz",
+      "origin": "actual_startup_directory",
+      "originalBytes": 3419,
+      "originalSha256": "a1fb07c93f20be1fd45d681ae1ddaecfdb036a076bead4310231976f35a91842",
+      "compressedSha256": "475b5c65a1f3d20851c8bc56b5f91f4809fd97d1b3cd38488c11b29dff90f29a",
+      "decompressedSha256": "a1fb07c93f20be1fd45d681ae1ddaecfdb036a076bead4310231976f35a91842"
+    },
+    {
+      "file": "logs/electron-fallback.log.gz",
+      "origin": "actual_startup_directory",
+      "originalBytes": 3419,
+      "originalSha256": "0232b7274be7eeb823562c896ef414ac1c7073761594b8e45e2a1bbbf6f92142",
+      "compressedSha256": "25bc696a733913f58c1d58c682f773c6f01261d7f9c6e7b5ab1c904153bea820",
+      "decompressedSha256": "0232b7274be7eeb823562c896ef414ac1c7073761594b8e45e2a1bbbf6f92142"
+    },
+    {
+      "file": "logs/electron-legacy-before-compatibility.log.gz",
+      "origin": "actual_startup_directory",
+      "originalBytes": 2414,
+      "originalSha256": "ec8fa25ab38b28d26a17ee9eef9708d14f353b96fed897ae3703f2ab62cdb957",
+      "compressedSha256": "fa003d9cd0702c36df063db73bfd59768f3fcb0d45bfc53b5a82710908bcaf8d",
+      "decompressedSha256": "ec8fa25ab38b28d26a17ee9eef9708d14f353b96fed897ae3703f2ab62cdb957"
+    },
+    {
+      "file": "logs/electron-legacy.log.gz",
+      "origin": "actual_startup_directory",
+      "originalBytes": 2414,
+      "originalSha256": "5924d29a6809622f646a091cfaf4b5f07d765c01e332b401ba697aae40996218",
+      "compressedSha256": "24aa359139884203414e5875fa89ee425d388cca41923cee8d574e47acdb9da8",
+      "decompressedSha256": "5924d29a6809622f646a091cfaf4b5f07d765c01e332b401ba697aae40996218"
+    },
+    {
+      "file": "logs/electron-native-before-compatibility.log.gz",
+      "origin": "actual_startup_directory",
+      "originalBytes": 3524,
+      "originalSha256": "0ae50216efc2ad798f22364310f227b2597c6aa84d7648754e6cb7a704acfbd1",
+      "compressedSha256": "95965dd3adc0cc80150e7bd723d802c5c9be1c28c0b1ef359ee70fb3c4d7cabc",
+      "decompressedSha256": "0ae50216efc2ad798f22364310f227b2597c6aa84d7648754e6cb7a704acfbd1"
+    },
+    {
+      "file": "logs/electron-native.log.gz",
+      "origin": "actual_startup_directory",
+      "originalBytes": 3524,
+      "originalSha256": "4429ad0a87ed00986ab7c615d5ab2362e0e96cc7b50ac7b8beca620756006c67",
+      "compressedSha256": "04eeee34b1d25edbd776f96d4d9e9712b6eddaab3fc6240a51e768920cdc4f58",
+      "decompressedSha256": "4429ad0a87ed00986ab7c615d5ab2362e0e96cc7b50ac7b8beca620756006c67"
+    },
+    {
+      "file": "logs/lint.log.gz",
+      "origin": "actual_startup_directory",
+      "originalBytes": 12,
+      "originalSha256": "cc5a0b39c7052d24c24888403c48018b4fcccc9d799f81be6c9c30c9e19c85fc",
+      "compressedSha256": "9cc204bc742f6b4170f8f4d4f0cc5131ee40541d4f1b327344f698cf557bb160",
+      "decompressedSha256": "cc5a0b39c7052d24c24888403c48018b4fcccc9d799f81be6c9c30c9e19c85fc"
+    },
+    {
+      "file": "logs/node-ui.log.gz",
+      "origin": "actual_startup_directory",
+      "originalBytes": 33939,
+      "originalSha256": "22ae79c6d7627daaa4280b5b62b152f49f2c9092fa1fb3ee6aa65ad545e97aa0",
+      "compressedSha256": "4193ebce38780242d76bd4924198b31ad241de49b7984e4d3b5f7c2aac10d18f",
+      "decompressedSha256": "22ae79c6d7627daaa4280b5b62b152f49f2c9092fa1fb3ee6aa65ad545e97aa0"
+    },
+    {
+      "file": "logs/platform-audit.log.gz",
+      "origin": "actual_startup_directory",
+      "originalBytes": 2784,
+      "originalSha256": "62ab30653719a62ccc410c1fe46c99f54325758e16f0979b1a190d27024a7ef3",
+      "compressedSha256": "d8a846179d30d4affd6f51e13fc439952c7d986d3bdc49192907d92286bc80e2",
+      "decompressedSha256": "62ab30653719a62ccc410c1fe46c99f54325758e16f0979b1a190d27024a7ef3"
+    },
+    {
+      "file": "logs/regression-final.log.gz",
+      "origin": "actual_startup_directory",
+      "originalBytes": 1414,
+      "originalSha256": "91a768690b62213cfde496eebb4acb7e4c7813b376baffdbe0aa898cf545aef1",
+      "compressedSha256": "5bf52f273daf02faf06bfaad42034f703111ca3abb1c9b129d82fae2c7263afd",
+      "decompressedSha256": "91a768690b62213cfde496eebb4acb7e4c7813b376baffdbe0aa898cf545aef1"
+    },
+    {
+      "file": "logs/regression-intermediate-helper.log.gz",
+      "origin": "actual_startup_directory",
+      "originalBytes": 5064,
+      "originalSha256": "45ce9308f111d28c5f59561fbb4af6d996d95eef17f7016a65154f16b6b8d8ab",
+      "compressedSha256": "1b81c4f802a64d987f07443773ae9a9defeea8bad6bd850fca59bfd933a6b067",
+      "decompressedSha256": "45ce9308f111d28c5f59561fbb4af6d996d95eef17f7016a65154f16b6b8d8ab"
+    },
+    {
+      "file": "logs/typecheck-intermediate-helper.log.gz",
+      "origin": "actual_startup_directory",
+      "originalBytes": 489,
+      "originalSha256": "7a3f7830c536c319a03042b6680f901c245fd4db9987d7e3b84ddfd73e4b6afa",
+      "compressedSha256": "28e6bca87740b87eb390fdf7c8f8a81b0594b8b10f12521b8a722eaf45f3c62a",
+      "decompressedSha256": "7a3f7830c536c319a03042b6680f901c245fd4db9987d7e3b84ddfd73e4b6afa"
+    },
+    {
+      "file": "logs/typecheck.log.gz",
+      "origin": "actual_startup_directory",
+      "originalBytes": 54,
+      "originalSha256": "653f5d9eecbb94f6ba67b87d1c6c8b26060bbc0ec8411260069aa069341c6232",
+      "compressedSha256": "98502d9ae1ed844e593017dddc513a8ea1a5d6cad184b61d03b3622ecc77a05c",
+      "decompressedSha256": "653f5d9eecbb94f6ba67b87d1c6c8b26060bbc0ec8411260069aa069341c6232"
+    },
+    {
+      "file": "logs/vitest-before-compatibility-fix.log.gz",
+      "origin": "actual_startup_directory",
+      "originalBytes": 57794,
+      "originalSha256": "b8bad311439b611af269001bc9b952f17f7e4edb290cbbb6fc7aab5072bdc816",
+      "compressedSha256": "c990e175c3a15b778cafb48c397dd79d8e4a1f4da828045c7c293f9e9343d6f6",
+      "decompressedSha256": "b8bad311439b611af269001bc9b952f17f7e4edb290cbbb6fc7aab5072bdc816"
+    },
+    {
+      "file": "logs/vitest-full.log.gz",
+      "origin": "actual_startup_directory",
+      "originalBytes": 55086,
+      "originalSha256": "f1787bcd1a475da1dd5840403ac9f00f9183fb8ed7c9f1c2fe4f89bf2b618cd4",
+      "compressedSha256": "c86fa61b968a355a57ff7d877a2b6a1ec14500e8edc5c23e7c051cba8f977a39",
+      "decompressedSha256": "f1787bcd1a475da1dd5840403ac9f00f9183fb8ed7c9f1c2fe4f89bf2b618cd4"
+    },
+    {
+      "file": "logs/vitest-interrupted-backup-discovery.log.gz",
+      "origin": "actual_startup_directory",
+      "originalBytes": 10188,
+      "originalSha256": "259e48db836fffbd0736b80a34560e811e60768e69e0547531f731c89d521bf2",
+      "compressedSha256": "e13f95dfcc78bdeddbeeb706e7b07c7ac174ceb2f76a5467b607de34715e53ae",
+      "decompressedSha256": "259e48db836fffbd0736b80a34560e811e60768e69e0547531f731c89d521bf2"
+    },
+    {
+      "file": "logs/vitest-interrupted-budget-fix.log.gz",
+      "origin": "actual_startup_directory",
+      "originalBytes": 9815,
+      "originalSha256": "b845957250d83756e37dafa824d98aec20fde5fb7fddffcdbb661f6654e318e5",
+      "compressedSha256": "849efff144418d350f40031b2ff22853582d98b1494bd05cebfca9db97d2aa84",
+      "decompressedSha256": "b845957250d83756e37dafa824d98aec20fde5fb7fddffcdbb661f6654e318e5"
+    },
+    {
+      "file": "logs/worktree-regression-before.log.gz",
+      "origin": "implementation_worktree",
+      "originalBytes": 4207,
+      "originalSha256": "ab14eadc3e0ba31e26f21743707d2ce16d6b69ef59c0ef57f9bac757b43fc22f",
+      "compressedSha256": "6a7fc6942d13486c0e1b23ef741318e1b09bfec1cbab871b47879c71c8afec63",
+      "decompressedSha256": "ab14eadc3e0ba31e26f21743707d2ce16d6b69ef59c0ef57f9bac757b43fc22f"
+    },
+    {
+      "file": "logs/worktree-regression-after.log.gz",
+      "origin": "implementation_worktree",
+      "originalBytes": 1289,
+      "originalSha256": "4ffbcae9f86e771d58f647f93b40d2efb463f1e536db33f570121d42b02b90e1",
+      "compressedSha256": "9454f1fda24905b2bf4d20ffb10021e138e974807c97eb0ac95c1b23062b8441",
+      "decompressedSha256": "4ffbcae9f86e771d58f647f93b40d2efb463f1e536db33f570121d42b02b90e1"
+    },
+    {
+      "file": "logs/worktree-regression-final.log.gz",
+      "origin": "implementation_worktree",
+      "originalBytes": 1289,
+      "originalSha256": "409aa1e0f6d9b32a1e98a9c7f3ab3fb7dfdc03e877361d724f1dde90ad898787",
+      "compressedSha256": "9d3c731cdedd8b8df0e642b725c913eb21ea12b020bdc76a99b7a616b376fa32",
+      "decompressedSha256": "409aa1e0f6d9b32a1e98a9c7f3ab3fb7dfdc03e877361d724f1dde90ad898787"
+    }
+  ]
+}

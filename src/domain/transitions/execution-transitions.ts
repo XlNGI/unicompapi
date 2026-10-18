@@ -292,3 +292,17 @@ export function canRecoverRemoteCompletedExecution(
       execution.remoteOperationId || execution.submissionOutcome === 'completed_sync'
     );
 }
+
+/** A known accepted video can be queried after tracking stopped, without a new submit. */
+export function canQueryKnownRemoteVideoExecution(execution: Execution): boolean {
+  return execution.state === 'failed' && ['queued', 'processing'].includes(execution.failure?.stage ?? '') &&
+    execution.failure?.retryability !== 'not_retryable' && execution.submissionOutcome === 'accepted_async' &&
+    Boolean(execution.remoteOperationId) && Boolean(execution.providerOperationRecordId);
+}
+
+/** Host must first confirm completion through the pinned original Provider operation. */
+export function recoverQueriedRemoteVideoExecution(execution: Execution, updatedAt: IsoTimestamp): Execution {
+  if (!canQueryKnownRemoteVideoExecution(execution)) throw new RetryNotAllowedError('A known accepted video operation is required');
+  assertTimestampNotBefore(updatedAt, execution.updatedAt, 'execution.updatedAt');
+  return { ...execution, state: 'remote_completed', failure: undefined, updatedAt };
+}

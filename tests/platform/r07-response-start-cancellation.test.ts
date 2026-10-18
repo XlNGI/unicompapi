@@ -1,3 +1,4 @@
+import { fixtureSemanticClassifier } from '../fixtures/conversation-semantic-classifier';
 import { mkdir, mkdtemp, rm } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
@@ -47,7 +48,13 @@ describe('R07 composed runtime cancellation before first response headers', () =
     let lateStreamReads = 0;
     const errors: unknown[] = [];
     const newApiRuntime = new NewApiSharedRuntime({ transport: { send: async request => {
-      requests.push(request);
+      const payload = JSON.parse(Buffer.from(request.body ?? []).toString('utf8'));
+    if (payload.messages?.some((message: { role: string; content: string }) => message.role === 'system' && message.content.includes('UniComp 会话语义规划器'))) {
+      const semantic = JSON.parse(payload.messages.find((message: { role: string }) => message.role === 'user').content);
+      const plan = await fixtureSemanticClassifier.classify({ rawText: semantic.currentRequest, context: semantic.context, signal: request.signal ?? new AbortController().signal });
+      return textResponse(provider.modelKey, JSON.stringify(plan));
+    }
+    requests.push(request);
       if (requests.length === 1) {
         headersEntered.resolve(request);
         // Deliberately ignores AbortSignal: the adapter must bound and close its late result.
@@ -60,6 +67,8 @@ describe('R07 composed runtime cancellation before first response headers', () =
     } } });
     const deepSeekRuntime = new DeepSeekSharedRuntime({ transport: { send: async () => { throw new Error('Unexpected provider'); } } });
     const runtime = createChatContextRuntime({ userDataDirectory, providerRegistry: provider.registry,
+      // Pin the one-response wire protocol under this response-header race;
+      // planner cancellation has its own submitted-boundary regressions.
       runtimeAuthorization: provider.authorization,
       getSession: () => ({ projectId, projectName: 'Offline R07 fixture', rootDirectory }),
       textSubmission: { credentialVault: provider.vault, deepSeekRuntime, newApiRuntime },

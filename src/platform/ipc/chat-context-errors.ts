@@ -7,7 +7,7 @@ import {
   DomainError
 } from '../../domain';
 import { ConversationAttachmentError } from '../documents/conversation-attachment-context';
-import { ConversationDocumentPageError } from '../documents/conversation-document-page-context';
+import { ConversationDocumentPageError } from '../documents/conversation-document-error';
 import type {
   ChatContextIpcErrorCode,
   ChatContextIpcResult

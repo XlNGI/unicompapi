@@ -68,25 +68,12 @@ import type {
 import type { DocumentExtractionStatus } from '../../shared/document-attachment-ipc';
 import { composeWorkflowRequirements, composeResearchInput } from './workflowInput';
 import {
-  composeDocumentRevisionInput,
-  documentResponseParameterValues,
-  documentKindInstruction,
-  extractSectionHeadings,
-  resolvePresentationTemplate
-} from './documentDrafting';
-import {
   notifyProjectSessionChanged,
   PROJECT_SESSION_CHANGED_EVENT,
   registerProjectSwitchGuard
 } from '../../ui/project-session-events';
 import { failedResponseNotice, responseFailureFactsFromTrace } from '../../ui/chat-response-failure-notice';
 import { ExecutionSettlementNotice } from './ExecutionSettlementNotice';
-import {
-  parseDeterministicClearRevisionTarget,
-  waitForDocumentResponseCompletion,
-  type OfficeRequestAction
-} from '../../application';
-import { documentPresentationPreferences } from '../../application/document-presentation-preferences';
 import { createThreadItemStore, mergeThreadItemStore, threadItemKey, threadItemStoreItems, type ThreadItemStore } from './threadItemStore';
 import { appendThreadItemStreamContent, clearThreadItemStreamContent, getThreadItemStreamContent, setThreadItemStreamSnapshot } from './threadItemStreamStore';
 import { createThreadSummaryStore, replaceThreadSummaryStore, threadSummaryStoreItems, type ThreadSummaryStore } from './threadSummaryStore';
@@ -361,20 +348,6 @@ function isImageFileName(fileName: string): boolean {
   return /\.(png|jpe?g|gif|webp)$/i.test(fileName);
 }
 
-function canAutoGenerateImageCandidate(candidate: {
-  readonly parameterSchema: {
-    readonly fields: readonly {
-      readonly required: boolean;
-      readonly defaultPolicy: string;
-    }[];
-  };
-}): boolean {
-  return candidate.parameterSchema.fields.every(
-    (field) =>
-      !field.required || field.defaultPolicy !== 'require_user_value'
-  );
-}
-
 function describeDocumentError(error: {
   readonly code: string;
   readonly message: string;
@@ -492,17 +465,6 @@ interface AttachmentDraft {
   readonly sizeBytes: number;
   readonly status: DocumentExtractionStatus;
   readonly warnings: readonly string[];
-}
-
-interface ReadyDocumentWorkflowExecution {
-  readonly workflow: ConversationWorkflowDto;
-  readonly conversation: ConversationDto;
-  readonly requirements: string;
-  readonly kind: 'word' | 'excel' | 'ppt';
-  readonly action: OfficeRequestAction;
-  readonly targetMessageId?: string;
-  readonly useInternalSources: boolean;
-  readonly researchReferences?: readonly WebResearchReferenceDto[];
 }
 
 
@@ -633,12 +595,9 @@ function ChatDraftField({
   editing,
   placeholder,
   pasteEnabled,
-  planningActive,
-  planningCancelRequested,
   workflowExecutionActive,
   workflowCancelRequested,
   documentGenerationActive,
-  documentResponseActive,
   documentCancelRequested,
   responseInProgress,
   cancelRequested,
@@ -658,12 +617,9 @@ function ChatDraftField({
   readonly editing: boolean;
   readonly placeholder: string;
   readonly pasteEnabled: boolean;
-  readonly planningActive: boolean;
-  readonly planningCancelRequested: boolean;
   readonly workflowExecutionActive: boolean;
   readonly workflowCancelRequested: boolean;
   readonly documentGenerationActive: boolean;
-  readonly documentResponseActive: boolean;
   readonly documentCancelRequested: boolean;
   readonly responseInProgress: boolean;
   readonly cancelRequested: boolean;
@@ -700,11 +656,9 @@ function ChatDraftField({
   useEffect(() => {
     resizeComposer(textareaRef.current);
   }, [shown]);
-  const documentStop = documentGenerationActive || (documentResponseActive && !responseInProgress);
-  const showStop = planningActive || workflowExecutionActive || responseInProgress || documentGenerationActive || documentResponseActive;
-  const submitLabel = planningActive
-    ? planningCancelRequested ? '正在停止需求理解' : '停止需求理解'
-    : responseInProgress
+  const documentStop = documentGenerationActive;
+  const showStop = workflowExecutionActive || responseInProgress || documentGenerationActive;
+  const submitLabel = responseInProgress
       ? cancelRequested ? '正在停止生成' : '停止生成'
       : workflowExecutionActive
         ? workflowCancelRequested ? '正在停止任务' : '停止任务'
@@ -747,11 +701,9 @@ function ChatDraftField({
         <button
           aria-label={submitLabel}
           className={`uc-chat-page__submit${showStop ? ' uc-chat-page__submit--stop' : ''}`}
-          disabled={planningActive
-            ? planningCancelRequested
-            : workflowExecutionActive
+          disabled={workflowExecutionActive
               ? workflowCancelRequested
-              : documentGenerationActive || (documentResponseActive && !responseInProgress)
+              : documentGenerationActive || false
                 ? documentCancelRequested
                 : responseInProgress
                   ? cancelRequested
@@ -762,9 +714,7 @@ function ChatDraftField({
                     busy ||
                     cancelRequested}
           onClick={onPress}
-          title={planningActive
-            ? planningCancelRequested ? '正在停止需求理解' : '停止需求理解'
-            : responseInProgress
+          title={responseInProgress
               ? cancelRequested ? '正在停止' : '停止生成'
               : workflowExecutionActive
                 ? workflowCancelRequested ? '正在停止任务' : '停止任务'
@@ -824,7 +774,6 @@ export function ChatPage({
   const webResearch = window.unicomp?.webResearch;
   const documentGeneration = window.unicomp?.documentGeneration;
   const documentAttachments = window.unicomp?.documentAttachments;
-  const imageFeatures = window.unicomp?.imageFeatures;
   const storage = window.unicomp?.storage;
   const threadReadsEnabled = Boolean(
     (import.meta.env.VITE_UNICOMP_THREAD_FIRST === '1' ||
@@ -832,9 +781,6 @@ export function ChatPage({
       import.meta.env.VITE_UNICOMP_THREAD_FILE_READ_PATH === '1') &&
     chat?.listThreadSummaries && chat.getThread && chat.getThreadItemsPage
   );
-  // Thread-first execution is opt-in until Shadow Read and rollback gates are
-  // complete. Read-only Thread adapters keep the legacy document route.
-  const threadFirstExecutionEnabled = import.meta.env.VITE_UNICOMP_THREAD_FIRST === '1' && threadReadsEnabled;
   const [session, setSession] = useState<StorageProjectSessionDto>();
   const [projects, setProjects] = useState<readonly StorageProjectSummaryDto[]>([]);
   const [expandedProjectIds, setExpandedProjectIds] = useState<ReadonlySet<string>>(() => new Set());
@@ -860,7 +806,6 @@ export function ChatPage({
     useState(false);
   // Document requests stream a machine-readable outline. Project its body into
   // the production timeline instead of displaying the raw payload as chat text.
-  const [documentResponseActive, setDocumentResponseActive] = useState(false);
   const [documentCancelRequested, setDocumentCancelRequested] =
     useState(false);
   const [attachments, setAttachments] = useState<readonly AttachmentDraft[]>([]);
@@ -900,14 +845,12 @@ export function ChatPage({
   const [deleteTarget, setDeleteTarget] = useState<DeleteTarget>();
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
-  const [planningActive, setPlanningActive] = useState(false);
   const [productionEvents, setProductionEvents] = useState<readonly ProductionTraceEventDto[]>([]);
   const [productionIssues, setProductionIssues] = useState<readonly string[]>([]);
   const [pendingProduction, setPendingProduction] = useState<PendingProductionInput>();
   const subscribedProductionConversation = useRef<string>();
   const productionEventQueueRef = useRef<ProductionTraceEventDto[]>([]);
   const productionEventFrameRef = useRef<number>();
-  const [planningCancelRequested, setPlanningCancelRequested] = useState(false);
   const [notice, setNotice] = useState('');
   const [candidatesLoading, setCandidatesLoading] = useState(false);
   const [candidateLoadFailures, setCandidateLoadFailures] = useState<readonly string[]>([]);
@@ -933,10 +876,8 @@ export function ChatPage({
   });
   const activeDraftKey = composerDraftKey(session?.projectId, selectedId);
   if (composerOwnerKeyRef.current === null) composerOwnerKeyRef.current = activeDraftKey;
-  const workflowSubmissionInFlightRef = useRef(false);
   const agentContinuationInFlightRef = useRef(false);
   const agentSessionCloseInFlightRef = useRef(false);
-  const planningCommandRef = useRef<{ readonly clientCommandId: string; cancelled: boolean }>();
   const productionCommandSubscriptions = useRef(new Map<string, () => void>());
   const workflowExecutionInFlightRef = useRef(false);
   const workflowResearchReferencesRef = useRef<{
@@ -2170,7 +2111,6 @@ export function ChatPage({
       cancelRequested ||
       responseInProgress ||
       documentGenerationActive ||
-      documentResponseActive ||
       startingClientCommandIdRef.current ||
       busy
     ) {
@@ -2194,12 +2134,8 @@ export function ChatPage({
       await startChatResponse(inputValueRef.current.trim(), selected, undefined, 'reply');
       return;
     }
-    if (activeWorkflow && ['needs_clarification', 'needs_confirmation', 'ready'].includes(activeWorkflow.status)) {
-      await submitWorkflowInput();
-      return;
-    }
     if (!chat.startAgentResponse) {
-      await submitWorkflowInput();
+      setNotice('当前桌面对话能力未连接，请重新启动应用。');
       return;
     }
     await startChatResponse(inputValueRef.current.trim(), selected);
@@ -2242,177 +2178,6 @@ export function ChatPage({
         : current);
     });
     productionCommandSubscriptions.current.set(clientCommandId, unsubscribe);
-  }
-
-  async function submitWorkflowInput() {
-    if (workflowSubmissionInFlightRef.current) return;
-    if (!chat || !session || !inputValueRef.current.trim() || busy || responseInProgress) return;
-    if (!selectedCandidateId || !selectedCandidate?.available) {
-      setNotice(errorMessages.model_selection_required);
-      return;
-    }
-    if (activeWorkflow?.status === 'ready' && selected && selectedCandidateId && webResearch?.answerNative &&
-        /^允许本(?:次|会话)联网[。！!]?$/u.test(inputValueRef.current.trim()) && !attachmentSelectionChangedRef.current) {
-      workflowSubmissionInFlightRef.current = true;
-      setBusy(true);
-      try {
-        const refreshed = await chat.getConversation(selected.conversationId);
-        if (!refreshed.ok) { setNotice(describeChatError(refreshed.error)); return; }
-        const answered = await webResearch.answerNative({ workflowId: activeWorkflow.workflowId,
-          expectedWorkflowRevision: activeWorkflow.revision, expectedConversationRevision: refreshed.value.revision,
-          candidateId: selectedCandidateId, content: inputValueRef.current.trim() });
-        if (!answered.ok) { setNotice(answered.error.message); return; }
-        const current = await chat.getConversation(selected.conversationId);
-        if (!current.ok) { setNotice(describeChatError(current.error)); return; }
-        replaceConversation(current.value);
-        updateInput('');
-        setNotice('');
-        if (answered.value === 'authorized') await executeReadyWorkflow(activeWorkflow, current.value, []);
-      } finally { setBusy(false); workflowSubmissionInFlightRef.current = false; }
-      return;
-    }
-    workflowSubmissionInFlightRef.current = true;
-    const planningCommand = { clientCommandId: `chat-workflow-${crypto.randomUUID()}`, cancelled: false };
-    planningCommandRef.current = planningCommand;
-    setPlanningActive(true);
-    setPlanningCancelRequested(false);
-    const content = inputValueRef.current.trim();
-    const inputScope = composerScopeRef.current;
-    subscribeStartingCommand(planningCommand.clientCommandId, content, selected?.conversationId);
-    const attachmentSelection = attachmentSelectionChangedRef.current
-      ? { attachmentFileIds: attachments.map((attachment) => attachment.fileId) }
-      : {};
-    const semanticSelection = { semanticCandidate: { candidateId: selectedCandidateId, productFeature: responseFeature } };
-    setWebResearchSession(undefined);
-    setBusy(true);
-    const answerCurrentWorkflow = activeWorkflow && selected &&
-      ['needs_clarification', 'needs_confirmation', 'ready'].includes(activeWorkflow.status);
-    setNotice(answerCurrentWorkflow ? '正在合并补充信息…' : '正在理解需求…');
-    let ready:
-      | { readonly workflow: ConversationWorkflowDto; readonly conversation: ConversationDto }
-      | undefined;
-    try {
-      // Streaming updates can advance storage after the renderer's last snapshot.
-      // Refresh before creating a command, without replaying a potentially accepted write.
-      let currentConversation = selected;
-      if (selected) {
-        const refreshed = await chat.getConversation(selected.conversationId);
-        if (inputScope !== composerScopeRef.current) return;
-        if (!refreshed.ok) {
-          setNotice(describeChatError(refreshed.error));
-          return;
-        }
-        currentConversation = refreshed.value;
-        replaceConversation(currentConversation);
-        if (currentConversation.readOnly || currentConversation.status !== 'active') {
-          setNotice(currentConversation.readOnly
-            ? errorMessages.legacy_conversation_read_only : errorMessages.conversation_not_active);
-          return;
-        }
-      }
-      if (planningCommand.cancelled) {
-        setNotice('需求理解已停止，未开始后续执行。');
-        return;
-      }
-      const result = answerCurrentWorkflow
-        ? await chat.answerWorkflow({
-            clientCommandId: planningCommand.clientCommandId,
-            workflowId: activeWorkflow.workflowId,
-            expectedWorkflowRevision: activeWorkflow.revision,
-            expectedConversationRevision: currentConversation!.revision,
-            content,
-            ...attachmentSelection,
-            ...semanticSelection
-          })
-        : await chat.startWorkflow({
-            clientCommandId: planningCommand.clientCommandId,
-            conversation: currentConversation
-              ? {
-                  conversationId: currentConversation.conversationId,
-                  expectedRevision: currentConversation.revision
-                }
-              : null,
-            title: conversationTitleFromMessage(content),
-            content,
-            ...attachmentSelection,
-            ...semanticSelection
-          });
-      if (inputScope !== composerScopeRef.current) return;
-      if (planningCommand.cancelled) {
-        if (result.ok) {
-          const cancelled = await chat.cancelWorkflow(result.value.workflow.workflowId, result.value.workflow.revision);
-          replaceConversation(result.value.conversation);
-          setSelectedId(result.value.conversation.conversationId);
-          setActiveWorkflow(cancelled.ok ? undefined : result.value.workflow);
-          if (!cancelled.ok) {
-            setNotice(describeChatError(cancelled.error));
-            return;
-          }
-        }
-        setNotice('需求理解已停止，未开始后续执行。');
-        return;
-      }
-      if (!result.ok) {
-        setNotice(describeChatError(result.error));
-        return;
-      }
-      replaceConversation(result.value.conversation);
-      setSelectedId(result.value.conversation.conversationId);
-      setActiveWorkflow(result.value.workflow);
-      attachmentSelectionChangedRef.current = false;
-      updateInput('');
-      if (result.value.workflow.status === 'failed' && result.value.workflow.planningFailureCode) {
-        setNotice('');
-        return;
-      }
-      if (result.value.workflow.status === 'cancelled') {
-        setActiveWorkflow(undefined);
-        setWebResearchSession(undefined);
-
-        setNotice('');
-        return;
-      }
-      if (result.value.workflow.status === 'needs_clarification') {
-        setNotice('');
-        return;
-      }
-      if (result.value.workflow.status === 'needs_confirmation') {
-        setNotice('');
-        return;
-      }
-      if (result.value.workflow.status !== 'ready') {
-        setNotice('会话任务当前不可执行，请重新发送需求。');
-        return;
-      }
-      ready = result.value;
-    } catch {
-      setNotice(planningCommand.cancelled
-        ? '需求理解已停止，未开始后续执行。'
-        : errorMessages.storage_error);
-    } finally {
-      setBusy(false);
-      workflowSubmissionInFlightRef.current = false;
-      if (planningCommandRef.current === planningCommand) {
-        planningCommandRef.current = undefined;
-        setPlanningActive(false);
-        setPlanningCancelRequested(false);
-      }
-    }
-    if (ready) await executeReadyWorkflow(ready.workflow, ready.conversation);
-  }
-
-  async function cancelWorkflowPlanning() {
-    const command = planningCommandRef.current;
-    if (!chat || !command || command.cancelled) return;
-    command.cancelled = true;
-    setPlanningCancelRequested(true);
-    setNotice('正在停止需求理解…');
-    try {
-      const result = await chat.cancelPlanning({ clientCommandId: command.clientCommandId });
-      if (!result.ok) setNotice('已停止后续执行，正在等待当前模型调用结束。');
-    } catch {
-      setNotice('已停止后续执行，正在等待当前模型调用结束。');
-    }
   }
 
   async function executeReadyWorkflow(
@@ -2529,7 +2294,7 @@ export function ChatPage({
     if (!workflowExecutionActive || workflowCancelRequested) return;
     documentOrchestrationCancelRef.current = true;
     setWorkflowCancelRequested(true);
-    if (documentGenerationActive || documentResponseActive) {
+    if (documentGenerationActive) {
       await cancelDocumentGeneration();
       return;
     }
@@ -2604,36 +2369,8 @@ export function ChatPage({
         setNotice('任务计划缺少文档类型，请补充需求后继续。');
         return;
       }
-      const kind = workflow.plan.documentKind;
-
-
-      const targetMessageId = workflow.resolvedTarget?.artifactRef ??
-        (workflow.plan.targetHint?.unit === 'document'
-          ? conversation.messages.find(
-              (message) => message.documentResult?.fileName === workflow.plan.targetHint?.name
-            )?.messageId
-          : undefined);
-      if (threadFirstExecutionEnabled) {
-        // Confirmed document work uses the same Agent/Response/Tool runtime as
-        // a native request. The ready workflow is passed as an immutable plan;
-        // the runtime owns authorization, tool calls and Work registration.
-        await startChatResponse(
-          composeWorkflowRequirements(workflow, sourceContent),
-          conversation,
-          workflow
-        );
-        return true;
-      }
-      return sendDocumentMessage({
-        workflow,
-        conversation,
-        requirements: composeWorkflowRequirements(workflow, sourceContent),
-        kind,
-        action: workflow.plan.action === 'revise' ? 'revise' : 'create',
-        targetMessageId,
-        useInternalSources: workflow.plan.sourcePolicy === 'internal',
-        researchReferences
-      });
+      await startChatResponse(composeWorkflowRequirements(workflow, sourceContent), conversation, workflow);
+      return true;
     }
     if (!selectedCandidateId || !selectedCandidate?.available) {
       setActiveWorkflow(workflow);
@@ -2911,7 +2648,7 @@ export function ChatPage({
             : [];
         }),
         parameterValues: {},
-        ...(workflow && threadFirstExecutionEnabled ? { agentNative: true } : {}),
+        ...(workflow ? { agentNative: true } : {}),
         ...(continuationAction && activeAgentSession?.resumeToken ? { continuation: {
           sessionId: activeAgentSession.sessionId, expectedRevision: activeAgentSession.revision,
           resumeToken: activeAgentSession.resumeToken, action: continuationAction
@@ -3136,558 +2873,6 @@ export function ChatPage({
     mapAttachments((current) =>
       current.filter((attachment) => attachment.fileId !== fileId)
     );
-  }
-
-  async function sendDocumentMessage(execution: ReadyDocumentWorkflowExecution): Promise<boolean | undefined> {
-    if (documentGenerationInFlightRef.current) return;
-    const executionConversation = execution.conversation;
-    const executionScope = composerScopeRef.current;
-    if (
-      !chat ||
-      !documentGeneration ||
-      !session ||
-      executionConversation.readOnly ||
-      executionConversation.status !== 'active' ||
-      busy ||
-      responseInProgress
-    ) {
-      return;
-    }
-    const requirements = execution.workflow.plan.deliverables && execution.workflow.plan.deliverables.length > 1
-      ? `${execution.requirements}\n\n关联任务执行范围：当前仅生成 ${documentKindLabel(execution.kind)}。保留上述主题、数据依据和有效约束；其他 Office 交付物由应用另行顺序执行。本轮只返回当前文档的一份完整大纲。`
-      : execution.requirements;
-    const action = execution.action;
-    const kind = execution.kind;
-    const { theme: documentTheme, aiImagesRequested } = documentPresentationPreferences(execution.requirements);
-    const targetMessageId = execution.targetMessageId;
-    const conversationDocumentMessages = executionConversation.messages.filter(
-      (message) =>
-        message.role === 'assistant' &&
-        message.state === 'completed' &&
-        message.documentResult
-    );
-    const previousDocument =
-      action === 'revise'
-        ? targetMessageId
-          ? conversationDocumentMessages.find(
-              (item) => item.messageId === targetMessageId
-            )
-          : [...conversationDocumentMessages]
-              .reverse()
-              .find((item) => item.documentResult?.kind === kind)
-        : undefined;
-    if (action === 'revise' && !previousDocument) {
-      setNotice(`请先生成或选择一份可修改的上一版 ${documentKindLabel(kind)}。`);
-      return;
-    }
-    const sourceMessage = executionConversation.messages.find(
-      (message) => message.messageId === execution.workflow.sourceMessageId
-    );
-    const previousAttachmentMessage = [...executionConversation.messages]
-      .reverse()
-      .find((message) => message.role === 'user' &&
-        (message.attachmentSelection === 'replace' || message.attachments.length > 0));
-    const documentImageAttachments = attachments.length > 0
-      ? attachments.filter((attachment) => isImageFileName(attachment.fileName))
-          .map((attachment) => ({ fileId: attachment.fileId, caption: attachment.fileName }))
-      : (previousAttachmentMessage?.attachments ?? []).flatMap((attachment) =>
-          attachment.kind === 'file_reference' && attachment.fileName && isImageFileName(attachment.fileName)
-            ? [{ fileId: attachment.fileReferenceId, caption: attachment.fileName }]
-            : []);
-    const deterministicTarget = parseDeterministicClearRevisionTarget(
-      sourceMessage?.content ?? ''
-    );
-    const workflowTarget = execution.workflow.plan.targetHint;
-    const useDeterministicLocalRevision = Boolean(
-      action === 'revise' &&
-      previousDocument?.documentResult?.validatedContent &&
-      deterministicTarget &&
-      workflowTarget?.unit === deterministicTarget.unit &&
-      workflowTarget.ordinal === deterministicTarget.ordinal &&
-      workflowTarget.name === undefined &&
-      execution.workflow.plan.sourcePolicy === 'none' &&
-      attachments.length === 0 &&
-      (execution.researchReferences?.length ?? 0) === 0
-    );
-    if (
-      !useDeterministicLocalRevision &&
-      (!selectedCandidateId || !selectedCandidate?.available)
-    ) {
-      setActiveWorkflow(execution.workflow);
-      setNotice('这项文档任务需要模型生成内容，请选择一个可用模型后继续。');
-      return;
-    }
-    documentGenerationInFlightRef.current = true;
-    documentOrchestrationCancelRef.current = false;
-    setDocumentCancelRequested(false);
-    responseFailureSafeCodeRef.current = undefined;
-    setBusy(true);
-    setNotice('');
-    rendererTrace('sendDocumentMessage:start', JSON.stringify({
-      selectedId: executionConversation.conversationId,
-      documentKind: kind,
-      action,
-      candidateId: selectedCandidateId,
-      productFeature: responseFeature
-    }));
-    if (useDeterministicLocalRevision && previousDocument?.documentResult) {
-      try {
-        const prepared = await documentGeneration.prepareDeterministicRevision({
-          conversationId: executionConversation.conversationId,
-          expectedRevision: executionConversation.revision,
-          workflowId: execution.workflow.workflowId,
-          expectedWorkflowRevision: execution.workflow.revision,
-          kind,
-          parentWorkId: previousDocument.documentResult.workId
-        });
-        if (executionScope !== composerScopeRef.current) return;
-        if (!prepared.ok) {
-          setNotice(describeDocumentError(prepared.error));
-          setActiveWorkflow(execution.workflow);
-          return;
-        }
-        setActiveWorkflow(undefined);
-        const preparedConversation = await chat.getConversation(
-          prepared.value.conversationId
-        );
-        if (preparedConversation.ok) {
-          replaceConversation(preparedConversation.value);
-          setSelectedId(preparedConversation.value.conversationId);
-        }
-        const generationContext = {
-          conversationId: prepared.value.conversationId,
-          expectedRevision: prepared.value.expectedRevision,
-          messageId: prepared.value.messageId
-        };
-        activeDocumentGenerationRef.current = generationContext;
-        setDocumentGenerationActive(true);
-        setDocumentCancelRequested(false);
-        const generated = await documentGeneration.generateFromMessage({
-          ...generationContext,
-          kind,
-          operation: 'edit',
-          parentWorkId: previousDocument.documentResult.workId,
-          ...(kind === 'ppt'
-            ? {
-                presentationTemplate: resolvePresentationTemplate(
-                  'auto',
-                  requirements
-                )
-              }
-            : { theme: documentTheme }),
-          images: []
-        });
-        if (executionScope !== composerScopeRef.current) return;
-        if (!generated.ok) {
-          setNotice(describeDocumentError(generated.error));
-        } else {
-          setNotice(
-            `新版文档已生成，基于 ${previousDocument.documentResult.fileName} 修改，原文件已保留。`
-          );
-
-        }
-        const refreshed = await chat.getConversation(
-          prepared.value.conversationId
-        );
-        if (refreshed.ok) {
-          replaceConversation(refreshed.value);
-          setSelectedId(refreshed.value.conversationId);
-        }
-        return generated.ok;
-      } catch {
-        setNotice('本地文档修改失败，原文件未改变，请重试。');
-      } finally {
-        activeDocumentGenerationRef.current = undefined;
-        setDocumentGenerationActive(false);
-        setDocumentCancelRequested(false);
-        documentGenerationInFlightRef.current = false;
-        setBusy(false);
-      }
-      return;
-    }
-    if (!selectedCandidateId || !selectedCandidate) return;
-    const modelCandidateId = selectedCandidateId;
-    const modelCandidate = selectedCandidate;
-    const revisionInput = composeDocumentRevisionInput(
-      previousDocument?.documentResult?.validatedContent ?? previousDocument?.content,
-      requirements,
-      kind
-    );
-    const resolvedPresentationTemplate = resolvePresentationTemplate(
-      'auto',
-      requirements
-    );
-    const responseParameterValues = documentResponseParameterValues(modelCandidate);
-    const combined = composeResearchInput(revisionInput, execution.researchReferences ?? []);
-    const kindInstruction = documentKindInstruction(kind);
-    const modelContent = `${combined}\n\n${kindInstruction}`;
-    if (execution.useInternalSources && attachments.length === 0 && includedContextIds.length === 0 &&
-        (previousAttachmentMessage?.attachments.length ?? 0) === 0 &&
-        (execution.researchReferences?.length ?? 0) === 0) {
-      setNotice('请先选择用于本次任务的附件或项目上下文，再继续生成。');
-      setActiveWorkflow(execution.workflow);
-      documentGenerationInFlightRef.current = false;
-      setBusy(false);
-      return;
-    }
-    setDocumentResponseActive(true);
-    try {
-      const startDocumentResponse = (
-        conversation?: Pick<ConversationDto, 'conversationId' | 'revision'>
-      ) => {
-        const clientCommandId = `chat-doc-${crypto.randomUUID()}`;
-        startingClientCommandIdRef.current = { projectId: session.projectId, clientCommandId };
-        setResponseStarting(true);
-        return chat.startResponse({
-          clientCommandId,
-          conversation: conversation
-            ? {
-                conversationId: conversation.conversationId,
-                expectedRevision: conversation.revision,
-                editedMessageId: null
-              }
-            : null,
-          title: conversationTitleFromMessage(requirements),
-          content: modelContent,
-          workflow: {
-            workflowId: execution.workflow.workflowId,
-            expectedRevision: execution.workflow.revision
-          },
-          productFeature: responseFeature,
-          candidateId: modelCandidateId,
-          contextSelections: includedContextIds.flatMap((contextId) => {
-            const context = viewedContexts[contextId];
-            return context
-              ? [{
-                  contextId,
-                  contextRevision: context.revision,
-                  includeInPrompt: true
-                }]
-              : [];
-          }),
-          parameterValues: responseParameterValues,
-          confirmed: true
-        }).finally(() => {
-          if (startingClientCommandIdRef.current?.clientCommandId === clientCommandId) startingClientCommandIdRef.current = undefined;
-          setResponseStarting(false);
-        });
-      };
-      let started = await startDocumentResponse(executionConversation);
-      if (executionScope !== composerScopeRef.current) return;
-      if (!started.ok && started.error.code === 'revision_conflict') {
-        setNotice('会话刚刚更新，正在同步后继续生成…');
-        const refreshed = await chat.getConversation(executionConversation.conversationId);
-        if (refreshed.ok) {
-          replaceConversation(refreshed.value);
-          setSelectedId(refreshed.value.conversationId);
-          started = await startDocumentResponse(refreshed.value);
-        }
-      }
-      if (!started.ok) {
-        rendererTrace('sendDocumentMessage:startResponse-error', JSON.stringify({
-          code: started.error.code
-        }));
-        setNotice(describeChatError(started.error));
-        if (started.error.code === 'response_start_cancelled') {
-          cancelAfterStartRef.current = false;
-          cancelRequestedRef.current = false;
-          setCancelRequested(false);
-          if (!inputValueRef.current.trim()) updateInput(sourceMessage?.content ?? execution.requirements);
-        }
-        if (executionConversation) {
-          const refreshedFailed = await chat.getConversation(executionConversation.conversationId);
-          if (refreshedFailed.ok) replaceConversation(refreshedFailed.value);
-        }
-        return;
-      }
-      rendererTrace('sendDocumentMessage:startResponse-ok', JSON.stringify({
-        conversationId: started.value.conversation.conversationId,
-        executionState: started.value.execution.state,
-        executionId: started.value.execution.responseExecutionId
-      }));
-      documentResponseUserIdsRef.current.add(started.value.execution.userMessageId);
-      replaceConversation(started.value.conversation);
-      setSelectedId(started.value.conversation.conversationId);
-      setResponseExecution(started.value.execution);
-      setNotice('');
-      if (execution.workflow.deliveries && execution.workflow.deliveries.length > 1) {
-        const executing = await chat.getWorkflow(execution.workflow.workflowId);
-        if (executing.ok) setActiveWorkflow(executing.value);
-      } else {
-        setActiveWorkflow(undefined);
-      }
-      if (documentOrchestrationCancelRef.current) {
-        cancelAfterStartRef.current = false;
-        await requestResponseCancellation(started.value.execution, started.value.conversation);
-        return;
-      }
-      const prepared = await documentGeneration.prepareGeneration({
-        conversationId: started.value.conversation.conversationId,
-        expectedRevision: started.value.conversation.revision,
-        messageId: started.value.execution.assistantMessageId,
-        kind
-      });
-      if (!prepared.ok) {
-        rendererTrace('sendDocumentMessage:prepare-error', JSON.stringify({
-          code: prepared.error.code
-        }));
-        setNotice(describeDocumentError(prepared.error));
-        await requestResponseCancellation(started.value.execution, started.value.conversation);
-        return;
-      } else {
-        const preparedConversation = await chat.getConversation(
-          started.value.conversation.conversationId
-        );
-        if (preparedConversation.ok) replaceConversation(preparedConversation.value);
-      }
-      updateInput('');
-      commitAttachments([]);
-      const targetId = started.value.conversation.conversationId;
-      const completion = await awaitDocumentCompletion(
-        chat,
-        started.value.execution.responseExecutionId
-      );
-      if (executionScope !== composerScopeRef.current) return;
-      rendererTrace('sendDocumentMessage:completion', JSON.stringify({
-        completed: Boolean(completion),
-        state: completion?.state
-      }));
-      const refreshedBefore = await chat.getConversation(targetId);
-      if (!refreshedBefore.ok) {
-        setNotice('刷新对话失败，请重试。');
-        return;
-      }
-      replaceConversation(refreshedBefore.value);
-      if (!completion) {
-        const finalCheck = await chat.getResponseExecution(
-          started.value.execution.responseExecutionId
-        );
-        const terminal = finalCheck.ok ? finalCheck.value.state : 'unknown';
-        rendererTrace('sendDocumentMessage:terminal-state', JSON.stringify({
-          terminal,
-          finalCheckOk: finalCheck.ok
-        }));
-        const latest = await chat.getConversation(targetId);
-        if (latest.ok && ['failed', 'cancelled', 'interrupted'].includes(terminal)) {
-          await documentGeneration.reconcileGeneration({
-            conversationId: targetId,
-            expectedRevision: latest.value.revision,
-            messageId: started.value.execution.assistantMessageId
-          });
-          const terminalConversation = await chat.getConversation(targetId);
-          if (terminalConversation.ok) replaceConversation(terminalConversation.value);
-        }
-        const failedMessage = latest.ok
-          ? [...latest.value.messages]
-              .reverse()
-              .find(
-                (item) =>
-                  item.role === 'assistant' &&
-                  item.state === 'failed'
-              )
-          : undefined;
-        const failureSafeCode = responseFailureSafeCodeRef.current as
-          | { readonly executionId: string; readonly safeCode?: string }
-          | undefined;
-        setNotice(
-          terminal === 'cancelled'
-            ? '文档内容生成已取消，文档未生成。'
-            : ['unknown', 'pending', 'streaming', 'interrupted'].includes(terminal)
-              ? '模型调用结果尚未确认，文档未交付；请先核对调用状态和费用，避免重复发送。'
-            : failedMessage
-              ? failedResponseNotice(
-                failedMessage,
-                failureSafeCode?.executionId ===
-                  started.value.execution.responseExecutionId
-                  ? failureSafeCode.safeCode
-                  : undefined
-              )
-              : '文档内容生成失败，文档未生成。'
-        );
-        return;
-      }
-      if (documentOrchestrationCancelRef.current) {
-        setNotice('已停止后续文档步骤；已发生的模型调用请以调用记录为准。');
-        return;
-      }
-      setNotice('');
-      const aiImages = await generateAiSlideImages(
-        completion.content,
-        documentImageAttachments.length,
-        aiImagesRequested
-      );
-      const documentImages = [
-        ...documentImageAttachments,
-        ...aiImages
-      ];
-      if (documentOrchestrationCancelRef.current) {
-        setNotice('已停止后续文档步骤；已完成的配图和调用记录已保留。');
-        return;
-      }
-      const runDocumentGeneration = async (generationContext: {
-        readonly conversationId: string;
-        readonly expectedRevision: number;
-        readonly messageId: string;
-      }) => {
-        activeDocumentGenerationRef.current = generationContext;
-        setDocumentGenerationActive(true);
-        setDocumentCancelRequested(false);
-        try {
-          return await documentGeneration.generateFromMessage({
-            ...generationContext,
-            kind,
-            operation: action === 'revise' ? 'edit' : 'create',
-            ...(previousDocument?.documentResult
-              ? { parentWorkId: previousDocument.documentResult.workId }
-              : {}),
-            ...(kind === 'ppt'
-              ? { presentationTemplate: resolvedPresentationTemplate }
-              : {}),
-            ...(kind !== 'ppt' ? { theme: documentTheme } : {}),
-            images: documentImages
-          });
-        } finally {
-          activeDocumentGenerationRef.current = undefined;
-          setDocumentGenerationActive(false);
-          setDocumentCancelRequested(false);
-        }
-      };
-      const generated = await runDocumentGeneration({
-        conversationId: targetId,
-        expectedRevision: refreshedBefore.value.revision,
-        messageId: completion.assistantMessageId
-      });
-      if (executionScope !== composerScopeRef.current) return;
-      rendererTrace('sendDocumentMessage:generate-result', JSON.stringify({
-        ok: generated.ok,
-        code: generated.ok ? undefined : generated.error.code
-      }));
-      if (!generated.ok) {
-        setNotice(describeDocumentError(generated.error));
-      } else {
-        setNotice(
-          previousDocument?.documentResult
-            ? `新版文档已生成，基于 ${previousDocument.documentResult.fileName} 修改，原文件已保留。`
-            : '文档已生成。'
-        );
-
-      }
-      const refreshed = await chat.getConversation(targetId);
-      if (refreshed.ok) {
-        replaceConversation(refreshed.value);
-        setSelectedId(refreshed.value.conversationId);
-      }
-      if (!generated.ok) {
-        const pending = await chat.getPendingWorkflow(targetId);
-        if (pending.ok) setActiveWorkflow(pending.value ?? undefined);
-      }
-      return generated.ok;
-    } catch {
-      setNotice('文档生成未能确认完成，请先核对当前任务状态，避免重复调用。');
-    } finally {
-      documentGenerationInFlightRef.current = false;
-      setDocumentCancelRequested(false);
-      setDocumentResponseActive(false);
-      setBusy(false);
-    }
-  }
-
-  async function awaitDocumentCompletion(
-    api: NonNullable<typeof chat>,
-    responseExecutionId: string
-  ): Promise<ConversationResponseExecutionDto | undefined> {
-    return waitForDocumentResponseCompletion({
-      read: async () => {
-        const result = await api.getResponseExecution(responseExecutionId);
-        if (!result.ok) throw new Error(result.error.code);
-        return result.value;
-      },
-      wait: (milliseconds) =>
-        new Promise((resolve) => window.setTimeout(resolve, milliseconds))
-    });
-  }
-
-  async function generateAiSlideImages(
-    content: string,
-    userImageCount: number,
-    requested: boolean
-  ): Promise<readonly { readonly workId: string; readonly caption: string }[]> {
-    rendererTrace('generateAiSlideImages:start', JSON.stringify({
-      requested,
-      hasFeatures: Boolean(imageFeatures),
-      contentLength: content.length,
-      userImageCount
-    }));
-    if (!requested) return [];
-    if (!imageFeatures) {
-      setNotice('当前配图能力不可用，继续生成文档正文。');
-      return [];
-    }
-    if (
-      !window.confirm(
-        'AI 配图将调用你已配置的图片模型为文档分节生成配图，可能消耗模型额度。继续？'
-      )
-    ) {
-      setNotice('已取消 AI 配图。');
-      return [];
-    }
-    const candidates = await imageFeatures.listQuickCandidates();
-    rendererTrace('generateAiSlideImages:candidates', JSON.stringify({
-      ok: candidates.ok,
-      count: candidates.ok ? candidates.value.length : 0,
-      available: candidates.ok
-        ? candidates.value.filter((item) => item.available).length
-        : 0
-    }));
-    const candidate = candidates.ok
-      ? candidates.value.find(
-          (item) => item.available && canAutoGenerateImageCandidate(item)
-        )
-      : undefined;
-    if (!candidate) {
-      setNotice(
-        '可用图片模型都需要必填参数（如尺寸），AI 配图无法自动取值，已跳过；请先到快速生图配置参数。'
-      );
-      return [];
-    }
-    const headings = extractSectionHeadings(content).slice(
-      0,
-      Math.max(0, 6 - userImageCount)
-    );
-    rendererTrace('generateAiSlideImages:headings', JSON.stringify(headings));
-    const generated: { readonly workId: string; readonly caption: string }[] = [];
-    for (const heading of headings) {
-      if (documentOrchestrationCancelRef.current) break;
-      try {
-        const result = await imageFeatures.generateQuickImage(
-          `为演示文稿「${heading}」一页生成纯图形插画配图，风格与内容契合；画面中绝对不能出现任何文字、字母、数字、标点、标题或水印`,
-          candidate.candidateId,
-          {}
-        );
-        rendererTrace('generateAiSlideImages:image', JSON.stringify({
-          heading,
-          ok: result.ok,
-          code: result.ok ? undefined : result.error.code,
-          workId: result.ok ? result.value.submission.workId : undefined,
-          safeCode: result.ok ? result.value.submission.safeCode : undefined
-        }));
-        if (result.ok && result.value.submission.workId) {
-          generated.push({
-            workId: result.value.submission.workId,
-            caption: heading
-          });
-        }
-      } catch {
-        // 单张配图失败不阻断整体生成。
-      }
-    }
-    if (headings.length > 0 && generated.length === 0) {
-      setNotice('AI 配图生成失败，文档将不包含 AI 配图。');
-    }
-    rendererTrace('generateAiSlideImages:result', JSON.stringify({
-      generatedCount: generated.length
-    }));
-    return generated;
   }
 
   async function cancelDocumentGeneration() {
@@ -4504,12 +3689,11 @@ export function ChatPage({
                   const isDocumentDraftMessage =
                     item.role === 'assistant' &&
                     (Boolean(item.documentResult || item.retainedDocumentResult) ||
-                      Boolean(item.documentGenerationStatus) || persistedDocumentDraft || (isCurrentAssistant && documentResponseActive));
+                      Boolean(item.documentGenerationStatus) || persistedDocumentDraft || (isCurrentAssistant && false));
                   const hideDocumentDraftContent =
                     item.role === 'assistant' &&
-                    (isDocumentDraftMessage || isCurrentAssistant || documentResponseActive ||
-                      Boolean(item.documentGenerationStatus) ||
-                      (documentResponseActive && ['pending', 'streaming'].includes(item.state))) &&
+                    (isDocumentDraftMessage || isCurrentAssistant ||
+                      Boolean(item.documentGenerationStatus)) &&
                     isMachineReadableDocumentOutline(item.content);
                   const taskProgress = isCurrentAssistant ? responseExecution?.taskProgress : undefined;
                   const traceEvents = productionProjection.timelineByMessage.get(item.messageId) ?? [];
@@ -4517,8 +3701,7 @@ export function ChatPage({
                   const showProductionProgress = isDocumentDraftMessage || hideDocumentDraftContent || Boolean(taskProgress?.length) || traceEvents.length > 0;
                   const isGeneratingFile = documentGenerationActive &&
                     activeDocumentGenerationRef.current?.messageId === item.messageId;
-                  const isDocumentStopping = (isCurrentAssistant && (cancelRequested ||
-                    (documentResponseActive && documentCancelRequested))) || (isGeneratingFile && documentCancelRequested);
+                  const isDocumentStopping = (isCurrentAssistant && cancelRequested) || (isGeneratingFile && documentCancelRequested);
                   const generationState = item.documentGenerationStatus?.state;
                   const generationTerminal = generationState === 'completed' || generationState === 'failed' ||
                     generationState === 'cancelled' || generationState === 'interrupted' ? generationState : undefined;
@@ -4833,12 +4016,9 @@ export function ChatPage({
               editing={Boolean(editingMessageId)}
               placeholder={!session ? '请先打开项目' : '输入问题或任务，可拖入图片、文档或电子书'}
               pasteEnabled={Boolean(session) && !busy && !responseInProgress}
-              planningActive={planningActive}
-              planningCancelRequested={planningCancelRequested}
               workflowExecutionActive={workflowExecutionActive}
               workflowCancelRequested={workflowCancelRequested}
               documentGenerationActive={documentGenerationActive}
-              documentResponseActive={documentResponseActive}
               documentCancelRequested={documentCancelRequested}
               responseInProgress={responseInProgress}
               cancelRequested={cancelRequested}
@@ -4849,11 +4029,9 @@ export function ChatPage({
               onPasteFiles={(files) => { void importDroppedFiles(files); }}
               onSubmit={() => { void sendMessage(); }}
               onPress={() =>
-                planningActive
-                  ? void cancelWorkflowPlanning()
-                  : workflowExecutionActive
+                workflowExecutionActive
                     ? void stopWorkflowExecution()
-                  : documentGenerationActive || documentResponseActive
+                  : documentGenerationActive
                     ? void cancelDocumentGeneration()
                     : responseInProgress
                       ? void cancelResponse()

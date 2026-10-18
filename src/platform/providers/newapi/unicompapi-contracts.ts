@@ -109,7 +109,7 @@ export const unicompapiProviderPackageDescriptor: ProviderPackageDescriptor = {
   ]
 };
 
-/** www has a distinct quote/submit media lifecycle; only verified shared chat protocol is published here. */
+/** WWW media uses a dedicated quote/submit adapter behind the shared transport identity. */
 export const unicompapiWwwProviderPackageDescriptor: ProviderPackageDescriptor = {
   packageId: UNICOMPAPI_WWW_PROVIDER_PACKAGE_ID, packageVersion: UNICOMPAPI_PROVIDER_PACKAGE_VERSION,
   displayName: 'UniCompAPI WWW',
@@ -118,10 +118,11 @@ export const unicompapiWwwProviderPackageDescriptor: ProviderPackageDescriptor =
   endpointPolicies: [{ policyId: UNICOMPAPI_WWW_ENDPOINT_POLICY_ID, revision: 1, allowedSchemes: ['https'],
     allowedHosts: ['www.unicompapi.com'], allowedPorts: [443], allowedPathPrefixes: ['/v1'], redirectPolicy: 'deny', proxyPolicy: 'system',
     allowLoopback: false, allowPrivateNetwork: false, allowLoopbackHttp: false, dnsRebindingProtection: 'required', fixedBaseUrl: UNICOMPAPI_WWW_BASE_URL }],
-  adapters: unicompapiProviderPackageDescriptor.adapters.filter(adapter => adapter.adapterId === NEWAPI_CHAT_ADAPTER_ID),
+  adapters: unicompapiProviderPackageDescriptor.adapters.filter(adapter => adapter.adapterId === NEWAPI_CHAT_ADAPTER_ID || adapter.adapterId === NEWAPI_VIDEO_ADAPTER_ID),
   templates: [{ templateId: UNICOMPAPI_WWW_TEMPLATE_ID, kind: 'official', serviceRole: 'relay', displayName: 'www.unicompapi.com', baseUrlMode: 'fixed',
     credentialSchemaId: UNICOMPAPI_WWW_CREDENTIAL_SCHEMA_ID, credentialSchemaVersion: 1,
     connectionPolicyId: 'connection.unicompapi.www-relay', connectionPolicyRevision: 1, discoveryPolicyId: 'discovery.unicompapi.www-models', discoveryPolicyRevision: 1,
     endpointPolicyId: UNICOMPAPI_WWW_ENDPOINT_POLICY_ID, endpointPolicyRevision: 1,
-    adapterBindings: [{ adapterId: NEWAPI_CHAT_ADAPTER_ID, adapterVersion: NEWAPI_ADAPTER_VERSION }], freeConnectionValidation: true, modelDiscoveryKind: 'catalog' }]
+    adapterBindings: [{ adapterId: NEWAPI_CHAT_ADAPTER_ID, adapterVersion: NEWAPI_ADAPTER_VERSION },
+      { adapterId: NEWAPI_VIDEO_ADAPTER_ID, adapterVersion: NEWAPI_ADAPTER_VERSION }], freeConnectionValidation: true, modelDiscoveryKind: 'catalog' }]
 };

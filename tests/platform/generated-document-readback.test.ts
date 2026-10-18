@@ -54,7 +54,9 @@ async function fixture() {
     getCurrentProjectId: () => activeProject, generatePptx: { compiler: new PlatformDocumentDraftCompiler(), executor,
       revalidateAuthorization: async () => activeProject === projectId } });
   services.push(service);
-  const selection = await service.select({ conversation, currentUserMessageId: conversation.messages[0].id, query: conversation.messages[0].content });
+  const selection = await service.select({ conversation, currentUserMessageId: conversation.messages[0].id, plan: {
+    schemaVersion: 1, kind: 'document', action: 'create', documentKind: 'ppt', parameters: { topic: '合成文件读回' },
+    sourcePolicy: 'none', missing: [], ambiguities: [], confidence: 'high', needsConfirmation: false } });
   if (!selection) throw new Error('Missing generation selection');
   const session = await service.createSession({ selection, responseExecutionId: 'generated-file-read-response' });
   sessions.push(session);

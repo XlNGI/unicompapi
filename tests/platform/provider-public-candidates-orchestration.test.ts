@@ -715,7 +715,7 @@ describe('provider submission orchestration', () => {
     expect((await unknown.ledger.load()).claims[0].state).toBe('outcome_recorded');
   });
 
-  it('records an explicit provider rejection after request start as failed', async () => {
+  it.each(['newapi.invalid_parameters', 'www_video.generation_not_submitted'])('records a confirmed rejection/preflight end after outbound authorization as failed: %s', async safeCode => {
     const fixture = await storageFixture();
     await approvedLedger(fixture.ledger);
     const service = candidateService({ now: () => t0 });
@@ -734,7 +734,7 @@ describe('provider submission orchestration', () => {
           await input.beforeRequestStarted();
           return {
             kind: 'failed_before_submission',
-            safeCode: 'newapi.invalid_parameters'
+            safeCode
           };
         }
       },
@@ -756,12 +756,12 @@ describe('provider submission orchestration', () => {
     const [acceptance] = await fixture.acceptances.list();
     expect(acceptance.intent).toMatchObject({
       status: 'failed',
-      safeCode: 'newapi.invalid_parameters'
+      safeCode
     });
     expect(acceptance.invocationAttempt.state).toBe('failed');
     expect(acceptance.invocationEvents.at(-1)).toMatchObject({
       type: 'failed',
-      safeCode: 'newapi.invalid_parameters'
+      safeCode
     });
     expect((await fixture.ledger.load()).claims[0].state).toBe('outcome_recorded');
     await expect(fixture.journal.load()).resolves.toMatchObject({

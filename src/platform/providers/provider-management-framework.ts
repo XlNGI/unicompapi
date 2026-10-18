@@ -42,6 +42,7 @@ import { parseModelApiContractBinding } from '../../domain/entities/parameter-co
 import { buildBoundTextParameterSchema } from './contracts/bound-text-contract';
 import { getOfficialApiContract, officialApiContractFingerprint, listOfficialApiContracts } from './contracts/official-api-contracts';
 import { UNICOMPAPI_WWW_PROVIDER_PACKAGE_ID } from './newapi/unicompapi-contracts';
+import { listWwwVideoContracts, routeWwwVideoProfile, WWW_VIDEO_CONTRACT_PREFIX } from './newapi/www-video-contracts';
 import {
   routeOpenAiCompatibleImageEditProfile,
   routeOpenAiCompatibleImageProfile,
@@ -500,10 +501,11 @@ export class ProviderManagementFramework {
   }
 
   listModelApiContracts() {
-    return listOfficialApiContracts().filter(contract => contract.id.endsWith('.chat')).map(contract => ({
+    return [...listOfficialApiContracts().filter(contract => contract.id.endsWith('.chat')).map(contract => ({
       contractId: contract.id, revision: contract.revision, authority: contract.authority, vendor: contract.vendor,
       modelNames: contract.modelKeys, sourceUrls: contract.sources.map(source => source.url)
-    }));
+    })), ...listWwwVideoContracts().map(contract => ({ contractId: contract.id, revision: contract.revision,
+      authority: 'relay' as const, vendor: 'www.unicompapi.com', modelNames: [contract.modelKey], sourceUrls: [contract.source.url] }))];
   }
 
   async bindModelApiContract(input: unknown): Promise<ProviderManagementFrameworkResult<{ readonly modelId: string; readonly state: 'bound' }>> {
@@ -512,6 +514,26 @@ export class ProviderManagementFramework {
           input.confirmed !== true || !Number.isSafeInteger(input.expectedRevision)) throw new TypeError('Invalid model contract binding');
       const modelId = requireId(input.modelId);
       const parsedBinding = parseModelApiContractBinding(input.binding);
+      if (parsedBinding.contractId.startsWith(WWW_VIDEO_CONTRACT_PREFIX)) {
+        const contract = listWwwVideoContracts().find(c => c.id === parsedBinding.contractId && c.revision === parsedBinding.contractRevision);
+        if (!contract || parsedBinding.rules.length) throw new TypeError('Invalid gateway binding');
+        const now = this.now();
+        const selected = await this.registry.mutate(snapshot => {
+          const model = snapshot.models.find(m => m.id === modelId);
+          if (!model) throw new ProviderManagementFrameworkError('model_not_found', 'Model not found');
+          if (model.revision !== input.expectedRevision) throw new ProviderManagementFrameworkError('provider_registry_conflict', 'Model changed');
+          const connection = snapshot.connections.find(c => c.id === model.connectionId);
+          if (connection?.packageId !== UNICOMPAPI_WWW_PROVIDER_PACKAGE_ID || model.providerModelKey !== contract.modelKey) {
+            throw new TypeError('Gateway contract requires exact connection and model');
+          }
+          const routed = routeWwwVideoProfile(snapshot, model, now);
+          if (routed.state === 'skipped') throw new ProviderManagementFrameworkError('operation_unavailable', 'Gateway video binding unavailable');
+          return { snapshot: routed.snapshot, result: model };
+        });
+        await this.record({ action: 'model_contract_bound', outcome: 'succeeded', modelId,
+          providerId: selected.providerId, connectionId: selected.connectionId }, now);
+        return { ok: true, value: { modelId, state: 'bound' } };
+      }
       const binding = { ...parsedBinding, contractFingerprint: officialApiContractFingerprint(getOfficialApiContract(parsedBinding.contractId, parsedBinding.contractRevision)) };
       const schemas = (['text_chat', 'text_reasoning'] as const).map(feature => buildBoundTextParameterSchema(binding, feature));
       const now = this.now();

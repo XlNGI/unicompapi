@@ -82,7 +82,7 @@ export interface VideoWorkspaceContextDto {
 }
 
 export interface VideoWorkspaceFeatureSelectionDto {
-  readonly productFeature: 'text_to_video' | 'image_to_video';
+  readonly productFeature: 'text_to_video' | 'image_to_video' | 'video_edit';
   readonly candidateId?: string;
   readonly parameterSchemaId?: string;
   readonly parameterSchemaRevision?: number;

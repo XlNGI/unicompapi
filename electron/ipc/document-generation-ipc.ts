@@ -11,39 +11,9 @@ import {
   type DocumentLlmRepairPlannerRequest
 } from '../../src/application';
 import { DocumentGenerationRuntimeBridge } from '../../src/application/document-generation-runtime-bridge';
-import { runLocalDocumentRevisionAgent } from '../../src/application';
+
 import { toConversationId, toDocumentTaskRuntimeId, toFileReferenceId, toMessageId, toWorkId } from '../../src/domain';
-import {
-  AttachmentImportError,
-  AttachmentImportService,
-  DocumentGenerationController,
-  DocumentGenerationRunner,
-  FileExtractionError,
-  FileExtractionService,
-  JsonFileReferenceRepository,
-  JsonWorkRepository,
-  JsonProjectConversationRepository,
-  JsonConversationWorkflowRepository,
-  JsonDocumentTaskRuntimeRepository,
-  NodeProjectStorage,
-  PlatformDocumentDraftCompiler,
-  PlatformDocumentGenerationExecutor,
-  applyStructuredDocumentPatch,
-  readStructuredDocument,
-  extractPptxThemeColors,
-  RagRetrievalService,
-  resolveFileReferencePathSafely,
-  createConfiguredOfficeRenderAdapter,
-  ConversationSemanticClassifier,
-  featureCandidateId,
-  type StorageProjectSession,
-  type StorageProjectSessionRegistry,
-  type ConversationTextSubmissionRuntimes,
-  type JsonProviderRegistryStore,
-  type ProviderCandidateRuntimeAuthorizationPort,
-  type RuntimeAuthorizationOrchestrationPort,
-  type ProviderPackageRegistry
-} from '../../src/platform';
+import { AttachmentImportError, AttachmentImportService, DocumentGenerationController, DocumentGenerationRunner, FileExtractionError, FileExtractionService, JsonFileReferenceRepository, JsonWorkRepository, JsonProjectConversationRepository, JsonConversationWorkflowRepository, JsonDocumentTaskRuntimeRepository, NodeProjectStorage, PlatformDocumentDraftCompiler, PlatformDocumentGenerationExecutor, extractPptxThemeColors, RagRetrievalService, resolveFileReferencePathSafely, createConfiguredOfficeRenderAdapter, ConversationSemanticClassifier, featureCandidateId, type StorageProjectSession, type StorageProjectSessionRegistry, type ConversationTextSubmissionRuntimes, type JsonProviderRegistryStore, type ProviderCandidateRuntimeAuthorizationPort, type RuntimeAuthorizationOrchestrationPort, type ProviderPackageRegistry } from '../../src/platform';
 import {
   documentAttachmentIpcChannels,
   documentAttachmentRequestParsers,
@@ -53,7 +23,7 @@ import {
 import { documentGenerationIpcChannels } from '../../src/shared/document-generation-ipc';
 import { toDocumentGenerationLogError } from './document-generation-logging';
 import { createDocumentWorkflowSettlement } from '../../src/platform/documents/conversation-document-workflow';
-import { createPresentationWorkflowScope, RegisteredPresentationReader } from '../../src/platform/documents/registered-presentation-reader';
+import { createPresentationWorkflowScope } from '../../src/platform/documents/registered-presentation-reader';
 import { ConversationDocumentInputStore } from '../../src/platform/documents/conversation-document-inputs';
 import { JsonConversationResponseExecutionRepository } from '../../src/platform/repositories/json-conversation-response-execution-repository';
 import { JsonProviderExecutionRouteSnapshotRepository } from '../../src/platform/repositories/json-provider-execution-route-snapshot-repository';
@@ -191,15 +161,6 @@ export function registerDocumentGenerationIpcHandlers(options: {
           }
         },
         projectId: session.projectId,
-        resolvePresentationMap: async (workId, outline) => {
-          const source = await new RegisteredPresentationReader({ rootDirectory: session.rootDirectory, projectId: session.projectId }).read(workId, outline);
-          return source.map!;
-        },
-        loadPresentationProductionPlan: async workId => {
-          const source = await new RegisteredPresentationReader({ rootDirectory: session.rootDirectory, projectId: session.projectId }).readWithProductionPlan(workId);
-          return source.productionPlan?.plan;
-        },
-        validatePresentationSelection: presentationScope.validatePresentationSelection,
         canRetryMessage: presentationScope.canRetryMessage,
         generationInputs: new ConversationDocumentInputStore(storage, session.projectId),
         conversations: {
@@ -260,7 +221,7 @@ export function registerDocumentGenerationIpcHandlers(options: {
           }
           return repairClassifier.planArtDirection({
             candidateId: featureCandidateId(route.modelId, route.profileId, route.productFeature),
-            productFeature: route.productFeature, input: request.input, signal: request.signal
+            productFeature: route.productFeature, input: request.input, signal: request.signal, timeoutMs: request.timeoutMs
           });
         } } : {}),
         ...(repairClassifier ? { llmRepairPlanner: async (request: DocumentLlmRepairPlannerRequest) => {
@@ -282,22 +243,8 @@ export function registerDocumentGenerationIpcHandlers(options: {
             signal: request.signal
           });
         } } : {}),
-        revisionAgent: (input) =>
-          runLocalDocumentRevisionAgent(input, {
-            readStructure: (outline) => readStructuredDocument(outline),
-            applyPatch: (outline, patch) => {
-              const result = applyStructuredDocumentPatch(outline, patch);
-              return {
-                document: result.document,
-                changed: result.change.changed,
-                affectedSections: result.change.affectedSections
-              };
-            }
-          }),
         fingerprint: (content) =>
-          createHash('sha256').update(content).digest('hex'),
-        nextLocalExecutionId: () =>
-          `local-document-revision-${randomUUID()}`
+          createHash('sha256').update(content).digest('hex')
       });
       applications.set(key, application);
       return application;
@@ -321,11 +268,7 @@ export function registerDocumentGenerationIpcHandlers(options: {
     }
   });
 
-  ipcMain.handle(
-    documentGenerationIpcChannels.prepareDeterministicRevision,
-    (_event, request: unknown) =>
-      controller.prepareDeterministicRevision(request)
-  );
+
   ipcMain.handle(
     documentGenerationIpcChannels.prepareGeneration,
     (_event, request: unknown) => controller.prepareGeneration(request)

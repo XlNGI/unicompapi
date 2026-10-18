@@ -1,0 +1,18 @@
+{
+  "inspectedAt": "2026-10-15T09:22:03.980Z",
+  "operation": "query",
+  "method": "GET",
+  "model": "happyhorse-1.1-i2v",
+  "taskId": "4f2f5286-8d19-42e6-9a85-e95465728e13",
+  "status": "submission_unknown",
+  "billing": {
+    "currency": "CNY_MICRO",
+    "price_version": "pv_86a0eeb6b26fe8555ac0da4e41d391d314e8ea655d8e39dd24045138368215f7",
+    "quoted_amount": 1012500,
+    "charged_amount": 0,
+    "reserved_amount": 1012500,
+    "settlement_pending": false
+  },
+  "errorCode": "MEDIA_RESULT_UNKNOWN",
+  "paidGenerationPosts": 0
+}

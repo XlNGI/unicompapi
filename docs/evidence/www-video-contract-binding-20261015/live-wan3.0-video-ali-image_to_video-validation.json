@@ -1,0 +1,126 @@
+{
+  "live": true,
+  "status": "passed",
+  "checks": [
+    {
+      "model": "wan3.0-video-ali",
+      "feature": "image_to_video",
+      "workId": "work-video-result-1fa55335-43ee-4518-ad20-b7c78ea75f16",
+      "checksumSha256": "56f4ea0eabd06fb85fb68a203d179234e29c968937f94cc77d96ce0d7300e4fe",
+      "state": "passed"
+    }
+  ],
+  "externalRequests": 16,
+  "paidPost": 1,
+  "requests": [
+    {
+      "method": "POST",
+      "path": "/v1/assets",
+      "operation": "upload"
+    },
+    {
+      "method": "POST",
+      "path": "/v1/videos/quote",
+      "operation": "post"
+    },
+    {
+      "method": "POST",
+      "path": "/v1/videos",
+      "operation": "post"
+    },
+    {
+      "method": "GET",
+      "path": "/v1/videos/7d22ec14-5824-4eef-9dda-2263099d2290",
+      "operation": "read"
+    },
+    {
+      "method": "GET",
+      "path": "/v1/videos/7d22ec14-5824-4eef-9dda-2263099d2290",
+      "operation": "read"
+    },
+    {
+      "method": "GET",
+      "path": "/v1/videos/7d22ec14-5824-4eef-9dda-2263099d2290",
+      "operation": "read"
+    },
+    {
+      "method": "GET",
+      "path": "/v1/videos/7d22ec14-5824-4eef-9dda-2263099d2290",
+      "operation": "read"
+    },
+    {
+      "method": "GET",
+      "path": "/v1/videos/7d22ec14-5824-4eef-9dda-2263099d2290",
+      "operation": "read"
+    },
+    {
+      "method": "GET",
+      "path": "/v1/videos/7d22ec14-5824-4eef-9dda-2263099d2290",
+      "operation": "read"
+    },
+    {
+      "method": "GET",
+      "path": "/v1/videos/7d22ec14-5824-4eef-9dda-2263099d2290",
+      "operation": "read"
+    },
+    {
+      "method": "GET",
+      "path": "/v1/videos/7d22ec14-5824-4eef-9dda-2263099d2290",
+      "operation": "read"
+    },
+    {
+      "method": "GET",
+      "path": "/v1/videos/7d22ec14-5824-4eef-9dda-2263099d2290",
+      "operation": "read"
+    },
+    {
+      "method": "GET",
+      "path": "/v1/videos/7d22ec14-5824-4eef-9dda-2263099d2290",
+      "operation": "read"
+    },
+    {
+      "method": "GET",
+      "path": "/v1/videos/7d22ec14-5824-4eef-9dda-2263099d2290",
+      "operation": "read"
+    },
+    {
+      "method": "GET",
+      "path": "/v1/videos/7d22ec14-5824-4eef-9dda-2263099d2290",
+      "operation": "read"
+    },
+    {
+      "method": "GET",
+      "path": "/v1/videos/7d22ec14-5824-4eef-9dda-2263099d2290/content",
+      "operation": "read"
+    }
+  ],
+  "budget": {
+    "maximumCnyMicro": 5000000,
+    "records": [
+      {
+        "model": "wan3.0-video-ali",
+        "idempotencyKey": "www-video-2d2e4867aab653a2ba3d18f76052077ea9cee5fdcfb0bdc6e8b104251fd7e5f9",
+        "reservedCnyMicro": 5000000,
+        "quotedAmount": 540000,
+        "actualChargedCnyMicro": 540000,
+        "state": "succeeded",
+        "createdAt": "2026-10-15T08:44:28.636Z",
+        "taskId": "03f35c64-d159-4b1f-aa7e-23f06d50a46e",
+        "settlementPending": false
+      },
+      {
+        "model": "wan3.0-video-ali",
+        "feature": "image_to_video",
+        "idempotencyKey": "www-video-f0eb0f3d736f1dcf6331b673f2136197d85e0392160ce0efd70c709ef5dcbebc",
+        "reservedCnyMicro": 4460000,
+        "quotedAmount": 540000,
+        "actualChargedCnyMicro": 540000,
+        "state": "succeeded",
+        "createdAt": "2026-10-15T09:02:24.242Z",
+        "taskId": "7d22ec14-5824-4eef-9dda-2263099d2290",
+        "settlementPending": false
+      }
+    ]
+  },
+  "boundaries": "one actual model; isolated native preload/IPC/Host, original encrypted credential; no production project modified"
+}

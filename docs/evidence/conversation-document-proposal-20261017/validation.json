@@ -1,0 +1,113 @@
+{
+  "schemaVersion": 1,
+  "date": "2026-10-17",
+  "recordedAt": "2026-10-17T07:15:01.941Z",
+  "status": "proposal_prepared_not_designed_or_implemented",
+  "baseline": {
+    "branch": "feature/www-video-contract-binding",
+    "head": "c2f8ac696da3fb39dd368233a0142e458e80b9cf"
+  },
+  "scope": "Generic conversation and Word/Excel/PPT remediation proposal; image features excluded; no detailed design or implementation",
+  "checks": {
+    "auditSourceIntegrity": {
+      "status": "passed",
+      "hashesChecked": 14,
+      "changed": 0
+    },
+    "auditCoverage": {
+      "status": "passed",
+      "covered": [
+        "A01",
+        "A02",
+        "A03",
+        "A04",
+        "A05",
+        "A06",
+        "A07",
+        "A08",
+        "A09"
+      ]
+    },
+    "implementationBatches": {
+      "status": "passed",
+      "covered": [
+        "B1",
+        "B2",
+        "B3",
+        "B4",
+        "B5"
+      ]
+    },
+    "plannedAcceptanceCoverage": {
+      "status": "passed",
+      "cases": [
+        "C01",
+        "C02",
+        "C03",
+        "C04",
+        "C05",
+        "C06",
+        "C07",
+        "C08",
+        "C09",
+        "C10",
+        "C11",
+        "C12",
+        "C13",
+        "C14",
+        "C15",
+        "C16"
+      ],
+      "meaning": "Specified future acceptance scenarios, not executed product tests"
+    },
+    "localLinks": {
+      "status": "passed",
+      "proposalLinks": 22,
+      "newPlanLinks": 2,
+      "missing": 0
+    },
+    "whitespace": {
+      "status": "passed"
+    },
+    "diffCheck": {
+      "status": "passed",
+      "command": "git diff --check"
+    },
+    "businessSourceChanges": {
+      "status": "passed",
+      "changedFiles": []
+    }
+  },
+  "inputHashes": {
+    "docs/current/conversation-document-audit-20261017.md": "347e0227a06c007051bad183d85c2b7d79e287f4a232250f069cd3e688f567fd",
+    "docs/evidence/conversation-document-audit-20261017/reproduce.cjs": "4a51e2ff45d0e2c0b72cbb8237673dd873050dfb2f812ddcb46d63b660b5b4f1",
+    "docs/evidence/conversation-document-audit-20261017/reproduction.json": "9bab4d9aac466c63dd86f47fe313b20f00b35c0239ec4d9e42c3ce8c2f6489b0",
+    "docs/evidence/conversation-document-audit-20261017/validation.json": "9caf5ad9265ebcb08f2b5b9b6e94cf6e59c5e81960b9db531bbca34dc7cc5d1d"
+  },
+  "proposalSha256": "e60e6700635352a6c856696f460bc4937ddd7094bb89ec5549a1bccd9898aa07",
+  "mutations": {
+    "businessSourceChanged": false,
+    "existingTestsChanged": false,
+    "auditEvidenceChanged": false,
+    "credentialsRead": false,
+    "userProjectsReadOrChanged": false,
+    "externalProviderRequests": 0,
+    "officeFilesGenerated": 0,
+    "applicationRestarts": 0,
+    "committedMergedOrPushed": false
+  },
+  "implementationStatus": {
+    "audit": "complete_with_unfixed_findings",
+    "proposal": "prepared",
+    "detailedDesign": "not_started",
+    "implementation": "not_started",
+    "A01": "not_fixed",
+    "A04": "not_fixed"
+  },
+  "limitations": [
+    "No product tests or new production build in this documentation-only proposal turn; previous 322 passing tests remain audit-stage evidence",
+    "Proposed capabilities and C01-C16 scenarios are not implemented or passed",
+    "The authoritative handoff package path is absent from the workspace",
+    "No user PPT page-by-page review, real model aesthetic evaluation, or macOS device validation"
+  ]
+}

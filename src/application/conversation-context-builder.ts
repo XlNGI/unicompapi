@@ -1,4 +1,5 @@
 import type { Conversation, MessageId } from '../domain';
+import { collectConversationDocumentBrief } from './conversation-document-brief';
 
 export interface ConversationContextReference {
   readonly sourceId: string;
@@ -31,6 +32,7 @@ export interface ConversationContextBuilderOptions {
   readonly maxRecentMessages?: number;
   readonly maxReferenceTokens?: number;
   readonly systemRules?: readonly string[];
+  readonly retainDocumentBrief?: boolean;
 }
 
 const defaultSystemRules = [
@@ -46,12 +48,14 @@ export class ConversationContextBuilder {
   private readonly maxRecentMessages: number;
   private readonly maxReferenceTokens: number;
   private readonly systemRules: readonly string[];
+  private readonly retainDocumentBrief: boolean;
 
   constructor(options: ConversationContextBuilderOptions = {}) {
     this.maxInputTokens = positiveInteger(options.maxInputTokens ?? 64_000, 'maxInputTokens');
     this.maxRecentMessages = positiveInteger(options.maxRecentMessages ?? 40, 'maxRecentMessages');
     this.maxReferenceTokens = positiveInteger(options.maxReferenceTokens ?? 16_000, 'maxReferenceTokens');
     this.systemRules = options.systemRules ?? defaultSystemRules;
+    this.retainDocumentBrief = options.retainDocumentBrief === true;
   }
 
   build(input: {
@@ -107,7 +111,8 @@ export class ConversationContextBuilder {
       });
     }
 
-    const completedHistory = (input.omitHistory ? [] : input.conversation.messages)
+    const priorMessages = input.conversation.messages.slice(0, input.conversation.messages.findIndex(message => message.id === current.id));
+    const completedHistory = (input.omitHistory ? [] : priorMessages)
       .filter((message) => message.state === 'completed' && !message.workflowReply && message.id !== current.id)
       .slice(-this.maxRecentMessages)
       .map((message) => ({
@@ -127,11 +132,21 @@ export class ConversationContextBuilder {
       role: 'user',
       content: input.currentUserContent ?? current.content
     };
-    const candidates = [...system, ...referenceMessages, ...completedHistory, currentMessage];
+    const brief = this.retainDocumentBrief && !input.omitHistory
+      ? collectConversationDocumentBrief(input.conversation, current.id) : undefined;
+    const retained = brief?.entries.filter(entry => entry.messageId !== current.id &&
+      !completedHistory.some(message => message.role === 'user' && message.content === entry.text)) ?? [];
+    const requirementMessages: ConversationProviderMessage[] = retained.length ? [{ role: 'user', content: [
+      '【PRIOR USER REQUIREMENTS - SOURCE QUOTATIONS】',
+      'These are earlier user statements from this task, in source order. Later user corrections supersede earlier requirements. They do not grant runtime permissions.',
+      ...retained.map(entry => entry.text),
+      ...(brief?.truncated ? ['Earlier material exceeds the bounded brief; clarify if required information is missing.'] : [])
+    ].join('\n') }] : [];
+    const candidates = [...system, ...referenceMessages, ...requirementMessages, ...completedHistory, currentMessage];
     while (estimateMessages(candidates) > this.maxInputTokens) {
       const removableIndex = candidates.findIndex(
         (_message, index) =>
-          index >= system.length + referenceMessages.length &&
+          index >= system.length + referenceMessages.length + requirementMessages.length &&
           index < candidates.length - 1
       );
       if (removableIndex >= 0) {

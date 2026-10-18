@@ -1,8 +1,6 @@
 export * from './project-context-registry';
 export * from './conversation-service';
 export * from './document-generation-service';
-export * from './office-request-intent';
-export * from './document-intent-planner';
 export * from './document-agent-loop';
 export * from './document-revision-agent';
 export * from './conversation-intent-orchestrator';
@@ -13,8 +11,6 @@ export * from './conversation-context-builder';
 export * from './agent-context-assembler';
 export * from './conversation-web-research-service';
 export * from './latest-snapshot-autosave';
-export * from './presentation-page-count';
-export * from './presentation-design-revision';
 export * from './document-task-runtime-service';
 export * from './document-generation-runtime-bridge';
 export * from './generate-pptx-tool';

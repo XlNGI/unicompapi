@@ -1,0 +1,65 @@
+{
+  "time": "2026-10-15T08:58:17.854Z",
+  "apply": true,
+  "connectionCount": 1,
+  "results": [
+    {
+      "model": "MiniMax-H3",
+      "contractId": "relay.unicompapi-www.MiniMax-H3.video",
+      "authority": "relay",
+      "state": "bound_enabled"
+    },
+    {
+      "model": "doubao-seedance-2-0-260128",
+      "contractId": "relay.unicompapi-www.doubao-seedance-2-0-260128.video",
+      "authority": "relay",
+      "state": "bound_enabled"
+    },
+    {
+      "model": "happyhorse-1.1-t2v",
+      "contractId": "relay.unicompapi-www.happyhorse-1.1-t2v.video",
+      "authority": "relay",
+      "state": "bound_enabled"
+    },
+    {
+      "model": "happyhorse-1.1-i2v",
+      "contractId": "relay.unicompapi-www.happyhorse-1.1-i2v.video",
+      "authority": "relay",
+      "state": "bound_enabled"
+    },
+    {
+      "model": "happyhorse-1.1-r2v",
+      "contractId": "relay.unicompapi-www.happyhorse-1.1-r2v.video",
+      "authority": "relay",
+      "state": "bound_enabled"
+    },
+    {
+      "model": "wan3.0-video",
+      "contractId": "relay.unicompapi-www.wan3.0-video.video",
+      "authority": "relay",
+      "state": "bound_enabled"
+    },
+    {
+      "model": "wan3.0-video-ali",
+      "contractId": "relay.unicompapi-www.wan3.0-video-ali.video",
+      "authority": "relay",
+      "state": "bound_enabled"
+    },
+    {
+      "model": "wan3.0-video-prime-ali",
+      "contractId": "relay.unicompapi-www.wan3.0-video-prime-ali.video",
+      "authority": "relay",
+      "state": "bound_enabled"
+    },
+    {
+      "model": "happyhorse-1.0-video-edit",
+      "contractId": "relay.unicompapi-www.happyhorse-1.0-video-edit.video",
+      "authority": "relay",
+      "state": "bound_enabled"
+    }
+  ],
+  "unrelatedModelsAndConnectionsUnchanged": true,
+  "credentialReads": 0,
+  "externalRequests": 0,
+  "liveVerification": "Separate acceptance evidence; declaration is not live verification"
+}

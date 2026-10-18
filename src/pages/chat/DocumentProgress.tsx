@@ -121,7 +121,7 @@ function eventDetails(event: ProductionTraceEventDto): string[] {
   if (!facts) return [];
   const details: string[] = [];
   if (facts.purpose) details.push(({ planning: '理解需求', content: '生成正文', repair: '修正结果', tool: '工具协作', source_summary: '概述授权资料' })[facts.purpose]);
-  if (facts.planKind) details.push(({ chat: '直接回复', document: '文档任务', unknown: '需求尚不明确' })[facts.planKind]);
+  if (facts.planKind) details.push(({ chat: '直接回复', document: '文档任务', cancel: '取消任务', unknown: '需求尚不明确' })[facts.planKind]);
   if (facts.action) details.push(({ answer: '回答问题', create: '创建文档', revise: '修订文档', analyze: '分析资料' })[facts.action]);
   if (facts.documentKind) details.push(({ word: 'Word', excel: 'Excel', ppt: 'PPT' })[facts.documentKind]);
   if (facts.sourcePolicy) details.push(({ none: '无需额外检索', internal: '使用本地资料', web: '请求联网资料，须校验授权', mixed: '使用本地及经授权联网资料' })[facts.sourcePolicy]);

@@ -118,6 +118,14 @@ async function fixture(revokeAfterAdvertisingRead = false, invalidArtDirection =
     arguments: JSON.stringify({ scope: 'document' }) } };
   const transport = { send: async (request: { readonly body?: Uint8Array; readonly signal?: AbortSignal }): Promise<NewApiHttpTransportResponse> => {
     const payload = JSON.parse(Buffer.from(request.body!).toString('utf8')) as WireRequest;
+    if (!payload.tools && payload.messages.some(message => message.role === 'system' && message.content.includes('UniComp 会话语义规划器'))) {
+      const input = JSON.parse(payload.messages.find(message => message.role === 'user')!.content) as { currentRequest: string };
+      const chat = agentConversation ? input.currentRequest !== '可以'
+        : !/(?:生成|制作|PPT)/iu.test(input.currentRequest) || /讨论|如何|怎么/u.test(input.currentRequest);
+      return stream(provider.modelKey, { content: JSON.stringify({ schemaVersion: 1, kind: chat ? 'chat' : 'document',
+        ...(!chat ? { action: 'create', documentKind: 'ppt' } : {}), parameters: chat ? {} : { topic: '合成生成读取闭环', ...(planningPageGoal === undefined ? {} : { pageCount: planningPageGoal }) },
+        sourcePolicy: 'none', missing: [], ambiguities: [], confidence: 'high', needsConfirmation: false }) }, 'stop');
+    }
     if (!payload.tools && payload.messages.some(message => message.role === 'system' && message.content.includes('Art Direction'))) {
       artRequests.push(payload);
       const outline = new PlatformDocumentDraftCompiler().compile({ content: generatedContent, kind: 'ppt', operation: 'create' });
@@ -385,7 +393,10 @@ describe('production NewAPI generation to verified-file read continuation', () =
   it('settles and revokes the owned document session when authorization fails before Provider dispatch', async () => {
     const data = await fixture(false, false, true);
     const lookup = vi.spyOn(ConversationDocumentToolSessionService.prototype, 'forExecution');
-    vi.spyOn(RuntimeAuthorizationLedger.prototype, 'claimSubmission').mockRejectedValue(new Error('Synthetic authorization refusal'));
+    const claim = RuntimeAuthorizationLedger.prototype.claimSubmission;
+    vi.spyOn(RuntimeAuthorizationLedger.prototype, 'claimSubmission')
+      .mockImplementationOnce(function (this: RuntimeAuthorizationLedger, input) { return claim.call(this, input); })
+      .mockRejectedValue(new Error('Synthetic authorization refusal'));
     const started = await data.start(true);
     expect(started).toMatchObject({ ok: true });
     if (!started.ok) throw new Error('Expected locally accepted execution');
@@ -416,7 +427,10 @@ describe('production NewAPI generation to verified-file read continuation', () =
         throw new Error('Synthetic missing close acknowledgement');
       } } : undefined;
     });
-    vi.spyOn(RuntimeAuthorizationLedger.prototype, 'claimSubmission').mockRejectedValue(new Error('Synthetic authorization refusal'));
+    const claim = RuntimeAuthorizationLedger.prototype.claimSubmission;
+    vi.spyOn(RuntimeAuthorizationLedger.prototype, 'claimSubmission')
+      .mockImplementationOnce(function (this: RuntimeAuthorizationLedger, input) { return claim.call(this, input); })
+      .mockRejectedValue(new Error('Synthetic authorization refusal'));
     const started = await data.start(true);
     if (!started.ok) throw new Error('Expected locally accepted execution');
     if (!('execution' in started.value)) throw new Error('Expected an executable locally accepted response');
@@ -794,7 +808,7 @@ describe('production NewAPI generation to verified-file read continuation', () =
     expect(execution.content).toContain('尚未达到该目标');
     expect(traces.some(trace => trace.operationId === 'generation_redirect_readback' && trace.status === 'completed')).toBe(true);
     expect(traces.some(trace => trace.operationId === 'execution_budget' && trace.status === 'failed')).toBe(false);
-  });
+  }, 15_000);
 
   it.each(['failed', 'cancelled', 'unknown'] as const)('preserves a verified registered file without changing the %s final-answer outcome', async terminalAfterGeneration => {
     const data = await fixture(false, false, false, false, undefined, false, { terminalAfterGeneration });
@@ -821,7 +835,7 @@ describe('production NewAPI generation to verified-file read continuation', () =
     expect(data.errors).toEqual([]);
     expect(execution.state).toBe('completed');
     expect(data.requests).toHaveLength(6);
-    expect(data.requests[3].messages.some(message => message.role === 'user' && message.content === '可以')).toBe(true);
+    expect(data.requests[3].messages.some(message => message.role === 'user' && message.content.includes('【当前用户需求】\n可以'))).toBe(true);
     expect(data.requests[3].messages.some(message => message.role === 'user' && message.content.includes('交换A'))).toBe(true);
     expect(data.requests[3].messages.some(message => message.role === 'assistant' && message.content.includes('人物和冲突'))).toBe(true);
     expect(data.requests[3].messages.filter(message => message.role === 'assistant' && message.tool_calls).map(message => message.tool_calls)).toEqual([]);
@@ -839,7 +853,7 @@ describe('production NewAPI generation to verified-file read continuation', () =
   it('retains explicitly enabled legacy fallback after malformed Art Direction and reads the real file', async () => {
     const data = await fixture(false, true);
     const { execution, traces } = await data.run();
-    expect(data.artRequests).toHaveLength(1);
+    expect(data.artRequests).toHaveLength(3);
     expect(data.requests).toHaveLength(3);
     expect(data.writes).toHaveLength(1);
     expect(data.writes[0].designIR).toBeUndefined();

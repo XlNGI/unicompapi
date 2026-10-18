@@ -80,7 +80,8 @@ export interface VideoContextReference {
 
 export type VideoWorkspaceProductFeature =
   | 'text_to_video'
-  | 'image_to_video';
+  | 'image_to_video'
+  | 'video_edit';
 
 export interface VideoFeatureSelection {
   readonly productFeature: VideoWorkspaceProductFeature;
@@ -695,7 +696,7 @@ function isVideoFeatureSelection(
       'parameterSchemaRevision',
       'parameterValues'
     ]) ||
-    value.productFeature !== defaultVideoFeatureForMode(mode) ||
+    (value.productFeature !== defaultVideoFeatureForMode(mode) && !(mode === 'image_to_video' && value.productFeature === 'video_edit')) ||
     !isRecord(value.parameterValues) ||
     !Object.values(value.parameterValues).every(isVideoDynamicParameterValue)
   ) {
