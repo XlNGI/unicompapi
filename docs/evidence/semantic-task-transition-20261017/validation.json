@@ -1,0 +1,599 @@
+{
+  "schemaVersion": 1,
+  "status": "passed",
+  "recordedAt": "2026-10-17T19:02:04.747Z",
+  "decision": "LLM is the only conversation semantic planner; Host validates controlled structures, entities and execution boundaries.",
+  "workspace": {
+    "branch": "feature/www-video-contract-binding",
+    "head": "c2f8ac696da3fb39dd368233a0142e458e80b9cf",
+    "preexistingDirtyChangesPreserved": true,
+    "committed": false,
+    "pushed": false,
+    "merged": false
+  },
+  "checks": {
+    "typecheck": {
+      "command": "pnpm typecheck",
+      "exitCode": 0
+    },
+    "lint": {
+      "command": "pnpm lint",
+      "exitCode": 0
+    },
+    "build": {
+      "command": "pnpm build",
+      "exitCode": 0,
+      "warnings": [
+        "Existing renderer chunk size warning"
+      ]
+    },
+    "platformAudit": {
+      "command": "pnpm audit:platform",
+      "exitCode": 0,
+      "violations": 0
+    },
+    "node": {
+      "command": "node --test tests/*.test.mjs tests/ui/*.test.mjs",
+      "passed": 393,
+      "failed": 0,
+      "skipped": 0
+    },
+    "vitest": {
+      "command": "pnpm exec vitest run tests/application tests/domain tests/platform validation tests/evaluation --maxWorkers=2 --minWorkers=1",
+      "files": 346,
+      "passed": 3443,
+      "failed": 0,
+      "skipped": 0
+    },
+    "combinedTests": 3836,
+    "diffCheck": {
+      "command": "git diff --check",
+      "exitCode": 0
+    }
+  },
+  "electron": {
+    "transitionThread": {
+      "status": "passed",
+      "threadFirst": true,
+      "discussion": {
+        "text": "我现在要制作一个ppt，先讨论内容",
+        "modelRequests": 2,
+        "registeredWorks": 0,
+        "exposedWriteTools": false
+      },
+      "generation": {
+        "text": "随便生成吧，现在是测试",
+        "semanticPlannerRequests": 1,
+        "state": "completed",
+        "registeredWorks": 1,
+        "physicalPages": 3,
+        "bytes": 59807,
+        "documentReceipt": {
+          "workId": "work-document-b7a0d6bd-46f9-46bb-b7a1-10bab0eb1e28",
+          "fileName": "Electron Tool Calling 验收-20261017185200-6a1978db-a0ac-4a40-a878-385bb11cccca.pptx",
+          "kind": "ppt",
+          "sizeBytes": 59807
+        }
+      },
+      "requestCount": 7,
+      "semanticRequestCount": 2,
+      "externalProviderCalls": 0,
+      "boundary": "production IPC + preload + Thread/Legacy Host + injected Provider transport; actual local PPT, no external generation"
+    },
+    "transitionLegacy": {
+      "status": "passed",
+      "threadFirst": false,
+      "discussion": {
+        "text": "我现在要制作一个ppt，先讨论内容",
+        "modelRequests": 2,
+        "registeredWorks": 0,
+        "exposedWriteTools": false
+      },
+      "generation": {
+        "text": "随便生成吧，现在是测试",
+        "semanticPlannerRequests": 1,
+        "state": "completed",
+        "registeredWorks": 1,
+        "physicalPages": 3,
+        "bytes": 59807,
+        "documentReceipt": {
+          "workId": "work-document-a48fca68-fae5-4165-9a3f-9d8308eda753",
+          "fileName": "Electron Tool Calling 验收-20261017185301-ce9b3601-4886-4ea9-a7f7-73a22f3f7714.pptx",
+          "kind": "ppt",
+          "sizeBytes": 59807
+        }
+      },
+      "requestCount": 7,
+      "semanticRequestCount": 2,
+      "externalProviderCalls": 0,
+      "boundary": "production IPC + preload + Thread/Legacy Host + injected Provider transport; actual local PPT, no external generation"
+    },
+    "documentsThread": {
+      "schemaVersion": 1,
+      "status": "passed",
+      "boundary": "real Electron BrowserWindow + production preload + production IPC + controlled in-process Provider transport",
+      "checks": [
+        "normal Agent response",
+        "persistent execution identity",
+        "cancel start boundary",
+        "Provider tool call through the real Electron IPC path",
+        "Word physical file generation",
+        "Excel physical file generation"
+      ],
+      "requestCount": 33,
+      "artDirectionRequestCount": 3,
+      "abortCount": 0,
+      "toolCalling": {
+        "state": "completed",
+        "toolCallCount": 1,
+        "toolCallId": "mock-generate-pptx-1",
+        "observationReturned": true,
+        "artifactRegistered": true,
+        "generatedWorkCount": 1,
+        "autonomousDesignExecuted": true,
+        "designExecution": {
+          "status": "passed",
+          "authoredPageCount": 3,
+          "nodeCount": 7,
+          "verifiedElementCount": 7
+        },
+        "designPath": "design-aware",
+        "documentResult": {
+          "workId": "work-document-a674fdc4-32cf-4de0-8484-aadae483060f",
+          "fileName": "Electron Tool Calling 验收-20261017185315-56d5aa2f-adb4-4dd9-8e19-86fe0a53d3c1.pptx",
+          "kind": "ppt",
+          "sizeBytes": 59807
+        },
+        "threadDocumentReceipt": {
+          "fileName": "Electron Tool Calling 验收-20261017185315-56d5aa2f-adb4-4dd9-8e19-86fe0a53d3c1.pptx",
+          "kind": "ppt",
+          "sizeBytes": 59807,
+          "workId": "work-document-a674fdc4-32cf-4de0-8484-aadae483060f"
+        },
+        "threadToolParentState": "completed",
+        "entry": "responses.startAgent",
+        "threadToolFacts": [
+          {
+            "itemType": "tool_call_projection",
+            "status": "completed",
+            "eventSystem": "agent_runtime",
+            "responseExecutionId": "response-execution-e801ae24-0547-4b1e-af6f-d87ea75dec54"
+          },
+          {
+            "itemType": "tool_result_projection",
+            "status": "completed",
+            "eventSystem": "agent_runtime",
+            "responseExecutionId": "response-execution-e801ae24-0547-4b1e-af6f-d87ea75dec54"
+          },
+          {
+            "itemType": "tool_call_projection",
+            "status": "completed",
+            "eventSystem": "agent_runtime",
+            "responseExecutionId": "response-execution-e801ae24-0547-4b1e-af6f-d87ea75dec54"
+          },
+          {
+            "itemType": "tool_result_projection",
+            "status": "completed",
+            "eventSystem": "agent_runtime",
+            "responseExecutionId": "response-execution-e801ae24-0547-4b1e-af6f-d87ea75dec54"
+          }
+        ],
+        "threadArtifact": {
+          "workId": "work-document-a674fdc4-32cf-4de0-8484-aadae483060f",
+          "fileName": "Electron Tool Calling 验收-20261017185315-56d5aa2f-adb4-4dd9-8e19-86fe0a53d3c1.pptx",
+          "kind": "ppt",
+          "sizeBytes": 59807
+        }
+      },
+      "threadRuntimeControls": true,
+      "discussionCases": [
+        {
+          "case": "discussion-sky-content",
+          "state": "completed",
+          "registeredNewWorks": 0,
+          "semanticPlannerCalls": 1,
+          "writeToolsExposed": false,
+          "externalProviderCalls": 0
+        },
+        {
+          "case": "discussion-reject-generation",
+          "state": "completed",
+          "registeredNewWorks": 0,
+          "semanticPlannerCalls": 1,
+          "writeToolsExposed": false,
+          "externalProviderCalls": 0
+        },
+        {
+          "case": "discussion-existing-ppt",
+          "state": "completed",
+          "registeredNewWorks": 0,
+          "semanticPlannerCalls": 1,
+          "writeToolsExposed": false,
+          "externalProviderCalls": 0
+        }
+      ],
+      "office": {
+        "word": {
+          "workId": "work-document-7849b339-54cf-4af0-aa4e-cac486d32d1b",
+          "fileName": "原生 Office 端到端验收-20261017185341-f7a0f012-3c5a-4dd0-8724-f0e8ba0417a8.docx",
+          "kind": "word",
+          "sizeBytes": 8842,
+          "nativeBusinessTool": true,
+          "threadArtifact": true
+        },
+        "excel": {
+          "workId": "work-document-569f7f3a-6825-4a29-b82f-4728b8f126d6",
+          "fileName": "原生 Office 端到端验收-20261017185349-d83aa95f-0899-49ca-b96a-b13babce66a5.xlsx",
+          "kind": "excel",
+          "sizeBytes": 6788,
+          "nativeBusinessTool": true,
+          "threadArtifact": true
+        }
+      },
+      "nativeRevision": {
+        "status": "passed",
+        "targetPage": 2,
+        "untouchedPagesPreserved": true,
+        "fileReadBack": true,
+        "workId": "work-document-49bf0e75-d480-4ae2-864b-2a0470d53718",
+        "unchangedRequestReusedWork": true
+      },
+      "externalProvider": "blocked: no authorized external credentials used",
+      "externalProviderCalls": 0
+    },
+    "documentsLegacy": {
+      "schemaVersion": 1,
+      "status": "passed",
+      "boundary": "real Electron BrowserWindow + production preload + production IPC + controlled in-process Provider transport",
+      "checks": [
+        "normal Agent response",
+        "persistent execution identity",
+        "cancel start boundary",
+        "Provider tool call through the real Electron IPC path",
+        "Word physical file generation",
+        "Excel physical file generation"
+      ],
+      "requestCount": 33,
+      "artDirectionRequestCount": 3,
+      "abortCount": 0,
+      "toolCalling": {
+        "state": "completed",
+        "toolCallCount": 1,
+        "toolCallId": "mock-generate-pptx-1",
+        "observationReturned": true,
+        "artifactRegistered": true,
+        "generatedWorkCount": 1,
+        "autonomousDesignExecuted": true,
+        "designExecution": {
+          "status": "passed",
+          "authoredPageCount": 3,
+          "nodeCount": 7,
+          "verifiedElementCount": 7
+        },
+        "designPath": "design-aware",
+        "documentResult": {
+          "workId": "work-document-33b7a73c-f467-4f01-be85-7580340ac4be",
+          "fileName": "Electron Tool Calling 验收-20261017185451-3046c9bf-dc5d-4b9a-b0ba-40335137d0a0.pptx",
+          "kind": "ppt",
+          "sizeBytes": 59807
+        },
+        "threadDocumentReceipt": null,
+        "entry": "responses.startAgent",
+        "threadToolFacts": null,
+        "threadArtifact": null
+      },
+      "discussionCases": [
+        {
+          "case": "discussion-sky-content",
+          "state": "completed",
+          "registeredNewWorks": 0,
+          "semanticPlannerCalls": 1,
+          "writeToolsExposed": false,
+          "externalProviderCalls": 0
+        },
+        {
+          "case": "discussion-reject-generation",
+          "state": "completed",
+          "registeredNewWorks": 0,
+          "semanticPlannerCalls": 1,
+          "writeToolsExposed": false,
+          "externalProviderCalls": 0
+        },
+        {
+          "case": "discussion-existing-ppt",
+          "state": "completed",
+          "registeredNewWorks": 0,
+          "semanticPlannerCalls": 1,
+          "writeToolsExposed": false,
+          "externalProviderCalls": 0
+        }
+      ],
+      "office": {
+        "word": {
+          "workId": "work-document-77543700-142d-4ba4-835d-efb2ca262a55",
+          "fileName": "原生 Office 端到端验收-20261017185512-5d4e5cf1-a414-450c-9734-682236db9a40.docx",
+          "kind": "word",
+          "sizeBytes": 8841,
+          "nativeBusinessTool": true,
+          "threadArtifact": false
+        },
+        "excel": {
+          "workId": "work-document-7599e4f3-86b0-4d0c-ba78-6fe6efb00a13",
+          "fileName": "原生 Office 端到端验收-20261017185518-08f15698-87cc-49fc-b318-768d2ecc33e8.xlsx",
+          "kind": "excel",
+          "sizeBytes": 6788,
+          "nativeBusinessTool": true,
+          "threadArtifact": false
+        }
+      },
+      "nativeRevision": {
+        "status": "passed",
+        "targetPage": 2,
+        "untouchedPagesPreserved": true,
+        "fileReadBack": true,
+        "workId": "work-document-9f08a740-c8d8-45f2-82d9-70b6f125618a",
+        "unchangedRequestReusedWork": true
+      },
+      "externalProvider": "blocked: no authorized external credentials used",
+      "externalProviderCalls": 0
+    }
+  },
+  "sources": [
+    {
+      "path": "src/application/conversation-intent-orchestrator.ts",
+      "sha256": "29f8ca6f4fdc2abb71d526c503405d08811be6536825264239755ef291f7d948"
+    },
+    {
+      "path": "src/application/conversation-workflow-service.ts",
+      "sha256": "8a73d3f4e77cec0c29a1e3b5f7b6efca7b2a162b754a8bad338d12b0368fcba4"
+    },
+    {
+      "path": "src/application/conversation-document-brief.ts",
+      "sha256": "2448e6a6399ab70cf939947ea8844452be0fa8e99b54b435226f026d05c365d4"
+    },
+    {
+      "path": "src/application/document-generation-service.ts",
+      "sha256": "5dbc413f1864111721c6e9213963ad0b8447b9147cdd944b9a208df91a487add"
+    },
+    {
+      "path": "src/application/document-revision-agent.ts",
+      "sha256": "a9643c2608516ad6dfb2a7aaf42f7b3bb8b42a7036d58176e213c0d5d7ecb61f"
+    },
+    {
+      "path": "src/application/document-request-completeness.ts",
+      "sha256": "9ea57c04a9983d53e95ced1efaa19b7f057bcd4de67f186c1243acf024f09069"
+    },
+    {
+      "path": "src/domain/entities/conversation-intent-plan.ts",
+      "sha256": "0c82a56dc3f1c546a7500b4054aee6336dc42ec952abb651fbd6a1e8ab537f87"
+    },
+    {
+      "path": "src/pages/chat/ChatPage.tsx",
+      "sha256": "2ad86e6e096f3ad16dc450b1725a3798a812901da6daa1a098f3cb72f57def36"
+    },
+    {
+      "path": "src/platform/documents/conversation-document-tool-session.ts",
+      "sha256": "d0bc2c4ef579e68ceb073a4629c11275b6dbe7ce946cd6f9d50b6cd01afab74f"
+    },
+    {
+      "path": "src/platform/documents/conversation-document-revision-session.ts",
+      "sha256": "85d423657efab6a2a2911fe30210791b305448db90c42de7075ae4305d607b68"
+    },
+    {
+      "path": "src/platform/documents/conversation-document-error.ts",
+      "sha256": "b4819b6f281a066e6a5ce051043a76ded9b8d548de2d158247b0b06fb4ef92c3"
+    },
+    {
+      "path": "src/platform/documents/registered-presentation-reader.ts",
+      "sha256": "964073e0e43f9eaa98c1fe6d39fa9aae40f387eaf0bf3e3027eadbef20ad3c79"
+    },
+    {
+      "path": "src/platform/ipc/chat-context-runtime.ts",
+      "sha256": "c1e982c25436e73627348b2de5d9ee3b7de97e3c8149ecce29c2e2e7921cab7b"
+    },
+    {
+      "path": "src/platform/ipc/conversation-agent-continuations.ts",
+      "sha256": "650d582def588b23fadb72b3a818144a106331b06289bdfdd6d980c13aaa91a5"
+    },
+    {
+      "path": "src/platform/ipc/conversation-response-controller.ts",
+      "sha256": "de74545341d28ffe320da73dea7acc1dd3f718be212a4af3d1115c40354d41de"
+    },
+    {
+      "path": "src/platform/providers/conversation-semantic-classifier.ts",
+      "sha256": "7f99a40449ab49a737f6c0a227d9b30f32609ea859494308270ae48ef990b6b8"
+    },
+    {
+      "path": "src/platform/providers/conversation-response-artifact-factory.ts",
+      "sha256": "766b3dc46a04be23a7f1cf858a28df88ef944758f4ec8dd96da6fbdb591e13b6"
+    },
+    {
+      "path": "src/platform/providers/project-conversation-response.ts",
+      "sha256": "c3d969afdacf500cbdfa7a197b99b94799a8f2a6c54623a5df7d46bd6c6fe616"
+    },
+    {
+      "path": "src/shared/document-generation-ipc.ts",
+      "sha256": "552309a01556d4d9d5349df763899a6d3e5c18f45bd4c76fe61cc66b6a072edc"
+    },
+    {
+      "path": "src/shared/chat-context-ipc.ts",
+      "sha256": "42b3783751c326128ed378b05b3747e90ce64eb04dbebb4da42fe6be3c8ea219"
+    },
+    {
+      "path": "src/shared/conversation-production-ipc.ts",
+      "sha256": "b1f53d2c3649d219f08f2748f2a2c372a0f1b2c31733470c7558fdf190757929"
+    },
+    {
+      "path": "electron/ipc/document-generation-ipc.ts",
+      "sha256": "07bd8f222f259344cfed7064586fd8b0b5f5b639e56f9bf6e3858a0747a1bf2e"
+    },
+    {
+      "path": "electron/preload.ts",
+      "sha256": "dc95c3158e6cabcf99eddb4a75dd48ac5603c73ec895bcbb52082621e59644be"
+    },
+    {
+      "path": "scripts/verify-agent-provider-mock-electron.cjs",
+      "sha256": "f355c9496af303fbad7d208db5ffd54e61b165cf51e04d2527abde135dd99be5"
+    },
+    {
+      "path": "tests/fixtures/conversation-semantic-classifier.ts",
+      "sha256": "54f8de38cb0061920ccc5d78703d8882327ac99f407f4b23f1efb889dfe7a4ac"
+    },
+    {
+      "path": "tests/fixtures/conversation-semantic-responses.json",
+      "sha256": "439daa8cfb674588fa124734d833713aa226f34b05f66a32a51f41070ebd6353"
+    },
+    {
+      "path": "tests/evaluation/conversation-intent-golden.json",
+      "sha256": "b3b96409df9c492723d0f0fee993e7660600eb8ba45bf4c08b2a039099d522a7"
+    },
+    {
+      "path": "validation/document-generation-revision-failclosed.test.ts",
+      "sha256": "5a93995c304a2717bb93b194b8dd21dadf1134b783394dff7059e3b6733f24b8"
+    },
+    {
+      "path": "tests/application/conversation-intent-orchestrator.test.ts",
+      "sha256": "c7508ed4e0ddcedb953a9c3a04bb6ef6c717c72aa3b2fe07e6f64761aac4324b"
+    },
+    {
+      "path": "tests/platform/conversation-workflow-controller.test.ts",
+      "sha256": "c5a0de8575639103ce39bd60f04f40f6c50f47e782fcdb1ae04864930df4d997"
+    }
+  ],
+  "deletedSources": [
+    "src/application/office-request-intent.ts",
+    "src/application/document-intent-planner.ts",
+    "src/application/document-presentation-preferences.ts",
+    "src/application/presentation-page-count.ts",
+    "src/application/presentation-design-revision.ts",
+    "src/application/conversation-image-request.ts",
+    "src/pages/chat/documentDrafting.ts",
+    "src/platform/documents/conversation-document-page-context.ts"
+  ],
+  "logs": [
+    {
+      "path": "full-complete.log.gz",
+      "sha256": "6cb8927e012b109ff161a95f123f0201211dc27ccc9e7adf50534dd61d08624c",
+      "uncompressedSha256": "86d235270c66ff42d67e75d2df6fc5e09f65b3cf75f78a7f4debc1964b95334a",
+      "bytes": 46980
+    },
+    {
+      "path": "node-complete.log.gz",
+      "sha256": "109ae23918b2adde21fe3c373e8bf8784abc49d3d0092e300637b105d64f473e",
+      "uncompressedSha256": "f0ffe153f8706e7f9906e548d7f50ab6e45dd21f8f4a65e948999e78d14542a3",
+      "bytes": 33143
+    },
+    {
+      "path": "lint-complete.log.gz",
+      "sha256": "92e7a7f29a820299e7f5ec32ae216b5e3d5d2c229da8c5770f061f7751634af4",
+      "uncompressedSha256": "cc5a0b39c7052d24c24888403c48018b4fcccc9d799f81be6c9c30c9e19c85fc",
+      "bytes": 12
+    },
+    {
+      "path": "typecheck-complete.log.gz",
+      "sha256": "736f58508a83c38745f7ef6b39bf2a9f21e2397672942ebccc10e2a74b6d244a",
+      "uncompressedSha256": "653f5d9eecbb94f6ba67b87d1c6c8b26060bbc0ec8411260069aa069341c6232",
+      "bytes": 54
+    },
+    {
+      "path": "build-complete.log.gz",
+      "sha256": "532bcdd0cc288a085eb5d86d9ebe5df7a442e0ae9cd3c285a8ab5b6749e598a9",
+      "uncompressedSha256": "0a8d0c8337e79ce615b1cb32bb3c5d558ff9158b92724d29ee3f72fbdb157458",
+      "bytes": 1104
+    },
+    {
+      "path": "platform-final.log.gz",
+      "sha256": "4a509caeaf4d47ab6cc05b86a90d4ebbf1f3e66f54d16dc77ea9cd4ad3a0729b",
+      "uncompressedSha256": "d9966bc5093a4e8a3b020a328dba4b937c5c2a5346287d0360f741917c42ee1b",
+      "bytes": 2784
+    },
+    {
+      "path": "electron-thread-complete.log.gz",
+      "sha256": "f0df0706bad6ecb385a0fee1815420c58a6c03aaadb5b742b21529989f85f28a",
+      "uncompressedSha256": "bcfcf5efeffdd1b0820efe41d85fd142ba9f1db3a1401d2e2bbdd1bd2a68db93",
+      "bytes": 745
+    },
+    {
+      "path": "electron-legacy-complete.log.gz",
+      "sha256": "407dfd485cd8a3b9a6641a28006b200e024cb8752f4b361e28875d2eb539fae0",
+      "uncompressedSha256": "059077a972d27b385edeab6d4907d7c5413497a824a5dbb003d07f702fdf5095",
+      "bytes": 746
+    },
+    {
+      "path": "electron-documents-thread-complete.log.gz",
+      "sha256": "5250021bc8f661fcfdb4ff807e7b105f33a841d2bc9c4015b9213290270b4570",
+      "uncompressedSha256": "dccdb96ae10d0366b9b3d6f961bd07f68aa384b7caabe6369acf8d64fa32ab9c",
+      "bytes": 3524
+    },
+    {
+      "path": "electron-documents-legacy-complete.log.gz",
+      "sha256": "31e9047f747f659d8d8673df7119cf30d8fb53be3d83004df4c68a99e68b1bcd",
+      "uncompressedSha256": "36f3d8c14fd2161accf257ab696805b4b5a55fdc2070e57c0093862c361ca9dd",
+      "bytes": 2414
+    },
+    {
+      "path": "no-business-clarification-final.log.gz",
+      "sha256": "706a408e7fa6bf42d37dcf05c258955def07100b31eda2840c66d670fb14e5f0",
+      "uncompressedSha256": "b1358d2580235e2129f04cc4ead7a97f1cf7363b76e834756dd7cfe800b4c32a",
+      "bytes": 849
+    },
+    {
+      "path": "retired-entry-final.log.gz",
+      "sha256": "ab152246b28dadbeff1d93594c6c7cce104a6b18f5f965db79c078db6837a364",
+      "uncompressedSha256": "95e5da53bfdd91724e6c7674e21be4111dc2d61f28920246c5814d0859180659",
+      "bytes": 1806
+    },
+    {
+      "path": "explicit-clarification-fixture-final.log.gz",
+      "sha256": "6543821d08647a6dee3f4d63dfdaf530d4c53679612478f269453a2b12bca98c",
+      "uncompressedSha256": "269645412883293b87be6ed133cecbc100cac2eba424bdc45be156324d9a1c1a",
+      "bytes": 869
+    }
+  ],
+  "intermediateRuns": [
+    {
+      "failed": 82,
+      "passed": 3523,
+      "status": "superseded",
+      "path": "semantic-only-full-first.log.gz",
+      "sha256": "88e342da41a677aaa787365778376eb9110fb1a306decb1c40e2a11009ecf86b",
+      "uncompressedSha256": "55ab507e944771f7db276077493d068fab6c0425ef1394d652e8929ac8a5e493",
+      "note": "Preserved intermediate failures. Retired local-route assertions were migrated; these results are not counted as final passes."
+    },
+    {
+      "failed": 6,
+      "passed": 3436,
+      "files": 346,
+      "status": "superseded",
+      "path": "full-final-first.log.gz",
+      "sha256": "3ae9530b54977a7b9047da03f2af85b67476369b4d13404716c3cc7c90cb9116",
+      "uncompressedSha256": "5a362a47b70d27294e9596ab4ff7e3f5b750d77e5ea0eaaf5dd7fe6006c2fdde",
+      "note": "Preserved intermediate failures. Retired local-route assertions were migrated; these results are not counted as final passes."
+    },
+    {
+      "knownFailingAssertions": 6,
+      "status": "interrupted_superseded",
+      "reason": "The remaining old mock returned ready while its tests expected the Host to invent a topic question. Replaced with an explicit model missing-field response; 12/12 targeted tests passed.",
+      "path": "full-clarification-intermediate.log.gz",
+      "sha256": "d6094ae7eca0d79490e2c3696c6147340d7ec93d43929d1be7af74c5105efdbb",
+      "uncompressedSha256": "d4008df1dfa558cd51f1bf5e46a0650fb3c324888dad408220f73f9361f32daa",
+      "note": "Preserved intermediate failures. Retired local-route assertions were migrated; these results are not counted as final passes."
+    }
+  ],
+  "workspaceSnapshot": {
+    "path": "source-snapshot.json.gz",
+    "files": 1096,
+    "sha256": "47e284e7a767d9c3444e63c320ca9b35221e755c7255690a7f81ed1a37db3343",
+    "collectedDuringFinalRun": true,
+    "recheckedAfterCompletion": true
+  },
+  "testScope": "Synthetic model transports and fixed classifier fixtures; actual local Office generation/read-back/registration. Existing 73-case language corpus retained as data, not reported as live-model accuracy.",
+  "limitations": [
+    "No paid or real Provider semantic-quality evaluation",
+    "No macOS device validation",
+    "User application not restarted; current open window is not claimed to have loaded this build",
+    "Original user project not modified; original failed request not automatically resent",
+    "Retired local semantic rules and old APIs lost their corresponding old tests; test counts are not claimed to be equivalent coverage"
+  ],
+  "externalProviderCalls": 0
+}

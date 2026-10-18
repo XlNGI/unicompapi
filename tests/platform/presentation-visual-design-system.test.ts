@@ -6,6 +6,19 @@ import { auditPresentationRenderPlan } from '../../src/platform/documents/presen
 import { stylePagesDesign, stylePagesOutline } from '../fixtures/presentation-style-pages';
 
 describe('presentation visual design system', () => {
+  it('ignores a full-page decorative backdrop and estimates short text inside oversized boxes', () => {
+    const compiled = compilePresentationRenderPlan(stylePagesOutline, stylePagesDesign(), resolvePresentationTemplate('business_minimal').tokens);
+    const base = compiled.plan!, page = base.pages[1];
+    const text = page.elements.find(element => element.content.type === 'text')!;
+    const background = { ...text, renderId: 'background', type: 'shape' as const, zIndex: 0,
+      geometry: { x: 0, y: 0, width: base.canvas.width, height: base.canvas.height },
+      style: { ...text.style, fill: '101010', fontFamily: 'Decoration only' }, content: { type: 'shape' as const, shapeKind: 'rect' as const } };
+    const short = { ...text, zIndex: 1, geometry: { x: 1, y: 1, width: 10, height: 5 },
+      style: { ...text.style, color: 'FFFFFF', fill: undefined }, content: { type: 'text' as const, text: '简短重点' } };
+    const audit = auditPresentationRenderPlan({ ...base, pages: [{ ...page, backgroundColor: 'FFFFFF', elements: [background, short] }] });
+    expect(audit.diagnostics.some(item => item.code === 'visual_crowded_page' || item.code === 'visual_low_contrast')).toBe(false);
+    expect(audit.multimodalReview).toBe('not_available');
+  });
   it('keeps model-selected palette, typography and page treatment through the compiler', () => {
     const base = stylePagesDesign();
     const design = parsePresentationDesignIR({

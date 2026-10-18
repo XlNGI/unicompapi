@@ -1,3 +1,4 @@
+import { fixtureToolService, fixtureToolInput } from '../fixtures/conversation-semantic-classifier';
 import { createHash } from 'node:crypto';
 import { mkdtemp, mkdir, readFile, rm, writeFile } from 'node:fs/promises';
 import os from 'node:os';
@@ -27,6 +28,8 @@ import { getProductionTraceStore, withProductionTrace } from '../../src/platform
 import * as productionTrace from '../../src/platform/conversation-production-trace';
 import { DocumentIdentityIndexStore } from '../../src/platform/documents/document-identity-index-store';
 import { DocumentMutationHeadStore } from '../../src/platform/documents/document-mutation-head-store';
+import { PlatformDocumentDraftCompiler, PlatformDocumentGenerationExecutor } from '../../src/platform/documents/document-generation-application-adapters';
+import { DocumentGenerationRunner } from '../../src/platform/documents/document-generation-runner';
 
 const roots: string[] = [];
 const services: ConversationDocumentToolSessionService[] = [];
@@ -50,7 +53,7 @@ async function fixture(texts = ['封面：验收演示文稿', '第二页独有�
   const files = new JsonFileReferenceRepository(storage, projectId);
   const works = new JsonWorkRepository(storage, projectId);
   let currentProjectId: ProjectId | undefined = projectId;
-  const service = new ConversationDocumentToolSessionService({ rootDirectory, projectId, conversations,
+  const service = fixtureToolService({ rootDirectory, projectId, conversations,
     getCurrentProjectId: () => currentProjectId,
     ...(mutation ? { mutation: { renderPreview: async () => ({ previewCount: 3, diagnostics: [] }) } } : {}) });
   services.push(service);
@@ -96,7 +99,7 @@ async function fixture(texts = ['封面：验收演示文稿', '第二页独有�
   async function question(query = '请读取当前 PPT 的整篇文档，并总结各页内容。') {
     const currentUserMessageId = toMessageId(`question-${conversation.messages.length}`);
     await save(addUserMessage(conversation, { id: currentUserMessageId, content: query, createdAt: now }));
-    return { conversation, currentUserMessageId, query };
+    return fixtureToolInput({ conversation, currentUserMessageId, query });
   }
   async function session(query?: string) {
     const selection = await service.select(await question(query));
@@ -114,6 +117,47 @@ function execute(session: ConversationDocumentToolSession, args: Record<string, 
 }
 
 describe('production registered document read sessions', () => {
+  it.each([['word', 'Word', 'generate_docx'], ['excel', 'Excel', 'generate_xlsx']] as const)(
+    'generates and reads a real %s file through the native Agent business tool', async (kind, label, toolId) => {
+      const data = await fixture();
+      const service = fixtureToolService({ rootDirectory: data.rootDirectory, projectId,
+        conversations: data.conversations, generatePptx: { compiler: new PlatformDocumentDraftCompiler(),
+          executor: new PlatformDocumentGenerationExecutor(new DocumentGenerationRunner({ rootDirectory: data.rootDirectory, projectId,
+            renderPreview: async () => ({ previewCount: 1, diagnostics: [] }) })), revalidateAuthorization: async () => true } });
+      services.push(service);
+      const request = await data.question(`现在生成一份${label}文件`), message = request.conversation.messages.at(-1)!;
+      const draft = createConversationResponseDraft({ id: toConversationResponseDraftId('native-office-generation'), projectId,
+        conversationId: request.conversation.id, conversationRevision: request.conversation.revision,
+        userMessageId: message.id, userMessageRevision: message.revision, agentNative: true, productFeature: 'text_chat', createdAt: now });
+      const selection = await service.prepare({ conversation: request.conversation, draft });
+      expect(selection).toMatchObject({ documentKind: kind });
+      const session = await service.createSession({ selection: selection!, responseExecutionId: `native-${kind}-generation` });
+      sessions.push(session);
+      expect((await session.prepareTools(new AbortController().signal))?.map(tool => tool.function.name)).toEqual([toolId]);
+      const content = JSON.stringify({ kind, title: '原生文档测试', sections: [{ heading: '可靠事实', level: 1,
+        blocks: kind === 'word' ? [{ type: 'paragraph', text: 'NATIVE_OFFICE_FACT_20261017' }]
+          : [{ type: 'table', header: ['项目', '数量'], rows: [['NATIVE_OFFICE_FACT_20261017', '3']] }] }] });
+      const wrong = await session.bridge.execute({ call: { id: 'wrong-format', name: 'generate_pptx', arguments: { title: 'Wrong', content } },
+        signal: new AbortController().signal });
+      expect(wrong.status).not.toBe('success');
+      const generated = await session.bridge.execute({ call: { id: 'native-generation', name: toolId, arguments: { title: '原生文档测试', content } },
+        signal: new AbortController().signal });
+      expect(generated.status).toBe('success');
+      expect((generated.observation as Record<string, unknown>)?.fileName).toMatch(kind === 'word' ? /\.docx$/u : /\.xlsx$/u);
+      expect((await session.prepareTools(new AbortController().signal))?.map(tool => tool.function.name)).toEqual(['read_document_structure']);
+      const read = await session.bridge.execute({ call: { id: 'native-read', name: 'read_document_structure', arguments: { scope: 'document' } },
+        signal: new AbortController().signal });
+      expect(read.status).toBe('success');
+      expect(read.observation).toMatchObject({ documentKind: kind, structureUnit: kind === 'excel' ? 'worksheet' : 'section' });
+      expect(JSON.stringify(read.observation)).toContain('NATIVE_OFFICE_FACT_20261017');
+      expect(read.observation).not.toHaveProperty('totalPages');
+      expect(session.bridge.finalizationState?.()).toMatchObject({ phase: 'final', readBackConfirmed: true, documentKind: kind });
+      await session.close();
+      const facts = await service.collectResponseFacts(`native-${kind}-generation`);
+      expect(facts.documentTasks).toHaveLength(1);
+      expect(facts.documentTasks[0]).toMatchObject({ required: true, readBackConfirmed: true,
+        runtime: { documentKind: kind, status: 'completed' }, registeredWork: { projectId } });
+    });
   it.each([false, true])('requires the requested read only until a successful observation is delivered (identity tools: %s)', async mutation => {
     const data = await fixture(undefined, mutation);
     const { session } = await data.session();
@@ -125,20 +169,34 @@ describe('production registered document read sessions', () => {
     expect(session.providerToolChoice?.(tools)).toBeUndefined();
   });
 
-  it.each([['讨论一下演示文稿的方向', false], ['制作一份新的PPT', false], ['立即生成新的PPT', true]] as const)
-  ('pins the generation requirement separately from Agent tool availability: %s', async (query, generationRequired) => {
-    const data = await fixture();
-    const request = await data.question(query);
-    const message = request.conversation.messages.at(-1)!;
-    const draft = createConversationResponseDraft({ id: toConversationResponseDraftId('required-gate'), projectId,
-      conversationId: request.conversation.id, conversationRevision: request.conversation.revision,
-      userMessageId: message.id, userMessageRevision: message.revision, agentNative: true, productFeature: 'text_chat', createdAt: now });
-    expect(await data.service.prepare({ conversation: request.conversation, draft })).toMatchObject({ kind: 'agent', generationRequired });
-  });
+  it.each(['随便生成吧，现在是测试', '选题你定，做出来让我看看', '就用上面那个方案出文件'])(
+    'uses the validated latest creation plan to end a preceding discussion: %s', async text => {
+      const data = await fixture();
+      const service = fixtureToolService({ rootDirectory: data.rootDirectory, projectId,
+        conversations: data.conversations, generatePptx: { compiler: new PlatformDocumentDraftCompiler(),
+          executor: { run: async () => { throw new Error('unused'); } }, revalidateAuthorization: async () => true } });
+      services.push(service);
+      await data.question('我现在要制作一个ppt，先讨论内容');
+      const request = await data.question(text), message = request.conversation.messages.at(-1)!;
+      const draft = createConversationResponseDraft({ id: toConversationResponseDraftId('semantic-transition'), projectId,
+        conversationId: request.conversation.id, conversationRevision: request.conversation.revision,
+        userMessageId: message.id, userMessageRevision: message.revision, agentNative: true, productFeature: 'text_chat', createdAt: now });
+      const workflow = createConversationWorkflow({ id: toConversationWorkflowId('semantic-transition-plan'), projectId,
+        conversationId: request.conversation.id, sourceMessageId: message.id, createdAt: now,
+        plan: parseConversationIntentPlan({ schemaVersion: 1, kind: 'document', action: 'create', documentKind: 'ppt',
+          parameters: { topic: '自行选择的演示主题' }, sourcePolicy: 'none', missing: [], ambiguities: [], confidence: 'high', needsConfirmation: false }) });
+      const selection = await service.prepare({ conversation: request.conversation, draft, workflow });
+      expect(selection).toMatchObject({ kind: 'generation', authorizationStatus: 'approved' });
+      const session = await service.createSession({ selection: selection!, responseExecutionId: 'semantic-transition-response' });
+      sessions.push(session);
+      const definitions = await session.prepareTools(new AbortController().signal);
+      expect(definitions?.map(tool => tool.function.name)).toEqual(['generate_pptx']);
+      expect(session.providerToolChoice?.(definitions)).toBe('required');
+    });
 
   it('requires creation authorized by a ready Host workflow even with an existing PPT and ordinary wording', async () => {
     const data = await fixture(undefined, true);
-    const service = new ConversationDocumentToolSessionService({ rootDirectory: data.rootDirectory, projectId,
+    const service = fixtureToolService({ rootDirectory: data.rootDirectory, projectId,
       conversations: data.conversations, mutation: { renderPreview: async () => ({ previewCount: 3, diagnostics: [] }) },
       generatePptx: { compiler: { compile: () => { throw new Error('unused'); }, recover: () => { throw new Error('unused'); } },
         executor: { run: async () => { throw new Error('unused'); } }, revalidateAuthorization: async () => true } });
@@ -153,7 +211,7 @@ describe('production registered document read sessions', () => {
       plan: parseConversationIntentPlan({ schemaVersion: 1, kind: 'document', action: 'create', documentKind: 'ppt',
         parameters: {}, sourcePolicy: 'none', missing: [], ambiguities: [], confidence: 'high', needsConfirmation: false }) });
     const selection = await service.prepare({ conversation: request.conversation, draft, workflow });
-    expect(selection).toMatchObject({ kind: 'agent', generationRequired: true });
+    expect(selection).toMatchObject({ kind: 'generation', authorizationStatus: 'approved' });
     expect(selection).not.toHaveProperty('mutation');
     const session = await service.createSession({ selection: selection!, responseExecutionId: 'confirmed-workflow-execution' });
     sessions.push(session);
@@ -168,7 +226,7 @@ describe('production registered document read sessions', () => {
   it('admits a legacy whole-document regeneration with a parent Work as an independent first identity', async () => {
     const data = await fixture();
     await data.works.save({ ...data.first.work, parentWorkId: toWorkId('legacy-prior-version') });
-    const service = new ConversationDocumentToolSessionService({ rootDirectory: data.rootDirectory, projectId,
+    const service = fixtureToolService({ rootDirectory: data.rootDirectory, projectId,
       conversations: data.conversations, mutation: { renderPreview: async () => ({ previewCount: 3, diagnostics: [] }) } });
     services.push(service);
     const first = await service.select(await data.question('修改当前 PPT')) as ConversationDocumentMutationToolSelection;
@@ -179,7 +237,7 @@ describe('production registered document read sessions', () => {
 
   it('refuses to reseed a lost first-admission identity when the durable head or seed still references the Work', async () => {
     const data = await fixture();
-    const service = new ConversationDocumentToolSessionService({ rootDirectory: data.rootDirectory, projectId,
+    const service = fixtureToolService({ rootDirectory: data.rootDirectory, projectId,
       conversations: data.conversations, mutation: { renderPreview: async () => ({ previewCount: 3, diagnostics: [] }) } });
     services.push(service);
     const first = await service.select(await data.question('修改当前 PPT')) as ConversationDocumentMutationToolSelection;
@@ -252,7 +310,7 @@ describe('production registered document read sessions', () => {
   it('separates registered generation, actual readback, and persisted delivery facts', async () => {
     const diagnostic = vi.spyOn(productionTrace, 'emitProductionDiagnostic');
     const data = await fixture();
-    const service = new ConversationDocumentToolSessionService({ rootDirectory: data.rootDirectory, projectId, conversations: data.conversations,
+    const service = fixtureToolService({ rootDirectory: data.rootDirectory, projectId, conversations: data.conversations,
       generatePptx: { compiler: { compile: () => ({ kind: 'ppt', title: '新的生成事实', sections: [
         { heading: '文档事实', level: 1, blocks: [{ type: 'paragraph', text: '核验新生成文件' }] }
       ] }), recover: () => { throw new Error('unused'); } }, executor: { run: async () => {
@@ -300,7 +358,7 @@ describe('production registered document read sessions', () => {
       return { taskId: result.work.sourceTaskId, executionId: result.work.sourceExecutionId, workId: result.work.id,
         fileName: result.fileName, sizeBytes: result.buffer.length };
     });
-    const service = new ConversationDocumentToolSessionService({ rootDirectory: data.rootDirectory, projectId, conversations: data.conversations,
+    const service = fixtureToolService({ rootDirectory: data.rootDirectory, projectId, conversations: data.conversations,
       generatePptx: { compiler: { compile: () => ({ kind: 'ppt', title: '迟到作品', sections: [
         { heading: '迟到事实', level: 1, blocks: [{ type: 'paragraph', text: '已登记事实' }] }
       ] }), recover: () => { throw new Error('unused'); } }, executor: { run }, revalidateAuthorization: async () => true } });
@@ -362,7 +420,7 @@ describe('production registered document read sessions', () => {
     const startedAt = Date.now() - 60_000;
     const policy = { startedAt, deadlineAt: startedAt + 180_000, maxToolCalls: 2, budgetUnits: 2 };
     const getInheritedExecutionContext = vi.fn(async () => ({ policy }));
-    const service = new ConversationDocumentToolSessionService({ rootDirectory: data.rootDirectory, projectId,
+    const service = fixtureToolService({ rootDirectory: data.rootDirectory, projectId,
       conversations: data.conversations, getInheritedExecutionContext });
     services.push(service);
     const selection = (await service.select(await data.question()))!;
@@ -386,7 +444,7 @@ describe('production registered document read sessions', () => {
     const startup = new AbortController();
     const lease = new AbortController();
     const startedAt = Date.now() - 1000;
-    const service = new ConversationDocumentToolSessionService({ rootDirectory: data.rootDirectory, projectId,
+    const service = fixtureToolService({ rootDirectory: data.rootDirectory, projectId,
       conversations: data.conversations, getInheritedExecutionContext: async () => ({
         policy: { startedAt, deadlineAt: startedAt + 180000, maxToolCalls: 2, budgetUnits: 2 }, signal: lease.signal
       }) });
@@ -405,10 +463,10 @@ describe('production registered document read sessions', () => {
     const data = await fixture();
     const startedAt = Date.now() - 1000;
     const policy = { startedAt, deadlineAt: startedAt + 180000, maxToolCalls: 8, budgetUnits: 8 };
-    if (field === 'deadline') policy.deadlineAt += 1;
-    if (field === 'units') policy.budgetUnits += 1;
-    if (field === 'calls') policy.maxToolCalls += 1;
-    const service = new ConversationDocumentToolSessionService({ rootDirectory: data.rootDirectory, projectId,
+    if (field === 'deadline') policy.deadlineAt = startedAt + 540_001;
+    if (field === 'units') policy.budgetUnits = 33;
+    if (field === 'calls') policy.maxToolCalls = 13;
+    const service = fixtureToolService({ rootDirectory: data.rootDirectory, projectId,
       conversations: data.conversations, getInheritedExecutionContext: async () => ({ policy }) });
     services.push(service);
     const create = vi.spyOn(service, 'createSession');
@@ -425,7 +483,7 @@ describe('production registered document read sessions', () => {
     let resolve!: (value: undefined) => void;
     const context = new Promise<undefined>(accept => { resolve = accept; });
     const getInheritedExecutionContext = vi.fn(async () => context);
-    const service = new ConversationDocumentToolSessionService({ rootDirectory: data.rootDirectory, projectId,
+    const service = fixtureToolService({ rootDirectory: data.rootDirectory, projectId,
       conversations: data.conversations, getInheritedExecutionContext });
     services.push(service);
     const create = vi.spyOn(service, 'createSession');
@@ -444,7 +502,7 @@ describe('production registered document read sessions', () => {
   it('does not renew an inherited deadline that already expired before session registration', async () => {
     const data = await fixture();
     const startedAt = Date.now() - 180000;
-    const service = new ConversationDocumentToolSessionService({ rootDirectory: data.rootDirectory, projectId,
+    const service = fixtureToolService({ rootDirectory: data.rootDirectory, projectId,
       conversations: data.conversations, getInheritedExecutionContext: async () => ({
         policy: { startedAt, deadlineAt: startedAt + 100000, maxToolCalls: 2, budgetUnits: 2 }
       }) });
@@ -463,7 +521,7 @@ describe('production registered document read sessions', () => {
     const getInheritedExecutionContext = vi.fn(async () => ({
       policy: { startedAt, deadlineAt: startedAt + 180000, maxToolCalls: 2, budgetUnits: 2 }
     })).mockRejectedValueOnce(new Error('Root lease refused'));
-    const service = new ConversationDocumentToolSessionService({ rootDirectory: data.rootDirectory, projectId,
+    const service = fixtureToolService({ rootDirectory: data.rootDirectory, projectId,
       conversations: data.conversations, getInheritedExecutionContext });
     services.push(service);
     const selection = (await service.select(await data.question()))!;
@@ -492,40 +550,6 @@ describe('production registered document read sessions', () => {
     });
   });
 
-  it('uses one bounded parent policy for combined Agent generation and mutation branches', async () => {
-    const data = await fixture();
-    const service = new ConversationDocumentToolSessionService({ rootDirectory: data.rootDirectory, projectId,
-      conversations: data.conversations,
-      generatePptx: { compiler: { compile: () => ({ kind: 'ppt', title: '预算合成', sections: [
-        { heading: '预算内容', level: 1, blocks: [{ type: 'paragraph', text: '测试内容' }] }
-      ] }), recover: () => { throw new Error('not invoked'); } }, executor: { run: async () => { throw new Error('not invoked'); } }, revalidateAuthorization: async () => true },
-      mutation: { renderPreview: async () => ({ previewCount: 3, diagnostics: [] }) } });
-    services.push(service);
-    const request = await data.question('继续处理当前 PPT');
-    const message = request.conversation.messages.at(-1)!;
-    const draft = createConversationResponseDraft({ id: toConversationResponseDraftId('combined-parent-budget'), projectId,
-      conversationId: request.conversation.id, conversationRevision: request.conversation.revision,
-      userMessageId: message.id, userMessageRevision: message.revision, agentNative: true, productFeature: 'text_chat', createdAt: now });
-    const selection = await service.prepare({ conversation: request.conversation, draft });
-    expect(selection).toMatchObject({ kind: 'agent', mutation: { kind: 'mutation' } });
-    const session = await service.createSession({ selection: selection!, responseExecutionId: 'combined-budget-execution' });
-    expect(session.bridge.finalizationState).toBeUndefined();
-    sessions.push(session);
-    const budget = session.executionBudget!;
-    expect(budget.policy).toMatchObject({ maxToolCalls: 12, budgetUnits: 32 });
-    expect(budget.policy.deadlineAt - budget.policy.startedAt).toBe(540_000);
-    const runtimes = await new JsonDocumentTaskRuntimeRepository(data.storage, projectId).list();
-    expect(runtimes).toHaveLength(2);
-    expect(budget.policy.startedAt).toBe(Math.min(...runtimes.map(item => Date.parse(item.createdAt))));
-    expect(runtimes.every(item => item.budget.timeoutMs === 540_000)).toBe(true);
-    const tools = await session.prepareTools(new AbortController().signal);
-    expect(tools?.some(tool => tool.function.name === 'generate_pptx')).toBe(true);
-    expect(tools?.some(tool => tool.function.name === 'update_element')).toBe(true);
-    await session.cancel?.();
-    expect(budget.stopReason).toBe('cancelled');
-    await expect(session.prepareTools(new AbortController().signal)).rejects.toMatchObject({ code: 'cancelled' });
-  });
-
   it('pins host-only metadata without reading bytes or including document content in the first prompt', async () => {
     const data = await fixture();
     const reader = vi.spyOn(RegisteredPresentationReader.prototype, 'read');
@@ -534,7 +558,8 @@ describe('production registered document read sessions', () => {
       checksumSha256: data.first.file.checksumSha256, scope: 'document', bindingHash: expect.stringMatching(/^[a-f0-9]{64}$/) });
     expect(reader).not.toHaveBeenCalled();
     expect(JSON.stringify(selection)).not.toMatch(/absolutePath|relativePath|rootDirectory|陈旧|九百|二百|三百/);
-    const instruction = buildDocumentReadToolInstruction(selection!);
+    if (!selection || 'kind' in selection) throw new Error('Expected scoped read selection');
+    const instruction = buildDocumentReadToolInstruction(selection);
     expect(instruction).not.toContain(data.rootDirectory);
     expect(instruction).not.toContain(data.first.work.id);
     expect(instruction).not.toContain(selection!.checksumSha256);
@@ -637,47 +662,27 @@ describe('production registered document read sessions', () => {
     const question = await data.question();
     const future = await data.register('另一个版本', ['不能读取的未来作品']);
     const selection = await data.service.select({ ...question, conversation: data.conversation });
-    expect(selection!.workId).toBe(data.first.work.id);
+    if (!selection || 'kind' in selection && selection.kind === 'generation') throw new Error('Expected existing document');
+    expect(selection.workId).toBe(data.first.work.id);
     const latest = await data.service.select(await data.question());
-    expect(latest!.workId).toBe(future.work.id);
+    if (!latest || 'kind' in latest && latest.kind === 'generation') throw new Error('Expected existing document');
+    expect(latest.workId).toBe(future.work.id);
     const explicit = await data.service.select(await data.question(`请读取 ${data.first.fileName} 的整篇内容。`));
-    expect(explicit!.workId).toBe(data.first.work.id);
+    if (!explicit || 'kind' in explicit && explicit.kind === 'generation') throw new Error('Expected existing document');
+    expect(explicit.workId).toBe(data.first.work.id);
     const page = await data.service.select(await data.question(`请读取 ${data.first.fileName} 的第2页。`));
     expect(page!.bindingHash).not.toBe(explicit!.bindingHash);
   });
 
-  it.each(['读取上一份PPT', '读取未知文件.pptx的内容', '读取 C:\\private\\source.pptx 第2页',
-    'PPT 第2页和第3页是什么', 'PPT 第2到3页是什么', 'PPT 最后一页是什么', '读取附件第2页'])(
-    'rejects an ambiguous, path-based or overbroad selection: %s', async query => {
-      const data = await fixture();
-      await expect(data.service.select(await data.question(query))).rejects.toMatchObject({ code: 'document_page_ambiguous' });
-    });
-
-  it.each(['你好', '删除当前 PPT 的第2页', '修改当前 PPT 的第2页标题'])(
-    'keeps unrelated and mutation requests on their existing path: %s', async query => {
-      const data = await fixture();
-      expect(await data.service.select(await data.question(query))).toBeUndefined();
-    });
-
-  it.each(['新增一页 PPT', 'add a slide to the PPT', '在第二页后面加一页，标题叫市场机会'])(
-    'routes controlled add-slide intent into the mutation path: %s', async query => {
-      const data = await fixture();
-      const service = new ConversationDocumentToolSessionService({ rootDirectory: data.rootDirectory, projectId,
-        conversations: data.conversations, mutation: { renderPreview: async temporary => ({ previewCount: (await readFile(temporary)).length ? 1 : 0, diagnostics: [] }) } });
-      services.push(service);
-      const selection = await service.select(await data.question(query));
-      expect(selection).toMatchObject({ kind: 'mutation', writeAuthorized: true });
-    });
-
-  it('creates an awaiting-user generation selection for a new PPT request', async () => {
+  it('pins the returned ready creation plan without requiring another phrasing-specific approval', async () => {
     const data = await fixture();
     const selection = await data.service.select(await data.question('制作一份新的PPT'));
-    expect(selection).toMatchObject({ kind: 'generation', authorizationStatus: 'awaiting_user' });
+    expect(selection).toMatchObject({ kind: 'generation', authorizationStatus: 'approved' });
   });
 
   it('binds the Agent-native path to the latest registered PPT mutation tools', async () => {
     const data = await fixture();
-    const service = new ConversationDocumentToolSessionService({
+    const service = fixtureToolService({
       rootDirectory: data.rootDirectory,
       projectId,
       conversations: data.conversations,
@@ -698,7 +703,7 @@ describe('production registered document read sessions', () => {
       createdAt: now
     });
     const selection = await service.prepare({ conversation: request.conversation, draft });
-    expect(selection).toMatchObject({ kind: 'agent', mutation: { kind: 'mutation', writeAuthorized: true, workId: data.first.work.id } });
+    expect(selection).toMatchObject({ kind: 'mutation', writeAuthorized: false, workId: data.first.work.id });
   });
 
   it('does not attach tools to an internal generation prompt or a different project', async () => {
@@ -708,8 +713,8 @@ describe('production registered document read sessions', () => {
     const draft = createConversationResponseDraft({ id: toConversationResponseDraftId('draft-read'), projectId,
       conversationId: request.conversation.id, conversationRevision: request.conversation.revision,
       userMessageId: message.id, userMessageRevision: message.revision, createdAt: now, productFeature: 'text_chat' });
-    expect(await data.service.prepare({ conversation: request.conversation, draft })).toBeDefined();
-    expect(await data.service.prepare({ conversation: request.conversation,
+    expect(await ConversationDocumentToolSessionService.prototype.prepare.call(data.service, { conversation: request.conversation, draft })).toBeUndefined();
+    expect(await ConversationDocumentToolSessionService.prototype.prepare.call(data.service, { conversation: request.conversation,
       draft: { ...draft, promptContent: 'Only return an Outline JSON document' } })).toBeUndefined();
     await expect(data.service.select({ ...request, conversation: { ...request.conversation, projectId: toProjectId('other-project') } }))
       .rejects.toMatchObject({ code: 'document_page_unavailable' });
@@ -724,14 +729,14 @@ describe('production registered document read sessions', () => {
       conversationId: request.conversation.id, conversationRevision: request.conversation.revision,
       userMessageId: message.id, userMessageRevision: message.revision, createdAt: now, productFeature: 'text_chat',
       attachmentQuery: request.query, promptContent: `${request.query}\n\n已确认参数：\n受众：管理层` });
-    expect(await data.service.prepare({ conversation: data.conversation, draft })).toBeUndefined();
+    expect(await ConversationDocumentToolSessionService.prototype.prepare.call(data.service, { conversation: data.conversation, draft })).toBeUndefined();
     await data.service.pinDraft({ draft, selection });
-    expect(await data.service.prepare({ conversation: data.conversation, draft })).toBe(selection);
+    expect(await ConversationDocumentToolSessionService.prototype.prepare.call(data.service, { conversation: data.conversation, draft })).toBe(selection);
     await data.service.registerExecution({ selection, responseExecutionId: 'composed-chat-response' });
     // Orchestration may reread the subject after artifact creation.
-    expect(await data.service.prepare({ conversation: data.conversation, draft })).toBe(selection);
+    expect(await ConversationDocumentToolSessionService.prototype.prepare.call(data.service, { conversation: data.conversation, draft })).toBe(selection);
     await (await data.service.forExecution({ responseExecutionId: 'composed-chat-response' }))!.close();
-    expect(await data.service.prepare({ conversation: data.conversation, draft })).toBeUndefined();
+    expect(await ConversationDocumentToolSessionService.prototype.prepare.call(data.service, { conversation: data.conversation, draft })).toBeUndefined();
   });
 
   it.each([

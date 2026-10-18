@@ -1,3 +1,4 @@
+import { fixtureSemanticClassifier } from '../fixtures/conversation-semantic-classifier';
 import { mkdtemp, rm } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
@@ -19,7 +20,7 @@ describe('Office workflow settlement', () => {
     const conversationId = toConversationId('conversation-settle');
     const messageId = toMessageId('assistant-settle');
     const workId = toWorkId('work-settle');
-    const service = new ConversationWorkflowService(new JsonConversationWorkflowRepository(new NodeProjectStorage(root), projectId), new ConversationIntentOrchestrator());
+    const service = new ConversationWorkflowService(new JsonConversationWorkflowRepository(new NodeProjectStorage(root), projectId), new ConversationIntentOrchestrator({ classifier: fixtureSemanticClassifier }));
     const workflow = await service.create({ projectId, conversationId, sourceMessageId: toMessageId('source-settle'), rawText: '帮我做一份 Word 和一份 PPT' });
     const executionId = local ? 'local-document-revision-settle' : 'response-settle';
     const started = await service.beginExecution({ workflowId: workflow.id, expectedRevision: workflow.revision, executionId });

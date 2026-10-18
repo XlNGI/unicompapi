@@ -1,7 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
 import {
-  ConversationApplicationError,
-  DocumentDraftCompilationError,
   DocumentGenerationApplicationService
 } from '../src/application';
 import {
@@ -47,7 +45,7 @@ function generatedResult(suffix: string) {
   };
 }
 
-function revisionConversation() {
+function revisionConversation(request = '清空第二章') {
   const previousMessageId = toMessageId('document-parent-message');
   const requestId = toMessageId('document-revision-request');
   let conversation = createConversation({
@@ -58,8 +56,8 @@ function revisionConversation() {
   });
   conversation = addUserMessage(conversation, {
     id: requestId,
-    content: '清空第二章',
-    displayContent: '清空第二章',
+    content: request,
+    displayContent: request,
     createdAt: now
   });
   const previousPending = beginAssistantMessage(conversation, {
@@ -98,287 +96,44 @@ function revisionConversation() {
   return completeAssistantMessage(chunked, messageId, now);
 }
 
-function environment() {
-  const conversation = revisionConversation();
-  const updateDocumentGenerationStatus = vi.fn(async () => undefined);
-  const run = vi.fn(async () => generatedResult('revision'));
-  const service = new DocumentGenerationApplicationService({
-    resolvePresentationMap: async (_workId, outline) => ({ checksumSha256: '0'.repeat(64), totalPages: outline.sections.length + 2,
-      sections: outline.sections.map((section, index) => ({ sectionIndex: index, heading: section.heading, pages: [index + 2] })) }),
-    projectId,
-    conversations: {
-      load: async () => conversation,
-      attachDocumentResult: async () => undefined,
-      updateDocumentGenerationStatus
-    },
-    compiler: {
-      compile: ({ content }) => JSON.parse(content),
-      recover: () => JSON.parse(outlineJson())
-    },
-    generator: { run },
-    fingerprint: () => 'content-sha256',
-    wait: async () => undefined
-  });
-  return { conversation, service, run, updateDocumentGenerationStatus };
+function environment(request?: string) {
+  const conversation = revisionConversation(request);
+  const compile = vi.fn(({ content }: { content: string }) => JSON.parse(content));
+  const recover = vi.fn(() => JSON.parse(outlineJson()));
+  const run = vi.fn(async (_input: unknown) => generatedResult('recovery'));
+  const attachDocumentResult = vi.fn(async () => undefined);
+  const service = new DocumentGenerationApplicationService({ projectId,
+    conversations: { load: async () => conversation, attachDocumentResult, updateDocumentGenerationStatus: async () => undefined },
+    compiler: { compile, recover }, generator: { run }, fingerprint: () => 'content-sha256', wait: async () => undefined });
+  return { conversation, service, compile, recover, run, attachDocumentResult };
 }
 
-function serviceWithCompilerError(
-  conversation: ReturnType<typeof revisionConversation>
-) {
-  const compile = vi.fn(() => {
-    throw new DocumentDraftCompilationError(
-      'invalid_structure',
-      'The model response is not valid JSON'
-    );
-  });
-  const recover = vi.fn(() => JSON.parse(outlineJson('兼容章节')));
-  const run = vi.fn(async () => generatedResult('legacy'));
-  const service = new DocumentGenerationApplicationService({
-    resolvePresentationMap: async (_workId, outline) => ({ checksumSha256: '0'.repeat(64), totalPages: outline.sections.length + 2,
-      sections: outline.sections.map((section, index) => ({ sectionIndex: index, heading: section.heading, pages: [index + 2] })) }),
-    projectId,
-    conversations: {
-      load: async () => conversation,
-      attachDocumentResult: async () => undefined,
-      updateDocumentGenerationStatus: async () => undefined
-    },
-    compiler: { compile, recover },
-    generator: { run },
-    fingerprint: () => 'content-sha256',
-    wait: async () => undefined
-  });
-  return { service, run, recover };
-}
-
-describe('document generation revision fail-closed boundary', () => {
-  it('passes a structurally validated local revision to the rendering runner', async () => {
-    const { conversation, run, updateDocumentGenerationStatus } = environment();
-    const currentTarget = JSON.parse(outlineJson()).sections[1];
-    const parsed = JSON.parse(outlineJson());
-    const revised = {
-      ...parsed,
-      sections: parsed.sections.map(
-        (section: object, index: number) =>
-          index === 1 ? { ...section, blocks: [] } : section
-      )
-    };
-    const service = new DocumentGenerationApplicationService({
-    resolvePresentationMap: async (_workId, outline) => ({ checksumSha256: '0'.repeat(64), totalPages: outline.sections.length + 2,
-      sections: outline.sections.map((section, index) => ({ sectionIndex: index, heading: section.heading, pages: [index + 2] })) }),
-      projectId,
-      conversations: {
-        load: async () => conversation,
-        attachDocumentResult: async () => undefined,
-        updateDocumentGenerationStatus
-      },
-      compiler: {
-        compile: ({ content }) => JSON.parse(content),
-        recover: () => JSON.parse(outlineJson())
-      },
-      generator: { run },
-      fingerprint: () => 'content-sha256',
-      revisionAgent: async () => ({
-        outline: revised,
-        agent: {
-          state: 'completed_unvalidated',
-          steps: 4,
-          costUnits: 8,
-          observations: []
-        },
-        changed: true,
-        targetSectionIndex: 1,
-        patch: {
-          operation: 'clear_section',
-          target: {
-            sectionIndex: 1,
-            sectionHeading: currentTarget.heading,
-            pageNumber: 3
-          }
-        }
-      }),
-      wait: async () => undefined
-    });
-
-    await service.generateFromMessage({
-      conversationId,
-      expectedRevision: conversation.revision,
-      messageId,
-      kind: 'ppt',
-      parentWorkId: toWorkId('work-parent'),
-      images: []
-    });
-
-    expect(run).toHaveBeenCalledTimes(1);
-    expect(run).toHaveBeenCalledWith(
-      expect.objectContaining({
-        outline: revised,
-        revisionPatch: {
-          operation: 'clear_section',
-          target: {
-            sectionIndex: 1,
-            sectionHeading: currentTarget.heading,
-            pageNumber: 3
-          }
-        }
-      })
-    );
+describe('retired local revision entry boundary', () => {
+  it.each(['清空第二章', '只改第3页', '重新排版当前PPT', '面向非技术管理者'])('rejects %s through the retired entry before compiling, rewriting or creating any file', async request => {
+    const f = environment(request);
+    await expect(f.service.generateFromMessage({ conversationId, expectedRevision: f.conversation.revision,
+      messageId, kind: 'ppt', parentWorkId: toWorkId('work-parent'), images: [] }))
+      .rejects.toMatchObject({ code: 'invalid_structure' });
+    expect(f.compile).not.toHaveBeenCalled();
+    expect(f.recover).not.toHaveBeenCalled();
+    expect(f.run).not.toHaveBeenCalled();
+    expect(f.attachDocumentResult).not.toHaveBeenCalled();
   });
 
-  it('uses the compatibility path only for an unparseable previous revision', async () => {
-    const conversation = revisionConversation();
-    const { service, run, recover } = serviceWithCompilerError(conversation);
-
-    await service.generateFromMessage({
-      conversationId,
-      expectedRevision: conversation.revision,
-      messageId,
-      kind: 'ppt',
-      parentWorkId: toWorkId('work-parent'),
-      images: []
-    });
-
-    expect(run).toHaveBeenCalledTimes(1);
-    expect(recover).toHaveBeenCalledTimes(2);
+  it('requires the controlled tool route for an explicit edit operation without a parent pin', async () => {
+    const f = environment();
+    await expect(f.service.generateFromMessage({ conversationId, expectedRevision: f.conversation.revision,
+      messageId, kind: 'ppt', operation: 'edit', images: [] })).rejects.toMatchObject({ code: 'invalid_structure' });
+    expect(f.run).not.toHaveBeenCalled();
   });
 
-  it('stops before file creation when the revision agent throws', async () => {
-    const { conversation, run, updateDocumentGenerationStatus } = environment();
-    const service = new DocumentGenerationApplicationService({
-    resolvePresentationMap: async (_workId, outline) => ({ checksumSha256: '0'.repeat(64), totalPages: outline.sections.length + 2,
-      sections: outline.sections.map((section, index) => ({ sectionIndex: index, heading: section.heading, pages: [index + 2] })) }),
-      projectId,
-      conversations: {
-        load: async () => conversation,
-        attachDocumentResult: async () => undefined,
-        updateDocumentGenerationStatus
-      },
-      compiler: {
-        compile: ({ content }) => JSON.parse(content),
-        recover: () => JSON.parse(outlineJson())
-      },
-      generator: { run },
-      fingerprint: () => 'content-sha256',
-      revisionAgent: async () => {
-        throw new Error('patch executor failed');
-      },
-      wait: async () => undefined
-    });
-
-    await expect(
-      service.generateFromMessage({
-        conversationId,
-        expectedRevision: conversation.revision,
-        messageId,
-        kind: 'ppt',
-        parentWorkId: toWorkId('work-parent'),
-        images: []
-      })
-    ).rejects.toMatchObject({ code: 'revision_patch_failed' });
-
-    expect(run).not.toHaveBeenCalled();
-    expect(updateDocumentGenerationStatus).toHaveBeenLastCalledWith(
-      expect.objectContaining({
-        status: expect.objectContaining({ errorCode: 'revision_patch_failed' })
-      })
-    );
-  });
-
-  it('rejects model output that changes sections outside the revision target', async () => {
-    const { conversation, run, updateDocumentGenerationStatus } = environment();
-    const parsed = JSON.parse(outlineJson());
-    const crossScope = {
-      ...parsed,
-      sections: parsed.sections.map(
-        (section: object, index: number) =>
-          index < 2 ? { ...section, blocks: [] } : section
-      )
-    };
-    const service = new DocumentGenerationApplicationService({
-    resolvePresentationMap: async (_workId, outline) => ({ checksumSha256: '0'.repeat(64), totalPages: outline.sections.length + 2,
-      sections: outline.sections.map((section, index) => ({ sectionIndex: index, heading: section.heading, pages: [index + 2] })) }),
-      projectId,
-      conversations: {
-        load: async () => conversation,
-        attachDocumentResult: async () => undefined,
-        updateDocumentGenerationStatus
-      },
-      compiler: {
-        compile: ({ content }) => JSON.parse(content),
-        recover: () => JSON.parse(outlineJson())
-      },
-      generator: { run },
-      fingerprint: () => 'content-sha256',
-      revisionAgent: async () => ({
-        outline: crossScope,
-        agent: { state: 'completed', steps: 1, costUnits: 1, observations: [] },
-        changed: true,
-        targetSectionIndex: 1,
-        patch: {
-          operation: 'clear_section',
-          target: { sectionIndex: 1, sectionHeading: '第二章', pageNumber: 3 }
-        }
-      }),
-      wait: async () => undefined
-    });
-
-    await expect(
-      service.generateFromMessage({
-        conversationId,
-        expectedRevision: conversation.revision,
-        messageId,
-        kind: 'ppt',
-        parentWorkId: toWorkId('work-parent'),
-        images: []
-      })
-    ).rejects.toMatchObject({ code: 'revision_scope_violation' });
-
-    expect(run).not.toHaveBeenCalled();
-    expect(updateDocumentGenerationStatus).toHaveBeenLastCalledWith(
-      expect.objectContaining({
-        status: expect.objectContaining({
-          errorCode: 'revision_scope_violation'
-        })
-      })
-    );
-  });
-
-  it('fails closed without a new work when the revision chain conflicts', async () => {
-    const { conversation, run, updateDocumentGenerationStatus } = environment();
-    const serviceWithAgent = new DocumentGenerationApplicationService({
-    resolvePresentationMap: async (_workId, outline) => ({ checksumSha256: '0'.repeat(64), totalPages: outline.sections.length + 2,
-      sections: outline.sections.map((section, index) => ({ sectionIndex: index, heading: section.heading, pages: [index + 2] })) }),
-      projectId,
-      conversations: {
-        load: async () => conversation,
-        attachDocumentResult: async () => undefined,
-        updateDocumentGenerationStatus
-      },
-      compiler: {
-        compile: ({ content }) => JSON.parse(content),
-        recover: () => JSON.parse(outlineJson())
-      },
-      generator: { run },
-      fingerprint: () => 'content-sha256',
-      revisionAgent: async () => {
-        throw new ConversationApplicationError(
-          'revision_conflict',
-          'Conversation revision has changed'
-        );
-      },
-      wait: async () => undefined
-    });
-
-    await expect(
-      serviceWithAgent.generateFromMessage({
-        conversationId,
-        expectedRevision: conversation.revision,
-        messageId,
-        kind: 'ppt',
-        parentWorkId: toWorkId('work-parent'),
-        images: []
-      })
-    ).rejects.toMatchObject({ code: 'revision_conflict' });
-
-    expect(run).not.toHaveBeenCalled();
+  it('recovers an explicit creation without interpreting historical user prose a second time', async () => {
+    const f = environment('清空第二章，面向非技术管理者，改成20页');
+    await f.service.generateFromMessage({ conversationId, expectedRevision: f.conversation.revision,
+      messageId, kind: 'ppt', operation: 'create', images: [] });
+    expect(f.run).toHaveBeenCalledOnce();
+    expect(f.run).toHaveBeenCalledWith(expect.objectContaining({ outline: JSON.parse(outlineJson()) }));
+    expect(f.run.mock.calls[0][0]).not.toHaveProperty('revisionPatch');
+    expect(f.run.mock.calls[0][0]).not.toHaveProperty('pageRequirement');
   });
 });

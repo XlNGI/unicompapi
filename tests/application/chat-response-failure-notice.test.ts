@@ -22,6 +22,11 @@ function failedMessage(
 }
 
 describe('chat response failure notices', () => {
+  it('reports a persisted local preparation failure without inventing a provider outage', () => {
+    const notice = failedResponseNotice(failedMessage('unavailable'), 'conversation.prepare_failed');
+    expect(notice).toContain('本地准备');
+    expect(notice).not.toMatch(/模型连接超时|切换模型|服务暂时不可用|请重试/);
+  });
   it.each(['newapi', 'deepseek'])('distinguishes %s protocol and round failures from a depleted execution budget', provider => {
     for (const [code, label] of [
       ['tool_bridge_unavailable', '受控工具不可用'], ['invalid_tool_calls', '工具调用不符合要求'],
@@ -185,7 +190,7 @@ describe('chat response failure notices', () => {
     ['invalid_response', '模型返回的数据格式异常'],
     ['truncated', '回答达到当前输出长度上限'],
     ['interrupted', '模型连接中断'],
-    ['unavailable', '模型连接超时或服务暂时不可用'],
+    ['unavailable', '当前回复未能完成'],
     ['unknown', '本地等待模型响应超时']
   ] as const)('preserves the existing %s fallback', (reason, expected) => {
     expect(failedResponseNotice(failedMessage(reason))).toContain(expected);

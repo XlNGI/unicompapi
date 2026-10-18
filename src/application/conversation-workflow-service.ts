@@ -143,10 +143,6 @@ export class ConversationWorkflowService {
     }
     // Exact replies are bound to this persisted workflow and its revision. They
     // do not authorize web research or change any outbound scope.
-    if (current.status === 'needs_confirmation' && /^(?:确认执行|确认并继续|同意执行|继续)[。！!\s]*$/u.test(input.rawText.trim())) {
-      if (input.signal?.aborted) throw new ConversationIntentOrchestrationError('cancelled');
-      return this.confirm({ workflowId: current.id, expectedRevision: current.revision });
-    }
     const decision = await this.orchestrator.analyze({
       rawText: input.rawText,
       context: input.context,

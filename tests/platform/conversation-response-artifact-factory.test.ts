@@ -178,7 +178,7 @@ describe('ConversationResponseArtifactFactory', () => {
       conversationId: conversation.id, conversationRevision: conversation.revision, userMessageId: toMessageId('image-user'),
       userMessageRevision: 0, productFeature: 'text_chat', createdAt: t0, imageQuery: '分析一下图片' });
     await drafts.create(draft);
-    const subject = await new ProjectConversationResponseSubjectResolver(conversations, drafts, contexts, undefined, attachments).resolve({
+    const subject = await new ProjectConversationResponseSubjectResolver(conversations, drafts, contexts, attachments).resolve({
       kind: 'conversation_response_draft', conversationId: conversation.id, conversationRevision: conversation.revision,
       responseDraftId: draft.id, responseDraftRevision: draft.revision, userMessageId: draft.userMessageId });
     expect(subject.imageCount).toBe(1);

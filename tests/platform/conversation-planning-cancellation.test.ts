@@ -1,3 +1,4 @@
+import { fixtureSemanticClassifier } from '../fixtures/conversation-semantic-classifier';
 import { mkdtemp, rm } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
@@ -30,7 +31,7 @@ async function fixture(ready?: Promise<void>, attachments?: ConversationWorkflow
   const conversationService = new ConversationApplicationService(conversations, {
     nextConversationId: () => toConversationId(`planning-conversation-${++id}`), nextMessageId: () => toMessageId(`planning-message-${++id}`)
   });
-  const orchestrator = new ConversationIntentOrchestrator();
+  const orchestrator = new ConversationIntentOrchestrator({ classifier: fixtureSemanticClassifier });
   const workflowService = new ConversationWorkflowService(workflows, orchestrator);
   const controller = new ConversationWorkflowController({ getSession: () => session,
     getRuntime: () => ({ conversationService, workflowService, ready, attachments }) });

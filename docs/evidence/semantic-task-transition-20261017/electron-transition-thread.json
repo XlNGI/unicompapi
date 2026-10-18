@@ -1,0 +1,28 @@
+{
+  "status": "passed",
+  "threadFirst": true,
+  "discussion": {
+    "text": "我现在要制作一个ppt，先讨论内容",
+    "modelRequests": 2,
+    "registeredWorks": 0,
+    "exposedWriteTools": false
+  },
+  "generation": {
+    "text": "随便生成吧，现在是测试",
+    "semanticPlannerRequests": 1,
+    "state": "completed",
+    "registeredWorks": 1,
+    "physicalPages": 3,
+    "bytes": 59807,
+    "documentReceipt": {
+      "workId": "work-document-b7a0d6bd-46f9-46bb-b7a1-10bab0eb1e28",
+      "fileName": "Electron Tool Calling 验收-20261017185200-6a1978db-a0ac-4a40-a878-385bb11cccca.pptx",
+      "kind": "ppt",
+      "sizeBytes": 59807
+    }
+  },
+  "requestCount": 7,
+  "semanticRequestCount": 2,
+  "externalProviderCalls": 0,
+  "boundary": "production IPC + preload + Thread/Legacy Host + injected Provider transport; actual local PPT, no external generation"
+}

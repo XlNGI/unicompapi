@@ -8,6 +8,22 @@ import { authoredFixtureDesign, autonomousOutline, splitTree } from '../fixtures
 const base = { outline: autonomousOutline, userRequirement: '自主设计，左侧65%，右侧35%', signal: new AbortController().signal,
   tokens: resolvePresentationTemplate('business_minimal').tokens, assets: [], availableAssets: [], requireDesignTree: true };
 describe('bounded autonomous design planning and correction', () => {
+  it('corrects a malformed initial response within the same two-correction allowance', async () => {
+    const design = authoredFixtureDesign(autonomousOutline, splitTree());
+    let calls = 0;
+    const request = vi.fn(async (_request: PresentationArtDirectionRequest) => ++calls === 1 ? '{' : design);
+    const result = await planExecutablePresentationDesign({ ...base, request });
+    expect(result.designIR).toEqual(design);
+    expect(result.correctionCount).toBe(1);
+    expect(request).toHaveBeenCalledTimes(2);
+    expect(request.mock.calls[1][0].input.planningDiagnostics).toEqual(['invalid_json']);
+  });
+  it('never starts a separate unbounded format-repair loop', async () => {
+    const request = vi.fn(async () => '{');
+    const result = await planExecutablePresentationDesign({ ...base, request });
+    expect(result.designIR).toBeUndefined(); expect(result.correctionCount).toBe(2);
+    expect(request).toHaveBeenCalledTimes(3);
+  });
   it('requires executable trees for new autonomous requests while preserving explicit v2 compatibility', async () => {
     const request = vi.fn(async () => buildFallbackPresentationDesignIR(autonomousOutline));
     expect((await planPresentationArtDirection({ ...base, request })).diagnostics).toEqual([{ code: 'design_tree_missing' }]);

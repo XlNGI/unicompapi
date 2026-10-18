@@ -1,3 +1,4 @@
+import { fixtureToolService } from '../fixtures/conversation-semantic-classifier';
 import { createHash } from 'node:crypto';
 import { mkdir, mkdtemp, readFile, readdir, rm } from 'node:fs/promises';
 import os from 'node:os';
@@ -28,7 +29,7 @@ import * as officeRenderer from '../../src/platform/documents/office-render-adap
 import { DocumentMutationCoordinator } from '../../src/application/document-mutation-coordinator';
 import { DocumentTaskRuntimeService } from '../../src/application/document-task-runtime-service';
 import { ConversationResponseExecutionLifecycle } from '../../src/platform/providers/conversation-response-streaming';
-import { ConversationDocumentToolSessionService } from '../../src/platform/documents/conversation-document-tool-session';
+
 
 const roots: string[] = [];
 const cleanups: Array<() => Promise<void>> = [];
@@ -140,6 +141,11 @@ async function fixture(revokeBeforeWrite = false, cancelBeforeWrite = false, mut
   let addedElementId: string | undefined;
   const transport = { send: async (request: { readonly body?: Uint8Array }): Promise<NewApiHttpTransportResponse> => {
     const payload = JSON.parse(Buffer.from(request.body!).toString('utf8')) as WireRequest;
+    if (!payload.tools && payload.messages.some(message => message.role === 'system' && message.content.includes('UniComp 会话语义规划器'))) {
+      return stream(provider.modelKey, { content: JSON.stringify({ schemaVersion: 1, kind: 'document', action: 'revise', documentKind: 'ppt',
+        parameters: {}, targetHint: { unit: 'page', ordinal: 2, name: sourceRead.fileName },
+        sourcePolicy: 'none', missing: [], ambiguities: [], confidence: 'high', needsConfirmation: false }) }, 'stop');
+    }
     requests.push(payload);
     let next: WireCall;
     if (failureMode === 'invalid_args' && requests.length === 1) {
@@ -254,7 +260,7 @@ async function fixture(revokeBeforeWrite = false, cancelBeforeWrite = false, mut
     const started = agentNative
       ? await runtime.responses.startAgent(request)
       : await runtime.responses.start({ ...request, confirmed: true });
-    if (!started.ok) throw new Error('Start failed: ' + started.error.code);
+    if (!started.ok) throw new Error('Start failed: ' + started.error.code + '; host: ' + errors.map(error => error instanceof Error ? error.stack : String(error)).join('\n'));
     if (!('execution' in started.value)) throw new Error('Expected an executable document update response');
     const executionId = started.value.execution.responseExecutionId;
     activeExecutionId = executionId;
@@ -305,7 +311,7 @@ describe('production NewAPI update_element continuation', () => {
     const draft = createConversationResponseDraft({ id: toConversationResponseDraftId('missing-identity-draft'), projectId,
       conversationId: conversation.id, conversationRevision: conversation.revision,
       userMessageId: message.id, userMessageRevision: message.revision, productFeature: 'text_chat', createdAt: message.createdAt });
-    const service = new ConversationDocumentToolSessionService({ rootDirectory: data.rootDirectory, projectId, conversations,
+    const service = fixtureToolService({ rootDirectory: data.rootDirectory, projectId, conversations,
       mutation: { renderPreview: data.render } });
     cleanups.push(() => service.dispose());
     await expect(service.prepare({ conversation, draft })).rejects.toMatchObject({ code: 'identity_unresolved' });

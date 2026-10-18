@@ -1,3 +1,4 @@
+import { fixtureSemanticClassifier, chatFixturePlan } from '../fixtures/conversation-semantic-classifier';
 import { createHash } from 'node:crypto';
 import { mkdtemp, rm } from 'node:fs/promises';
 import os from 'node:os';
@@ -30,7 +31,7 @@ afterEach(async () => {
     await rm(root, { recursive: true, force: true });
   }));
 });
-async function setup(classifier?: ConversationIntentClassifierPort, supportsMutation?: boolean, threadFirst = false) {
+async function setup(classifier: ConversationIntentClassifierPort | null = fixtureSemanticClassifier, supportsMutation?: boolean, threadFirst = false) {
   const root = await mkdtemp(path.join(os.tmpdir(), 'unicomp-continuations-')); roots.push(root);
   let now = start, messageIndex = 0, tokenIndex = 0, current = true;
   const at = () => new Date(now).toISOString(), storage = new NodeProjectStorage(root);
@@ -58,7 +59,7 @@ async function setup(classifier?: ConversationIntentClassifierPort, supportsMuta
   }));
   const cancelExecution = vi.fn(async (_responseExecutionId: string) => undefined);
   runtime = new ConversationAgentContinuationRuntime({ storage, projectId, sessions, sessionService: service, agentRuns, conversations,
-    isCurrent: () => current, now: at, classifier, supportsGeneration: true, supportsMutation, replayExecution: replay, cancelExecution,
+    isCurrent: () => current, now: at, classifier: classifier ?? undefined, supportsGeneration: true, supportsMutation, replayExecution: replay, cancelExecution,
     ...(threadFirst ? { modelHistory: new ModelHistoryReader(source) } : {}) });
   const request = (content: string, continuation?: StartResponseRequest['continuation'], commandId = `command-${messageIndex + 1}`): StartResponseRequest => ({
     clientCommandId: commandId, conversation: { conversationId: conversation.id, expectedRevision: 0, editedMessageId: null },
@@ -98,6 +99,37 @@ function continuation(session: { sessionId: string; revision: number; resumeToke
 }
 
 describe('Host conversation continuations', () => {
+  it.each([false, true])('uses semantic planning with the preceding discussion for an implicit generation request (Thread: %s)', async threadFirst => {
+    const classify = vi.fn(async (input: Parameters<ConversationIntentClassifierPort['classify']>[0]) => {
+      if (input.rawText === '我现在要制作一个ppt，先讨论内容') return chatFixturePlan;
+      expect(input.rawText).toBe('随便生成吧，现在是测试');
+      expect(input.context.recentUserMessages).toEqual(['我现在要制作一个ppt，先讨论内容', '随便生成吧，现在是测试']);
+      expect(input.context.recentConversationMessages).toContainEqual({ role: 'user', content: '我现在要制作一个ppt，先讨论内容' });
+      return { schemaVersion: 1, kind: 'document', action: 'create', documentKind: 'ppt', parameters: { topic: '自选演示主题' },
+        sourcePolicy: 'none', missing: [], ambiguities: [], confidence: 'high', needsConfirmation: false };
+    });
+    const f = await setup({ classify }, true, threadFirst);
+    const discussion = await f.prepare(f.request('我现在要制作一个ppt，先讨论内容'));
+    expect(discussion.workflow?.plan.kind).toBe('chat');
+    expect(classify).toHaveBeenCalledOnce();
+    await f.service.settle(toConversationAgentRunId(discussion.agentSession.sessionId), 'completed');
+    f.runtime.discardPreparation(discussion.agentSession.sessionId);
+    const generation = await f.prepare(f.request('随便生成吧，现在是测试'));
+    expect(classify).toHaveBeenCalledTimes(2);
+    expect(generation).toMatchObject({ waiting: false, workflow: { status: 'ready', plan: {
+      kind: 'document', action: 'create', documentKind: 'ppt', parameters: {
+        topic: '自选演示主题'
+      }
+    } } });
+    expect((await f.getSession(generation.agentSession.sessionId)).planningBoundary).toBe('received');
+  });
+
+  it('fails closed when the production semantic route has no classifier', async () => {
+    const f = await setup(null, true, false);
+    await expect(f.prepare(f.request('随便生成吧，现在是测试'))).rejects.toMatchObject({ code: 'continuation_invalid' });
+    expect((await f.sessions.list())[0]).toMatchObject({ status: 'closed', closedReason: 'failed' });
+  });
+
   it('pins Thread-only clarification and continuation messages when Legacy saves fail', async () => {
     const f = await setup(undefined, true, true);
     const save = vi.spyOn(f.conversationsRepository, 'save').mockRejectedValue(new Error('Legacy denied'));
@@ -150,13 +182,13 @@ describe('Host conversation continuations', () => {
     expect(prepared.waiting).toBe(false);
     expect((await f.getSession(prepared.agentSession.sessionId)).budget).toMatchObject({ maxToolCalls: 8, budgetUnits: 24, deadlineAt: start + 360_000 });
   });
-  it('takes explicit complete generation through local planning without another model or confirmation', async () => {
-    const classifier = { classify: vi.fn(async () => { throw new Error('unnecessary classification'); }) };
+  it('uses one semantic plan for explicit complete generation without another confirmation', async () => {
+    const classifier = { classify: vi.fn(fixtureSemanticClassifier.classify) };
     const f = await setup(classifier), ready = await f.prepare(f.request('制作一份关于龙的传说的10页PPT'));
     expect(ready).toMatchObject({ waiting: false, agentSession: { state: 'running' } });
-    expect(classifier.classify).not.toHaveBeenCalled();
+    expect(classifier.classify).toHaveBeenCalled();
     const session = await f.getSession(ready.agentSession.sessionId);
-    expect(session).toMatchObject({ budget: { startedAt: start, deadlineAt: start + 360_000, maxToolCalls: 8, budgetUnits: 24 }, planningBoundary: 'not_started' });
+    expect(session).toMatchObject({ budget: { startedAt: start, deadlineAt: start + 360_000, maxToolCalls: 8, budgetUnits: 24 }, planningBoundary: 'received' });
     expect((await f.agentRuns.get(session.id))?.responseExecutionId).toBeUndefined();
     const child = await f.bind(ready);
     expect((await f.getSession(session.id)).childSegments).toHaveLength(2);
@@ -164,7 +196,7 @@ describe('Host conversation continuations', () => {
     expect(child.parentRunId).toBe(session.id);
   });
   it('reuses a host-confirmed workflow when Thread-first execution supplies its revision', async () => {
-    const classifier = { classify: vi.fn(async () => { throw new Error('workflow must not be replanned'); }) };
+    const classifier = { classify: vi.fn(fixtureSemanticClassifier.classify) };
     const f = await setup(classifier);
     const planned = await f.prepare(f.request('制作一份关于龙的传说的10页PPT'));
     expect(planned.workflow).toMatchObject({ status: 'ready' });
@@ -178,7 +210,7 @@ describe('Host conversation continuations', () => {
     });
     expect(replay.waiting).toBe(false);
     expect(replay.workflow?.id).toBe(planned.workflow!.id);
-    expect(classifier.classify).not.toHaveBeenCalled();
+    expect(classifier.classify).toHaveBeenCalled();
   });
   it('persists a missing topic and binds the answer to the same root and original deadline', async () => {
     const f = await setup(), waiting = await f.prepare(f.request('制作一个PPT'));
@@ -199,13 +231,13 @@ describe('Host conversation continuations', () => {
     await f.bind(resumed);
   });
   it('keeps successive discussion turns and a short approval on the native history route', async () => {
-    const classifier = { classify: vi.fn(async () => { throw new Error('duplicate semantic dispatch'); }) }, f = await setup(classifier);
+    const classifier = { classify: vi.fn(async () => chatFixturePlan) }, f = await setup(classifier);
     for (const content of ['我想做一个《交换A》的 PPT。', '主要讲两个家庭交换身份以后发生的冲突。', '人物关系和冲突重点一点。', '可以']) {
       const prepared = await f.prepare(f.request(content));
       expect(prepared.waiting).toBe(false);
       await f.service.settle(toConversationAgentRunId(prepared.agentSession.sessionId), 'completed'); f.runtime.discardPreparation(prepared.agentSession.sessionId);
     }
-    expect(classifier.classify).not.toHaveBeenCalled();
+    expect(classifier.classify).toHaveBeenCalled();
     expect((await f.conversations.get(f.conversation.id)).messages.filter(message => message.role === 'user').map(message => message.content)).toHaveLength(4);
   });
   it('keeps a bare acknowledgment waiting for the topic rather than treating it as complete authorization', async () => {
@@ -259,7 +291,7 @@ describe('Host conversation continuations', () => {
     await expect(f.runtime.validateReferences(session)).rejects.toMatchObject({ code: 'scope_mismatch' });
   });
   it('uses existing document identity to avoid asking which sole PPT should be revised', async () => {
-    const classifier = { classify: vi.fn(async () => { throw new Error('unnecessary classification'); }) };
+    const classifier = { classify: vi.fn(fixtureSemanticClassifier.classify) };
     const f = await setup(classifier);
     const base = await f.conversations.get(f.conversation.id);
     const withReply = addCompletedAssistantMessage(base, { id: toMessageId('fixture-artifact-message'), content: '已交付', createdAt: toIsoTimestamp(new Date(start).toISOString()) });
@@ -267,7 +299,7 @@ describe('Host conversation continuations', () => {
     await f.conversationsRepository.save(attachDocumentResultToMessage(withReply, withReply.messages.at(-1)!.id,
       { workId: toWorkId('fixture-ppt'), kind: 'ppt', fileName: '龙的传说.pptx', sizeBytes: 100 }, toIsoTimestamp(new Date(start).toISOString())), withReply.revision);
     const prepared = await f.prepare(f.request('把刚才的PPT标题改成龙的传说'));
-    expect(prepared.waiting).toBe(false); expect(classifier.classify).not.toHaveBeenCalled();
+    expect(prepared.waiting).toBe(false); expect(classifier.classify).toHaveBeenCalled();
     expect((await f.getSession(prepared.agentSession.sessionId)).budget).toMatchObject({ maxToolCalls: 12, budgetUnits: 32, deadlineAt: start + 540_000 });
   });
   it('cancels a persisted waiting task without leaving a resume challenge', async () => {
@@ -334,7 +366,7 @@ describe('Host conversation continuations', () => {
     expect((await f.sessions.list())[0]).toMatchObject({ status: 'needs_reconciliation', planningBoundary: 'submitted' });
   });
   it('closes a planner-only unknown result only after explicit confirmation while retaining its submitted evidence', async () => {
-    const f = await setup({ classify: vi.fn(async () => { throw new Error('planning lost reply'); }) });
+    const f = await setup({ classify: vi.fn().mockRejectedValueOnce(new Error('planning lost reply')).mockResolvedValue(chatFixturePlan) });
     await expect(f.prepare(f.request('把报告弄一下'))).rejects.toMatchObject({ code: 'continuation_invalid' });
     const unknown = (await f.sessions.list())[0];
     await expect(f.runtime.controller.cancel({ sessionId: unknown.id, expectedRevision: unknown.revision })).rejects.toMatchObject({ code: 'unknown_result' });

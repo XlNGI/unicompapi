@@ -3,7 +3,6 @@ import {
   DocumentDraftCompilationError,
   DocumentGenerationApplicationError,
   toDocumentGenerationApplicationInput,
-  toPrepareDeterministicDocumentRevisionInput,
   type DocumentGenerationApplicationService
 } from '../../application';
 import {
@@ -15,7 +14,6 @@ import {
 import type { Conversation, ConversationId } from '../../domain';
 import type {
   DocumentGenerationCancelResultDto,
-  DocumentDeterministicRevisionPrepareResultDto,
   DocumentGenerationFromConversationDto,
   DocumentGenerationIpcErrorCode,
   DocumentGenerationIpcResult,
@@ -51,31 +49,6 @@ export class DocumentGenerationController {
   constructor(
     private readonly dependencies: DocumentGenerationControllerDependencies
   ) {}
-
-  prepareDeterministicRevision(
-    request: unknown
-  ): Promise<
-    DocumentGenerationIpcResult<DocumentDeterministicRevisionPrepareResultDto>
-  > {
-    return this.execute(async () => {
-      const input = documentGenerationRequestParsers
-        .prepareDeterministicRevision(request);
-      const session = this.requireSession();
-      const result = await this.dependencies
-        .getApplication(session)
-        .prepareDeterministicRevision(
-          toPrepareDeterministicDocumentRevisionInput(input)
-        );
-      return {
-        ok: true,
-        value: {
-          conversationId: result.conversationId,
-          expectedRevision: result.expectedRevision,
-          messageId: result.messageId
-        }
-      };
-    });
-  }
 
   prepareGeneration(
     request: unknown

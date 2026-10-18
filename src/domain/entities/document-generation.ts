@@ -95,24 +95,25 @@ export interface DocumentMessageResult {
 }
 
 /** A locally verified artifact retained after the response stopped or failed. */
-export interface RetainedDocumentMessageResult {
+export type RetainedDocumentMessageResult = {
   readonly workId: WorkId;
   readonly fileName: string;
-  readonly kind: 'ppt';
   readonly sizeBytes: number;
-  readonly actualPageCount: number;
-  /** Total-page planning goal from the host's successful publication receipt. */
-  readonly planningTargetTotalPages?: number;
-}
+} & ({ readonly kind: 'ppt'; readonly actualPageCount: number; readonly planningTargetTotalPages?: number }
+  | { readonly kind: 'word' | 'excel'; readonly actualPageCount?: never; readonly planningTargetTotalPages?: never });
 
 export function parseRetainedDocumentMessageResult(value: unknown): RetainedDocumentMessageResult {
   if (!isRecord(value)) throw new TypeError('message.retainedDocumentResult must be an object');
-  requireExactKeys(value, ['workId', 'fileName', 'kind', 'sizeBytes', 'actualPageCount',
+  requireExactKeys(value, ['workId', 'fileName', 'kind', 'sizeBytes', ...(value.kind === 'ppt' ? ['actualPageCount'] : []),
     ...(value.planningTargetTotalPages === undefined ? [] : ['planningTargetTotalPages'])]);
   const result = parseDocumentMessageResult({ workId: value.workId, fileName: value.fileName,
     kind: value.kind, sizeBytes: value.sizeBytes });
-  if (result.kind !== 'ppt' || result.sizeBytes < 1 || /[\u0000-\u001f\\/]/u.test(result.fileName)) {
+  if (result.sizeBytes < 1 || /[\u0000-\u001f\\/]/u.test(result.fileName) || !result.fileName.toLowerCase().endsWith(documentWorkspaceKindExtensions[result.kind])) {
     throw new TypeError('message.retainedDocumentResult artifact is invalid');
+  }
+  if (result.kind !== 'ppt') {
+    if (value.planningTargetTotalPages !== undefined) throw new TypeError('Page goals require a presentation');
+    return { workId: result.workId, fileName: result.fileName, kind: result.kind, sizeBytes: result.sizeBytes };
   }
   const pageCount = (input: unknown): number => {
     if (!Number.isSafeInteger(input) || (input as number) < 1 ||

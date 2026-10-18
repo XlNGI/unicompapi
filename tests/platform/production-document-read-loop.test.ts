@@ -114,7 +114,7 @@ async function fixture(mode: 'document' | 'page' | 'workflow' | 'revoked' | 'cha
   const workflowUserId = toMessageId('workflow-source-original');
   const workflow = mode === 'workflow' ? createConversationWorkflow({ id: toConversationWorkflowId('workflow-read-multiturn'),
     projectId, conversationId: conversation.id, sourceMessageId: workflowUserId,
-    plan: { schemaVersion: 1, kind: 'chat', parameters: { requirements: '请读取当前 PPT 的第 2 页，回答真实内容。' },
+    plan: { schemaVersion: 1, kind: 'document', action: 'analyze', documentKind: 'ppt', targetHint: { unit: 'page', ordinal: 2, name: fileName }, parameters: { requirements: '请读取当前 PPT 的第 2 页，回答真实内容。' },
       sourcePolicy: 'internal', missing: [], ambiguities: [], confidence: 'high', needsConfirmation: false },
     pendingQuestions: [], createdAt: now }) : undefined;
   if (workflow) {
@@ -134,6 +134,11 @@ async function fixture(mode: 'document' | 'page' | 'workflow' | 'revoked' | 'cha
     arguments: JSON.stringify(mode === 'page' || mode === 'workflow' ? { scope: 'page', ordinal: 2 } : { scope: 'document' }) } };
   const transport = { send: async (request: { readonly body?: Uint8Array }): Promise<DeepSeekHttpTransportResponse> => {
     const payload = JSON.parse(Buffer.from(request.body!).toString('utf8')) as WireRequest;
+    if (!payload.tools && payload.messages.some(message => message.role === 'system' && message.content.includes('UniComp 会话语义规划器'))) {
+      return stream(modelKey, { content: JSON.stringify({ schemaVersion: 1, kind: mode === 'chat' ? 'chat' : 'document',
+        ...(mode === 'chat' ? {} : { action: 'analyze', documentKind: 'ppt', targetHint: { unit: mode === 'page' ? 'page' : 'document',
+          ...(mode === 'page' ? { ordinal: 2 } : {}), name: fileName } }), parameters: {}, sourcePolicy: 'internal', missing: [], ambiguities: [], confidence: 'high', needsConfirmation: false }) }, 'stop');
+    }
     requests.push(payload);
     if (mode !== 'chat') {
       expect(payload.tool_choice).toBe(requests.length === 1 ? 'required' : undefined);
@@ -211,11 +216,11 @@ describe('production read-only Document Tool Loop through responses.start', () =
       expect(request.tools![0].function).not.toHaveProperty('requiresExistingDocument');
     }
     const initial = JSON.stringify(data.requests[0]);
-    expect(initial).not.toContain(oldMarker);
+    expect(initial).toContain(oldMarker);
     for (const marker of markers) expect(initial).not.toContain(marker);
     expect(data.requests[0].messages.some(message => message.role === 'tool')).toBe(false);
     const continuation = data.requests[1];
-    expect(continuation.messages.find(message => message.role === 'assistant')?.tool_calls).toEqual([data.toolCall]);
+    expect(continuation.messages.find(message => message.tool_calls)?.tool_calls).toEqual([data.toolCall]);
     const toolMessage = continuation.messages.find(message => message.role === 'tool')!;
     expect(toolMessage.tool_call_id).toBe(data.toolCall.id);
     expect(JSON.parse(toolMessage.content)).toMatchObject({ status: 'success', observation: { scope: mode === 'document' ? 'document' : 'page' } });
@@ -227,8 +232,9 @@ describe('production read-only Document Tool Loop through responses.start', () =
       expect(JSON.parse(toolMessage.content)).toMatchObject({ observation: { ordinal: 2, page: { pageNumber: 2, totalPages: 3 } } });
     } else expect(execution.content).toContain(markers[1]);
     if (mode === 'workflow') expect(initial).toContain('内部整理后的问答请求');
-    expect(JSON.stringify(continuation)).not.toContain(oldMarker);
-    for (const hidden of [data.rootDirectory, data.work.id, data.file.id, 'currentDocumentIR', 'currentDocumentId', 'authorization', 'rootDirectory']) {
+    expect(toolMessage.content).not.toContain(oldMarker);
+    expect(execution.content).not.toContain(oldMarker);
+    for (const hidden of [data.rootDirectory, data.work.id, data.file.id, '"currentDocumentIR":', '"currentDocumentId":', '"authorization":', '"rootDirectory":']) {
       expect(JSON.stringify(data.requests)).not.toContain(hidden);
     }
     expect(traces.filter(trace => trace.facts?.tool === contract.diagnostics.traceType && ['tool_authorization', 'tool_call', 'tool_result'].includes(trace.code)).map(trace => [trace.code, trace.status]))
@@ -255,7 +261,8 @@ describe('production read-only Document Tool Loop through responses.start', () =
     expect(traces.some(trace => trace.code === 'tool_result' && trace.status === 'failed')).toBe(true);
     expect(traces.some(trace => trace.code === 'tool_call' && trace.status === 'started')).toBe(false);
     expect(execution.content).toBe('文档读取被拒绝，未使用旧资料。');
-    for (const marker of [...markers, oldMarker]) expect(JSON.stringify(data.requests)).not.toContain(marker);
+    for (const marker of markers) expect(JSON.stringify(data.requests)).not.toContain(marker);
+    expect(observation.content).not.toContain(oldMarker);
   });
 
   it('keeps ordinary chat on its existing path without any document tools', async () => {

@@ -6,12 +6,12 @@ import { toConversationId } from '../../domain';
 import { DocumentGenerationApplicationError } from '../../application/document-generation-service';
 import { mappedPresentationTarget, type PresentationRevisionMap } from '../../application/presentation-revision-map';
 import { JsonExecutionRepository, JsonFileReferenceRepository, JsonTaskRepository, JsonWorkRepository } from '../repositories/json-repositories';
-import { JsonConversationWorkflowRepository } from '../repositories/json-conversation-workflow-repository';
-import { JsonConversationResponseExecutionRepository } from '../repositories/json-conversation-response-execution-repository';
-import type { GenerateDocumentFromMessageInput } from '../../application/document-generation-service';
+
+
+
 import { JsonProjectConversationRepository } from '../repositories/json-project-conversation-repository';
 import { parseDocumentOutline } from './document-outline-parser';
-import { ConversationDocumentPageError } from './conversation-document-page-context';
+import { ConversationDocumentPageError } from './conversation-document-error';
 import { NodeProjectStorage, toProjectRelativePath } from '../storage';
 import { resolveFileReferencePathSafely } from '../files/file-paths';
 import { readPptxDocument, type PptxPhysicalPage } from './pptx-page-reader';
@@ -107,18 +107,6 @@ export function createPresentationWorkflowScope(options: { rootDirectory: string
   }
   return {
     canRetryMessage,
-    async validatePresentationSelection(input: GenerateDocumentFromMessageInput, map: PresentationRevisionMap, target: { unit: 'page' | 'section'; ordinal: number }) {
-      const executions = await new JsonConversationResponseExecutionRepository(storage, options.projectId).list(input.conversationId);
-      const execution = executions.find((item) => item.snapshot.assistantMessageId === input.messageId);
-      const workflows = await new JsonConversationWorkflowRepository(storage, options.projectId).list(input.conversationId);
-      const workflow = workflows.find((item) => item.plan.action === 'revise' &&
-        (item.deliveries?.some((delivery) => delivery.resultMessageId === input.messageId) || (execution && item.executionId === execution.id)));
-      const selected = workflow?.resolvedTarget?.presentation;
-      const actual = (() => { try { return mappedPresentationTarget(map, target); } catch { throw scopeError(); } })();
-      if (!selected || selected.workId !== input.parentWorkId || selected.checksumSha256 !== map.checksumSha256 ||
-        selected.unit !== target.unit || selected.ordinal !== target.ordinal || selected.heading !== actual.sectionHeading ||
-        JSON.stringify(selected.pages) !== JSON.stringify(actual.pages)) throw scopeError();
-    },
     async resolve(conversationId: ConversationId, artifactRef: string, plan: ConversationIntentPlan) {
       if (plan.kind !== 'document' || plan.action !== 'revise' || !plan.targetHint?.ordinal ||
         !['page', 'section'].includes(plan.targetHint.unit)) return undefined;

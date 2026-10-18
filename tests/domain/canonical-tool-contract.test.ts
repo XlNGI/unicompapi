@@ -41,7 +41,7 @@ describe('canonical document tool contracts', () => {
       expect(contract.execution.timeoutMs).toBeGreaterThan(0);
       expect(contract.execution.budgetUnits).toBeGreaterThan(0);
       expect(contract.diagnostics.failureCodes).toContain('invalid_tool_arguments');
-      if (!['read_document_structure', 'generate_pptx', 'update_element', 'add_element', 'delete_element', 'add_slide'].includes(contract.toolId)) {
+      if (!['read_document_structure', 'generate_pptx', 'generate_docx', 'generate_xlsx', 'revise_presentation', 'revise_office', 'update_element', 'add_element', 'delete_element', 'add_slide'].includes(contract.toolId)) {
         expect(contract.exposure).toBe('internal');
         expect(contract.input.fields).toEqual({});
       }
@@ -144,7 +144,7 @@ describe('canonical document tool contracts', () => {
   });
 
   it('permits querying a newly initialized and bound IR without forcing file parsing', () => {
-    expect(deriveAvailableToolSet(registry, { ...context, operation: 'create', currentDocumentIR: { operation: 'create', attachmentRefs: [] } }).map(item => item.toolId)).toEqual(['read_document_structure', 'generate_pptx']);
+    expect(deriveAvailableToolSet(registry, { ...context, operation: 'create', currentDocumentIR: { operation: 'create', attachmentRefs: [] } }).map(item => item.toolId)).toEqual(['generate_docx', 'generate_xlsx', 'read_document_structure', 'generate_pptx']);
   });
 
   it('checks write authorization and explicit operation restrictions from the contract', () => {

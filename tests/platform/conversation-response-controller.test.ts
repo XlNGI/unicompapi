@@ -38,7 +38,7 @@ import {
   toResponseDraftDto,
   type ConversationResponseControllerRuntime
 } from '../../src/platform';
-import { ConversationDocumentPageError } from '../../src/platform/documents/conversation-document-page-context';
+
 
 const projectId = toProjectId('project-response-controller');
 const createdAt = toIsoTimestamp('2026-08-18T00:00:00.000Z');
@@ -67,7 +67,7 @@ function execution(
   };
 }
 
-function fixture(documentPages?: ConversationResponseControllerRuntime['documentPages'], userContent = 'hello', userDisplayContent?: string) {
+function fixture(documentPages?: { resolve: (...args: unknown[]) => Promise<unknown> }, userContent = 'hello', userDisplayContent?: string) {
   const traceRoot = mkdtempSync(path.join(os.tmpdir(), 'unicomp-response-controller-'));
   traceRoots.push(traceRoot);
   const base = createConversation({
@@ -166,7 +166,6 @@ function fixture(documentPages?: ConversationResponseControllerRuntime['document
     },
     streamChannel: {},
     workflowService,
-    documentPages,
     ready: Promise.resolve(),
     start: vi.fn(async () => startedExecution)
   } as unknown as ConversationResponseControllerRuntime;
@@ -607,7 +606,7 @@ describe('ConversationResponseController', () => {
 
   it('keeps a reusable conversation grant eligible without claiming offline creation', async () => {
     const f = fixture();
-    const workflow = { ...f.readyWorkflow, plan: { ...f.readyWorkflow.plan, kind: 'document' as const, action: 'create' as const, documentKind: 'ppt' as const } };
+    const workflow = { ...f.readyWorkflow, plan: { ...f.readyWorkflow.plan, kind: 'document' as const, sourcePolicy: 'web' as const, action: 'create' as const, documentKind: 'ppt' as const } };
     f.workflowService.get.mockResolvedValue(workflow);
     const native = { prepare: vi.fn(async () => undefined), allowsConversation: vi.fn(async () => true) };
     Object.assign(f.runtime, { nativeSearch: native });
@@ -619,9 +618,9 @@ describe('ConversationResponseController', () => {
     expect(f.service.ensureLocalReply).not.toHaveBeenCalled();
   });
 
-  it.each(['不要联网', '不需要联网', '取消网络搜索', '关闭联网', '只使用内部资料'])('honors %s before considering reusable grants', async (content) => {
+  it.each(['不要联网', '不需要联网', '取消网络搜索', '关闭联网', '只使用内部资料'])('uses the returned internal source policy for %s without local semantic parsing', async (content) => {
     const f = fixture(undefined, content);
-    const workflow = { ...f.readyWorkflow, plan: { ...f.readyWorkflow.plan, kind: 'document' as const, sourcePolicy: 'web' as const, action: 'create' as const, documentKind: 'ppt' as const } };
+    const workflow = { ...f.readyWorkflow, plan: { ...f.readyWorkflow.plan, kind: 'document' as const, sourcePolicy: 'internal' as const, action: 'create' as const, documentKind: 'ppt' as const } };
     f.workflowService.get.mockResolvedValue(workflow);
     const native = { revoke: vi.fn(async () => undefined), prepare: vi.fn(), allowsConversation: vi.fn(async () => true) };
     Object.assign(f.runtime, { nativeSearch: native });
@@ -649,15 +648,15 @@ describe('ConversationResponseController', () => {
     expect(f.draftRepository.create).toHaveBeenCalledWith(expect.objectContaining({ conversationRevision: disclosed.revision }));
   });
 
-  it('pins an explicit image question for main-process reading without exposing internal routing in the DTO', async () => {
+  it('does not infer an image reference from prose without a registered attachment', async () => {
     const value = fixture(undefined, '分析一下图片');
     const result = await value.controller.start({ ...startRequest(), content: '分析一下图片' });
     expect(result.ok).toBe(true);
-    expect(value.draftRepository.create).toHaveBeenCalledWith(expect.objectContaining({ imageQuery: '分析一下图片' }));
+    expect(value.draftRepository.create).toHaveBeenCalledWith(expect.not.objectContaining({ imageQuery: expect.anything() }));
     expect(JSON.stringify(result)).not.toContain('imageQuery');
   });
 
-  it.each(['content', 'matching displayContent'] as const)('preflights and pins the stored %s page query through the legacy createDraft entry', async (source) => {
+  it.each(['content', 'matching displayContent'] as const)('keeps the stored %s draft free of local page-intent interpretation', async (source) => {
     const query = '第 5 页讲了什么？';
     const documentPages = { resolve: vi.fn(async () => [{ sourceId: 'delivered-work', sourceType: 'project' as const,
       contentHash: 'a'.repeat(64), excerpt: '实际第 5 页：现金流风险' }]) };
@@ -668,13 +667,8 @@ describe('ConversationResponseController', () => {
       userMessageId: 'message-user-controller', productFeature: 'text_chat'
     });
     expect(result).toMatchObject({ ok: true });
-    expect(documentPages.resolve).toHaveBeenCalledWith(expect.objectContaining({
-      currentUserMessageId: 'message-user-controller', query
-    }));
-    expect(value.draftRepository.create).toHaveBeenCalledWith(expect.objectContaining({
-      attachmentQuery: query, documentPageQuery: query
-    }));
-    expect(documentPages.resolve.mock.invocationCallOrder[0]).toBeLessThan(value.draftRepository.create.mock.invocationCallOrder[0]);
+    expect(documentPages.resolve).not.toHaveBeenCalled();
+    expect(value.draftRepository.create).toHaveBeenCalledWith(expect.objectContaining({ attachmentQuery: query }));
     expect(result.ok && result.value).not.toHaveProperty('documentPageQuery');
     expect(value.candidateService.prepareSubmission).not.toHaveBeenCalled();
     expect(value.runtime.start).not.toHaveBeenCalled();
@@ -705,40 +699,24 @@ describe('ConversationResponseController', () => {
     expect(value.runtime.start).toHaveBeenCalledOnce();
   });
 
-  it('rejects an unavailable page before legacy createDraft can persist a draft', async () => {
-    const documentPages = { resolve: vi.fn(async () => {
-      throw new ConversationDocumentPageError('document_page_out_of_range', '该 PPT 没有第 5 页。');
-    }) };
+  it('defers page selection until a semantic plan instead of reading prose during draft creation', async () => {
+    const documentPages = { resolve: vi.fn(async () => { throw new Error('Unexpected local page preflight'); }) };
     const value = fixture(documentPages, '第 5 页讲了什么？');
-    expect(await value.controller.createDraft({
-      conversationId: 'conversation-controller', expectedRevision: 1,
-      userMessageId: 'message-user-controller', productFeature: 'text_chat'
-    })).toMatchObject({ ok: false, error: { code: 'document_page_out_of_range' } });
-    expect(documentPages.resolve).toHaveBeenCalledOnce();
-    expect(value.draftRepository.create).not.toHaveBeenCalled();
+    expect(await value.controller.createDraft({ conversationId: 'conversation-controller', expectedRevision: 1,
+      userMessageId: 'message-user-controller', productFeature: 'text_chat' })).toMatchObject({ ok: true });
+    expect(documentPages.resolve).not.toHaveBeenCalled();
+    expect(value.draftRepository.create).toHaveBeenCalledOnce();
     expect(value.candidateService.prepareSubmission).not.toHaveBeenCalled();
     expect(value.runtime.start).not.toHaveBeenCalled();
   });
 
-  it('stops a missing generated PPT page before draft creation, candidate authorization or dispatch', async () => {
-    const documentPages = { resolve: vi.fn(async () => {
-      throw new ConversationDocumentPageError('document_page_out_of_range', '该 PPT 没有第 5 页。');
-    }) };
+  it('does not interpret page prose before the semantic execution route', async () => {
+    const documentPages = { resolve: vi.fn(async () => { throw new Error('Unexpected local page preflight'); }) };
     const value = fixture(documentPages);
-    const result = await value.controller.start({ ...startRequest(), content: '第 5 页讲了什么？' });
-    expect(result).toMatchObject({ ok: false, error: { code: 'document_page_out_of_range', message: '该 PPT 没有第 5 页。' } });
-    expect(documentPages.resolve).toHaveBeenCalledOnce();
-    expect(value.draftRepository.create).not.toHaveBeenCalled();
-    expect(value.candidateService.prepareSubmission).not.toHaveBeenCalled();
-    expect(value.runtime.start).not.toHaveBeenCalled();
-  });
-
-  it('persists the trusted page query after successful local page preflight', async () => {
-    const documentPages = { resolve: vi.fn(async () => [{ sourceId: 'delivered-work', sourceType: 'project' as const,
-      contentHash: 'a'.repeat(64), excerpt: '实际第 5 页：现金流风险' }]) };
-    const value = fixture(documentPages, '第 5 页讲了什么？');
     expect(await value.controller.start({ ...startRequest(), content: '第 5 页讲了什么？' })).toMatchObject({ ok: true });
-    expect(value.draftRepository.create).toHaveBeenCalledWith(expect.objectContaining({ documentPageQuery: '第 5 页讲了什么？' }));
+    expect(documentPages.resolve).not.toHaveBeenCalled();
+    expect(value.draftRepository.create).toHaveBeenCalledWith(expect.not.objectContaining({ documentPageQuery: expect.anything() }));
+    expect(value.runtime.start).toHaveBeenCalledOnce();
   });
   it('projects a provider completion that raced ahead of workflow execution binding', async () => {
     const value = fixture();

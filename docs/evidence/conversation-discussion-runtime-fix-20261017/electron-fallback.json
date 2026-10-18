@@ -1,0 +1,120 @@
+{
+  "schemaVersion": 1,
+  "status": "passed",
+  "boundary": "real Electron BrowserWindow + production preload + production IPC + controlled in-process Provider transport",
+  "checks": [
+    "normal Agent response",
+    "persistent execution identity",
+    "cancel start boundary",
+    "Provider tool call through the real Electron IPC path",
+    "Word physical file generation",
+    "Excel physical file generation"
+  ],
+  "requestCount": 16,
+  "artDirectionRequestCount": 3,
+  "abortCount": 0,
+  "toolCalling": {
+    "state": "completed",
+    "toolCallCount": 1,
+    "toolCallId": "mock-generate-pptx-1",
+    "observationReturned": true,
+    "artifactRegistered": true,
+    "generatedWorkCount": 1,
+    "autonomousDesignExecuted": false,
+    "designPath": "legacy-fallback",
+    "fallbackReason": "art_direction_invalid",
+    "documentResult": {
+      "workId": "work-document-2c641372-234e-4419-855b-b3298735d848",
+      "fileName": "Electron Tool Calling 验收-20261017130152-0ba7c5cb-42e1-4b13-9bb1-91e2adc5cee6.pptx",
+      "kind": "ppt",
+      "sizeBytes": 63195
+    },
+    "threadDocumentReceipt": {
+      "fileName": "Electron Tool Calling 验收-20261017130152-0ba7c5cb-42e1-4b13-9bb1-91e2adc5cee6.pptx",
+      "kind": "ppt",
+      "sizeBytes": 63195,
+      "workId": "work-document-2c641372-234e-4419-855b-b3298735d848"
+    },
+    "threadToolParentState": "completed",
+    "entry": "responses.startAgent",
+    "threadToolFacts": [
+      {
+        "itemType": "tool_call_projection",
+        "status": "completed",
+        "eventSystem": "agent_runtime",
+        "responseExecutionId": "response-execution-5cfcf233-e200-4fe6-a50c-5c3c4fcc4995"
+      },
+      {
+        "itemType": "tool_result_projection",
+        "status": "completed",
+        "eventSystem": "agent_runtime",
+        "responseExecutionId": "response-execution-5cfcf233-e200-4fe6-a50c-5c3c4fcc4995"
+      },
+      {
+        "itemType": "tool_call_projection",
+        "status": "completed",
+        "eventSystem": "agent_runtime",
+        "responseExecutionId": "response-execution-5cfcf233-e200-4fe6-a50c-5c3c4fcc4995"
+      },
+      {
+        "itemType": "tool_result_projection",
+        "status": "completed",
+        "eventSystem": "agent_runtime",
+        "responseExecutionId": "response-execution-5cfcf233-e200-4fe6-a50c-5c3c4fcc4995"
+      }
+    ],
+    "threadArtifact": {
+      "workId": "work-document-2c641372-234e-4419-855b-b3298735d848",
+      "fileName": "Electron Tool Calling 验收-20261017130152-0ba7c5cb-42e1-4b13-9bb1-91e2adc5cee6.pptx",
+      "kind": "ppt",
+      "sizeBytes": 63195
+    }
+  },
+  "threadRuntimeControls": true,
+  "discussionCases": [
+    {
+      "case": "discussion-sky-content",
+      "state": "completed",
+      "registeredNewWorks": 0,
+      "semanticPlannerCalls": 0,
+      "writeToolsExposed": false,
+      "externalProviderCalls": 0
+    },
+    {
+      "case": "discussion-reject-generation",
+      "state": "completed",
+      "registeredNewWorks": 0,
+      "semanticPlannerCalls": 0,
+      "writeToolsExposed": false,
+      "externalProviderCalls": 0
+    },
+    {
+      "case": "discussion-existing-ppt",
+      "state": "completed",
+      "registeredNewWorks": 0,
+      "semanticPlannerCalls": 0,
+      "writeToolsExposed": false,
+      "externalProviderCalls": 0
+    }
+  ],
+  "office": {
+    "word": {
+      "workId": "work-document-7f04719f-8a20-4a41-ab21-627e2b4cc57d",
+      "fileName": "原生 Office 端到端验收-20261017130205-7bff0832-bd32-457e-a144-2e23fb34eeec.docx",
+      "kind": "word",
+      "sizeBytes": 8842,
+      "nativeBusinessTool": true,
+      "threadArtifact": true
+    },
+    "excel": {
+      "workId": "work-document-b2009ae5-4ba8-4585-92aa-0193129830d7",
+      "fileName": "原生 Office 端到端验收-20261017130213-15949636-181b-4def-a438-bf0b41af4189.xlsx",
+      "kind": "excel",
+      "sizeBytes": 6787,
+      "nativeBusinessTool": true,
+      "threadArtifact": true
+    }
+  },
+  "externalProvider": "blocked: no authorized external credentials used",
+  "externalProviderCalls": 0
+}

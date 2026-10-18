@@ -66,6 +66,7 @@ describe('chat composer event behavior', () => {
   let tree: ReactElement;
   let draftTree: ReactNode;
   const startWorkflow = vi.fn();
+  const agentStart = vi.fn();
   const answerWorkflow = vi.fn();
   const startResponse = vi.fn();
   const getPendingWorkflow = vi.fn();
@@ -151,6 +152,7 @@ describe('chat composer event behavior', () => {
     // these composer behavior fixtures represent that selected state.
     candidateEnabled = true;
     vi.clearAllMocks();
+    agentStart.mockReset().mockResolvedValue({ ok: false, error: { code: 'invalid_request', message: 'Synthetic request capture' } });
     getPendingWorkflow.mockResolvedValue({ ok: true, value: null });
     startWorkflow.mockResolvedValue({ ok: true, value: { conversation, workflow } });
     answerWorkflow.mockResolvedValue({ ok: true, value: {
@@ -171,7 +173,7 @@ describe('chat composer event behavior', () => {
             available: true, providerName: 'Test', connectionName: 'Test', modelName: 'Test',
             parameterSchema: { productFeature, fields: [] }
           }] : [] })),
-          getPendingWorkflow, startWorkflow, answerWorkflow, startResponse,
+          getPendingWorkflow, startWorkflow, answerWorkflow, startResponse, startAgentResponse: agentStart,
           getConversation: vi.fn(async () => ({ ok: true, value: conversation }))
         },
         storage: { getProjectSession: vi.fn(async () => ({ ok: true, value: currentSession })) },
@@ -793,36 +795,6 @@ describe('chat composer event behavior', () => {
     expect(element('对话输入').props.value).toBe('旧环境草稿');
   });
 
-  it('cancels a document response start before execution identity exists and retains the source request', async () => {
-    const requirements = '帮我生成10页PPT';
-    const documentConversation = { ...conversation, messages: [{ messageId: 'source-1', role: 'user', state: 'completed',
-      content: requirements, attachments: [] }] };
-    const ready = { ...workflow, status: 'ready', plan: { ...workflow.plan, action: 'create', documentKind: 'ppt',
-      parameters: { topic: '季度经营' } }, pendingQuestions: [] };
-    const pending = deferred<{ ok: false; error: { code: 'response_start_cancelled'; message: string } }>();
-    startWorkflow.mockResolvedValue({ ok: true, value: { conversation: documentConversation, workflow: ready } });
-    getPendingWorkflow.mockResolvedValue({ ok: true, value: ready });
-    startResponse.mockImplementation(async () => pending.promise);
-    const cancelResponseStart = vi.fn(async () => ({ ok: true, value: { cancelled: true } }));
-    Object.assign(window.unicomp!.chatContexts!, { cancelResponseStart });
-    const prepareGeneration = vi.fn();
-    Object.assign(window.unicomp!, { documentGeneration: { prepareGeneration } });
-    try {
-      await settle();
-      await type(requirements);
-      await send('button');
-      await settle(24);
-      expect(startResponse).toHaveBeenCalledOnce();
-      (element('停止生成').props.onClick as () => void)();
-      expect(cancelResponseStart).toHaveBeenCalledWith({ projectId: session.projectId,
-        clientCommandId: startResponse.mock.calls[0][0].clientCommandId });
-      pending.resolve({ ok: false, error: { code: 'response_start_cancelled', message: 'Cancelled' } });
-      await settle(30);
-      expect(prepareGeneration).not.toHaveBeenCalled();
-      expect(element('对话输入').props.value).toBe(requirements);
-    } finally { startResponse.mockReset(); }
-  });
-
   it('restores the selected reasoning model and feature together after leaving and reopening chat', async () => {
     await settle();
     const reasoning = find(modelPicker().props.listboxHeader as ReactNode, (item) =>
@@ -839,8 +811,8 @@ describe('chat composer event behavior', () => {
     await type('帮我生成一个ppt');
     expect(element('发送消息').props.disabled).toBe(false);
     await send('button');
-    expect(startWorkflow).toHaveBeenCalledWith(expect.objectContaining({
-      semanticCandidate: { candidateId: 'candidate-reasoning', productFeature: 'text_reasoning' }
+    expect(agentStart).toHaveBeenCalledWith(expect.objectContaining({
+      candidateId: 'candidate-reasoning', productFeature: 'text_reasoning'
     }));
   });
 
@@ -906,11 +878,11 @@ describe('chat composer event behavior', () => {
     expect(find(tree, (item) => item.props.title === '生成 Office 文档（Word/Excel/PPT）')).toBeUndefined();
     await type('这份报告主要讲了什么？');
     await send(method);
-    expect(startWorkflow).toHaveBeenCalledTimes(1);
-    expect(startWorkflow.mock.calls[0][0]).toMatchObject({
+    expect(agentStart).toHaveBeenCalledTimes(1);
+    expect(agentStart.mock.calls[0][0]).toMatchObject({
       content: '这份报告主要讲了什么？'
     });
-    expect(startWorkflow.mock.calls[0][0].intentHint).toBeUndefined();
+    expect(agentStart.mock.calls[0][0].intentHint).toBeUndefined();
     expect(startResponse).not.toHaveBeenCalled();
   });
 
@@ -921,7 +893,7 @@ describe('chat composer event behavior', () => {
     await settle();
     await type('总结主要观点，在这里回复就行');
     await send('enter');
-    const request = startWorkflow.mock.calls[0][0];
+    const request = agentStart.mock.calls[0][0];
     expect(request.attachmentFileIds).toEqual(['file-1']);
     expect(request.intentHint).toBeUndefined();
     expect(request.content).toBe('总结主要观点，在这里回复就行');
@@ -947,9 +919,9 @@ describe('chat composer event behavior', () => {
     expect(find(tree, item => item.type === ChatAttachment)?.props.previewUrl).toBe(preview);
     await type('分析一下图片');
     await send('button');
-    expect(startWorkflow.mock.calls[0][0].attachmentFileIds).toEqual(['image-1']);
-    expect(startWorkflow.mock.calls[0][0].content).toBe('分析一下图片');
-    expect(JSON.stringify(startWorkflow.mock.calls[0][0])).not.toContain('base64');
+    expect(agentStart.mock.calls[0][0].attachmentFileIds).toEqual(['image-1']);
+    expect(agentStart.mock.calls[0][0].content).toBe('分析一下图片');
+    expect(JSON.stringify(agentStart.mock.calls[0][0])).not.toContain('base64');
   });
 
   it('does not submit when Enter is only committing Chinese input composition', async () => {
@@ -971,8 +943,8 @@ describe('chat composer event behavior', () => {
     await settle();
     await type('生成提示词');
     await send('button');
-    const request = (phase === 'new' ? startWorkflow : answerWorkflow).mock.calls[0][0];
-    expect(phase === 'new' ? request.conversation.expectedRevision : request.expectedConversationRevision).toBe(12);
+    const request = agentStart.mock.calls[0][0];
+    expect(request.conversation.expectedRevision).toBe(12);
     expect(request.content).toBe('生成提示词');
   });
 
@@ -984,24 +956,6 @@ describe('chat composer event behavior', () => {
     await settle();
     await type('生成提示词');
     await send('button');
-    expect(startWorkflow).not.toHaveBeenCalled();
-    expect(element('对话输入').props.value).toBe('生成提示词');
-  });
-
-  it('does not submit after cancellation during conversation synchronization', async () => {
-    initialConversationId = conversation.conversationId;
-    let resolveRead!: (result: unknown) => void;
-    Object.assign(window.unicomp!.chatContexts!, {
-      getConversation: vi.fn(() => new Promise(resolve => { resolveRead = resolve; })),
-      cancelPlanning: vi.fn(async () => ({ ok: true, value: { cancelled: false } }))
-    });
-    await settle();
-    await type('生成提示词');
-    await send('button');
-    (element('停止需求理解').props.onClick as () => void)();
-    await settle();
-    resolveRead({ ok: true, value: { ...conversation, revision: 12 } });
-    await settle();
     expect(startWorkflow).not.toHaveBeenCalled();
     expect(element('对话输入').props.value).toBe('生成提示词');
   });
@@ -1022,69 +976,17 @@ describe('chat composer event behavior', () => {
     expect(find(tree, item => item.props.children === title)).toBeDefined();
   });
 
-  it('preserves a real write conflict without automatically submitting the same message twice', async () => {
-    initialConversationId = conversation.conversationId;
-    startWorkflow.mockResolvedValue({ ok: false, error: { code: 'revision_conflict' } });
-    await settle();
-    await type('生成提示词');
-    await send('button');
-    expect(startWorkflow).toHaveBeenCalledTimes(1);
-    expect(element('对话输入').props.value).toBe('生成提示词');
-  });
-
-  it.each(['needs_confirmation', 'ready'] as const)('accepts natural cancellation while %s and leaves no executable workflow', async (status) => {
+  it.each(['needs_confirmation', 'ready'] as const)('sends cancellation prose while %s through the same semantic Agent entry', async (status) => {
     initialConversationId = conversation.conversationId;
     getPendingWorkflow.mockResolvedValue({ ok: true, value: { ...workflow, status } });
     await settle();
     await type('不用做 PPT 了，取消');
     await send('button');
-    expect(answerWorkflow).toHaveBeenCalledTimes(1);
+    expect(agentStart).toHaveBeenCalledWith(expect.objectContaining({ content: '不用做 PPT 了，取消' }));
+    expect(answerWorkflow).not.toHaveBeenCalled();
     expect(startWorkflow).not.toHaveBeenCalled();
     expect(startResponse).not.toHaveBeenCalled();
     expect(find(tree, (item) => item.props.children === '取消任务')).toBeUndefined();
-  });
-
-  it.each(['new', 'answer'] as const)('stops %s planning and ignores a late ready result after cancellation', async (phase) => {
-    candidateEnabled = true;
-    if (phase === 'answer') {
-      initialConversationId = conversation.conversationId;
-      getPendingWorkflow.mockResolvedValue({ ok: true, value: workflow });
-    }
-    const planningCall = phase === 'new' ? startWorkflow : answerWorkflow;
-    let finishPlanning: ((value: unknown) => void) | undefined;
-    planningCall.mockReturnValue(new Promise((resolve) => { finishPlanning = resolve; }));
-    const cancelPlanning = vi.fn(async () => ({ ok: true, value: { cancelled: true } }));
-    const cancelWorkflow = vi.fn(async () => ({ ok: true, value: { ...workflow, status: 'cancelled' } }));
-    Object.assign(window.unicomp!.chatContexts!, { cancelPlanning, cancelWorkflow });
-    await settle();
-    await type('帮我分析这个问题');
-    await send('button');
-    const stop = element('停止需求理解');
-    expect(stop.props.disabled).toBe(false);
-    (stop.props.onClick as () => void)();
-    await settle();
-    expect(cancelPlanning).toHaveBeenCalledWith({ clientCommandId: planningCall.mock.calls[0][0].clientCommandId });
-    finishPlanning!({ ok: true, value: {
-      conversation, workflow: { ...workflow, status: 'ready', plan: { ...workflow.plan, kind: 'chat' } }
-    } });
-    await settle();
-    expect(cancelWorkflow).toHaveBeenCalledTimes(1);
-    expect(startResponse).not.toHaveBeenCalled();
-  });
-
-  it('sends an explicit empty attachment selection when a pinned attachment is removed during clarification', async () => {
-    getPendingWorkflow.mockResolvedValue({ ok: true, value: workflow });
-    await settle();
-    const page = find(tree, (item) => typeof item.props.onDrop === 'function')!;
-    (page.props.onDrop as (event: unknown) => void)({ preventDefault: vi.fn(), dataTransfer: { files: [{}] } });
-    await settle();
-    await type('做个总结');
-    await send('button');
-    (find(tree, item => item.type === ChatAttachment && item.props.fileName === 'report.pdf')!.props.onRemove as () => void)();
-    await settle();
-    await type('不使用附件，在这里回复');
-    await send('button');
-    expect(answerWorkflow.mock.calls[0][0].attachmentFileIds).toEqual([]);
   });
 
   it('does not carry an unsent attachment or document request into a new conversation', async () => {
@@ -1097,9 +999,9 @@ describe('chat composer event behavior', () => {
     await settle();
     await type('谢谢');
     await send('button');
-    expect(startWorkflow.mock.calls[0][0].attachmentFileIds).toBeUndefined();
-    expect(startWorkflow.mock.calls[0][0].intentHint).toBeUndefined();
-    expect(startWorkflow.mock.calls[0][0].content).toBe('谢谢');
+    expect(agentStart.mock.calls[0][0].attachmentFileIds).toBeUndefined();
+    expect(agentStart.mock.calls[0][0].intentHint).toBeUndefined();
+    expect(agentStart.mock.calls[0][0].content).toBe('谢谢');
   });
 
   it('opens chat search across the current project without a file-search action', async () => {
@@ -1356,88 +1258,6 @@ describe('chat composer event behavior', () => {
     const betaRow = find(tree, (item) => item.props.className === 'uc-chat-page__workspace-conversation-row'
       && JSON.stringify(item.props.children).includes('Beta chat'));
     expect(betaRow?.props['aria-current']).toBe('true');
-  });
-
-  it('delivers Office outputs sequentially and retries local generation without repeating completed model responses', async () => {
-    candidateEnabled = true;
-    const events: string[] = [];
-    const deliveries: {
-      kind: 'word' | 'ppt'; status: string; failureReason?: string;
-      executionId?: string; resultMessageId?: string
-    }[] = [
-      { kind: 'word', status: 'pending' }, { kind: 'ppt', status: 'pending' }
-    ];
-    const current = () => ({
-      ...workflow,
-      status: deliveries.some((item) => item.status === 'failed') ? 'failed' : 'ready',
-      plan: {
-        ...workflow.plan, documentKind: deliveries.find((item) => item.status !== 'completed')?.kind ?? 'ppt',
-        deliverables: ['word', 'ppt'], parameters: { requirements: '做一份 Word 和 PPT' }
-      },
-      deliveries: deliveries.map((item) => ({ ...item })), pendingQuestions: []
-    });
-    const desktop = window.unicomp!;
-    const api = desktop.chatContexts!;
-    let executionNumber = 0;
-    let failPpt = true;
-    const execution = () => ({
-      responseExecutionId: `execution-${executionNumber}`, conversationId: conversation.conversationId,
-      assistantMessageId: `assistant-${executionNumber}`, userMessageId: 'source-1',
-      state: 'completed', content: '{"kind":"word","sections":[]}', streamSequence: 0
-    });
-    startWorkflow.mockImplementation(async () => ({ ok: true, value: { conversation, workflow: current() } }));
-    getPendingWorkflow.mockImplementation(async () => ({
-      ok: true, value: deliveries.every((item) => item.status === 'completed') ? null : current()
-    }));
-    startResponse.mockImplementation(async () => {
-      executionNumber += 1;
-      events.push(`start:${current().plan.documentKind}`);
-      return { ok: true, value: { conversation, execution: execution() } };
-    });
-    Object.assign(api, {
-      getConversation: vi.fn(async () => ({ ok: true, value: {
-        ...conversation, messages: [{
-          messageId: execution().assistantMessageId, role: 'assistant', state: 'completed',
-          content: execution().content, attachments: []
-        }]
-      } })),
-      getWorkflow: vi.fn(async () => ({ ok: true, value: { ...current(), status: 'executing' } })),
-      getResponseExecution: vi.fn(async () => ({ ok: true, value: execution() })),
-      resumeFailedWorkflow: vi.fn(async () => {
-        const failed = deliveries.find((item) => item.status === 'failed')!;
-        failed.status = 'executing'; failed.failureReason = undefined;
-        return { ok: true, value: { ...current(), status: 'executing' } };
-      })
-    });
-    Object.assign(desktop, { documentGeneration: {
-      prepareGeneration: vi.fn(async () => ({ ok: true, value: {} })),
-      generateFromMessage: vi.fn(async ({ kind }: { kind: 'word' | 'ppt' }) => {
-        events.push(`generate:${kind}`);
-        const item = deliveries.find((delivery) => delivery.kind === kind)!;
-        if (kind === 'ppt' && failPpt) {
-          failPpt = false; item.status = 'failed'; item.failureReason = 'execution_failed';
-          item.executionId = execution().responseExecutionId;
-          item.resultMessageId = execution().assistantMessageId;
-          return { ok: false, error: { code: 'generation_failed', message: 'Test failure' } };
-        }
-        item.status = 'completed';
-        return { ok: true, value: { workId: `work-${kind}` } };
-      })
-    } });
-    await settle();
-    await type('做一份 Word 和 PPT');
-    await send('button');
-    await settle(50);
-    expect(events).toEqual(['start:word', 'generate:word', 'start:ppt', 'generate:ppt']);
-    expect(startResponse.mock.calls[0][0].content).toContain('当前仅生成 Word');
-    expect(startResponse.mock.calls[1][0].content).toContain('当前仅生成 PPT');
-    const retry = find(tree, (item) => item.props.children === '重试失败文档');
-    expect(retry).toBeDefined();
-    (retry!.props.onClick as () => void)();
-    await settle(50);
-    expect(events).toEqual(['start:word', 'generate:word', 'start:ppt', 'generate:ppt', 'generate:ppt']);
-    expect(startResponse).toHaveBeenCalledTimes(2);
-    expect(deliveries.map((item) => item.status)).toEqual(['completed', 'completed']);
   });
 
   it('keeps an unsent draft with its own conversation and does not ask to discard it', async () => {

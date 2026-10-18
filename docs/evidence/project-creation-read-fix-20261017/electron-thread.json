@@ -1,0 +1,130 @@
+{
+  "passed": true,
+  "mode": "thread",
+  "externalRequests": 0,
+  "observations": {
+    "initialSession": {
+      "ok": true
+    },
+    "initialList": {
+      "ok": true,
+      "value": {
+        "items": [],
+        "readAtSequence": 0,
+        "hasMore": false
+      }
+    },
+    "directoryFocusList": {
+      "ok": true,
+      "value": {
+        "items": [],
+        "readAtSequence": 0,
+        "hasMore": false
+      }
+    },
+    "createdSession": {
+      "projectId": "project-ec720426-1cd8-4f95-82c5-329c6c00da87",
+      "projectName": "新建项目保存验证"
+    },
+    "createdConversation": {
+      "ok": true,
+      "value": {
+        "conversationId": "conversation-78a0606c-7ac4-456f-8dbb-edb5547532de",
+        "revision": 0,
+        "projectId": "project-ec720426-1cd8-4f95-82c5-329c6c00da87",
+        "title": "本地保存验证",
+        "status": "active",
+        "storageScope": "current_project",
+        "readOnly": false,
+        "messages": [],
+        "createdAt": "2026-10-17T14:08:05.148Z",
+        "updatedAt": "2026-10-17T14:08:05.148Z"
+      }
+    },
+    "savedMessage": {
+      "ok": true,
+      "value": {
+        "conversationId": "conversation-78a0606c-7ac4-456f-8dbb-edb5547532de",
+        "revision": 1,
+        "projectId": "project-ec720426-1cd8-4f95-82c5-329c6c00da87",
+        "title": "本地保存验证",
+        "status": "active",
+        "storageScope": "current_project",
+        "readOnly": false,
+        "messages": [
+          {
+            "messageId": "message-a3291361-ea06-4e11-b990-9d7457c7fea1",
+            "conversationId": "conversation-78a0606c-7ac4-456f-8dbb-edb5547532de",
+            "revision": 0,
+            "role": "user",
+            "state": "completed",
+            "content": "第一条本地消息",
+            "attachments": [],
+            "createdAt": "2026-10-17T14:08:05.198Z",
+            "updatedAt": "2026-10-17T14:08:05.198Z",
+            "streamSequence": 0,
+            "completedAt": "2026-10-17T14:08:05.198Z"
+          }
+        ],
+        "createdAt": "2026-10-17T14:08:05.148Z",
+        "updatedAt": "2026-10-17T14:08:05.198Z"
+      }
+    },
+    "closed": {
+      "ok": true,
+      "value": {
+        "closed": true
+      }
+    },
+    "afterClose": {
+      "ok": true,
+      "value": {
+        "items": [],
+        "readAtSequence": 0,
+        "hasMore": false
+      }
+    },
+    "reopened": {
+      "ok": true,
+      "value": {
+        "cancelled": false,
+        "session": {
+          "projectId": "project-ec720426-1cd8-4f95-82c5-329c6c00da87",
+          "projectName": "新建项目保存验证"
+        }
+      }
+    },
+    "restoredConversation": {
+      "ok": true,
+      "value": {
+        "conversationId": "conversation-78a0606c-7ac4-456f-8dbb-edb5547532de",
+        "revision": 1,
+        "projectId": "project-ec720426-1cd8-4f95-82c5-329c6c00da87",
+        "title": "本地保存验证",
+        "status": "active",
+        "storageScope": "current_project",
+        "readOnly": false,
+        "messages": [
+          {
+            "messageId": "message-a3291361-ea06-4e11-b990-9d7457c7fea1",
+            "conversationId": "conversation-78a0606c-7ac4-456f-8dbb-edb5547532de",
+            "revision": 0,
+            "role": "user",
+            "state": "completed",
+            "content": "第一条本地消息",
+            "attachments": [],
+            "createdAt": "2026-10-17T14:08:05.198Z",
+            "updatedAt": "2026-10-17T14:08:05.198Z",
+            "streamSequence": 0,
+            "completedAt": "2026-10-17T14:08:05.198Z"
+          }
+        ],
+        "createdAt": "2026-10-17T14:08:05.148Z",
+        "updatedAt": "2026-10-17T14:08:05.198Z",
+        "parentRuns": [],
+        "agentSessions": []
+      }
+    }
+  },
+  "boundary": "isolated production main/preload/renderer; controlled directory selection with focus refresh; local IPC message save; no Provider generation"
+}

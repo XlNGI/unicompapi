@@ -238,7 +238,7 @@ describe('controlled conversation semantic classifier', () => {
     const f = fixture({ newApiSse: kimiEvent({ role: 'assistant' }, '') +
       kimiEvent({ reasoning_content: 'Synthetic private reasoning' }, '') +
       kimiEvent({ content: JSON.stringify(missingTopicPlan) }, '') + kimiEvent({}, 'stop') + 'data: [DONE]\n\n' });
-    const result = await new ConversationIntentOrchestrator({ routingMode: 'agent_first', classifier: f.classifier })
+    const result = await new ConversationIntentOrchestrator({ classifier: f.classifier })
       .analyze({ rawText: '帮我生成一个ppt', context: { semanticCandidate: f.selection } });
     expect(result.failureCode).toBeUndefined();
     expect(result.plan).toMatchObject({ kind: 'document', documentKind: 'ppt', missing: ['document_topic'] });
@@ -257,7 +257,7 @@ describe('controlled conversation semantic classifier', () => {
     ['json_invalid', 'data: {private malformed body\n\n']
   ])('audits NewAPI %s and propagates unusable responses without a retry', async (reason, newApiSse) => {
     const f = fixture({ newApiSse });
-    const result = await new ConversationIntentOrchestrator({ routingMode: 'agent_first', classifier: f.classifier })
+    const result = await new ConversationIntentOrchestrator({ classifier: f.classifier })
       .analyze({ rawText: '我想制作一个ppt', context: { semanticCandidate: f.selection } });
     expect(result.failureCode).toBe('classification_invalid_response');
     expect(f.auditEvents.at(-1)).toMatchObject({ type: 'failed', safeCode: `newapi.invalid_response.${reason}` });
@@ -269,7 +269,7 @@ describe('controlled conversation semantic classifier', () => {
 
   it.each(['', 'partial plan'])('rejects length-limited Kimi responses even when chat accepts partial text (%s)', async (content) => {
     const f = fixture({ newApiSse: kimiEvent({ content }, 'length') + 'data: [DONE]\n\n' });
-    const result = await new ConversationIntentOrchestrator({ routingMode: 'agent_first', classifier: f.classifier })
+    const result = await new ConversationIntentOrchestrator({ classifier: f.classifier })
       .analyze({ rawText: '做 PPT', context: { semanticCandidate: f.selection } });
     expect(result.failureCode).toBe('classification_invalid_response');
     expect(f.auditEvents.at(-1)).toMatchObject({ type: 'failed', safeCode: 'newapi.finish.length' });
@@ -290,7 +290,7 @@ describe('controlled conversation semantic classifier', () => {
     ['schema_invalid', JSON.stringify({ ...plan, scene: { private: true } })]
   ])('keeps a received SSE response with %s distinct from a protocol failure', async (reason, content) => {
     const f = fixture({ newApiSse: kimiEvent({ content }, 'stop') + 'data: [DONE]\n\n' });
-    const result = await new ConversationIntentOrchestrator({ routingMode: 'agent_first', classifier: f.classifier })
+    const result = await new ConversationIntentOrchestrator({ classifier: f.classifier })
       .analyze({ rawText: '做 PPT', context: { semanticCandidate: f.selection } });
     expect(result.failureCode).toBe('invalid_intent_plan');
     expect(f.auditEvents.map((event) => event.type)).toEqual(['provider_accepted', 'result_received', 'failed']);
@@ -339,7 +339,7 @@ describe('controlled conversation semantic classifier', () => {
       if (started) await input.beforeRequestStarted?.();
       throw new NewApiRuntimeError('invalid_response', 'not_retryable');
     });
-    const result = await new ConversationIntentOrchestrator({ routingMode: 'agent_first', classifier: f.classifier })
+    const result = await new ConversationIntentOrchestrator({ classifier: f.classifier })
       .analyze({ rawText: '做 PPT', context: { semanticCandidate: f.selection } });
     expect(result.failureCode).toBe(started ? 'classification_invalid_response' : 'classification_unavailable');
     expect(f.auditEvents.at(-1)).toMatchObject({
@@ -358,7 +358,7 @@ describe('controlled conversation semantic classifier', () => {
   });
   it('preserves invalid-plan failures through the production agent-first orchestrator', async () => {
     const f = fixture({ content: { ...plan, filePath: 'unauthorized' } });
-    const result = await new ConversationIntentOrchestrator({ routingMode: 'agent_first', classifier: f.classifier })
+    const result = await new ConversationIntentOrchestrator({ classifier: f.classifier })
       .analyze({ rawText: '我想制作一个ppt', context: { semanticCandidate: f.selection } });
     expect(result.failureCode).toBe('invalid_intent_plan');
     expect(f.submit).toHaveBeenCalledOnce();
@@ -447,5 +447,23 @@ describe('controlled conversation semantic classifier', () => {
     expect(text).not.toMatch(/private-route|private-id/);
     expect(() => semanticInput('x'.repeat(20_000), {})).toThrow('budget');
     expect(() => semanticParameters({ ...deepSeekChatParameterSchema, fields: [] })).toThrow('budget');
+  });
+
+  it('sends bounded role-labelled dialogue and retains current instructions and the original user brief', () => {
+    const recentUserMessages = ['先讨论一份面向小学生的PPT', ...Array.from({ length: 30 }, (_, index) => `补充${index}：${'资料'.repeat(300)}`), '随便生成吧，现在是测试'];
+    const recentConversationMessages = [{ role: 'user' as const, content: '我现在要制作一个ppt，先讨论内容' },
+      { role: 'assistant' as const, content: '可以告诉我主题，也可以让我自行选择。' }];
+    const short = JSON.parse(semanticInput('随便生成吧，现在是测试', { recentConversationMessages }));
+    expect(short.context.recentConversationMessages).toEqual(recentConversationMessages);
+    const bounded = semanticInput('随便生成吧，现在是测试', { recentUserMessages,
+      recentConversationMessages: Array.from({ length: 20 }, () => ({ role: 'assistant', content: '长历史'.repeat(1_000) })) });
+    expect(bounded.length).toBeLessThanOrEqual(16_000);
+    const value = JSON.parse(bounded);
+    expect(value.currentRequest).toBe('随便生成吧，现在是测试');
+    expect(value.context.recentUserMessages[0]).toBe(recentUserMessages[0]);
+    expect(value.context.recentUserMessages.at(-1)).toBe(recentUserMessages.at(-2));
+    expect(recentUserMessages).toHaveLength(32);
+    const longRequest = '需求'.repeat(4_000);
+    expect(JSON.parse(semanticInput(longRequest, { recentUserMessages: [longRequest] })).currentRequest).toBe(longRequest);
   });
 });

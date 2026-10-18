@@ -241,7 +241,8 @@ describe('production Presentation Design IR v2 contract', () => {
     expect(prompt).toContain(encoded);
     expect(prompt).toContain('untrusted');
     expect(prompt).toContain('outline.sections[0].blocks[0].items[1]');
-    expect(prompt).toContain('Include organization schemaVersion 1');
+    expect(prompt).toContain('organization schemaVersion 1');
+    expect(prompt).toContain('optional for authored trees');
     expect(prompt).toContain('standalone header group');
   });
 

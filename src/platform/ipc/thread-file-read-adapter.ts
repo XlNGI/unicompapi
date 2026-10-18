@@ -43,7 +43,13 @@ export class ThreadFileReadAdapter implements ThreadReadApi {
     try {
       this.expireSummarySnapshots();
       const input = parseSummaryRequest(request);
-      const repository = this.requireRepository();
+      const repository = this.options.getRepository();
+      // The project picker can return focus before a session has been opened.
+      // There is no project transcript to read in that normal empty state.
+      if (!repository && this.options.projectId() === undefined && !input.cursor) {
+        return { ok: true, value: { items: [], readAtSequence: 0, hasMore: false } };
+      }
+      if (!repository) throw new Error('thread_file_read_disabled');
       const cursor = input.cursor ? decode< { readonly snapshotId: string; readonly offset: number }>(input.cursor) : undefined;
       let snapshot = cursor ? this.snapshots.get(cursor.snapshotId) : undefined;
       if (cursor && !snapshot) return failure('thread_cursor_expired', '会话列表快照已过期，请重新加载。');

@@ -32,9 +32,8 @@ import type { SubmissionArtifactFactoryPort } from './provider-submission-orches
 import type { ItemStatus } from '../../domain';
 import type { ConversationAttachmentContextService } from '../documents/conversation-attachment-context';
 import { ConversationAttachmentError } from '../documents/conversation-attachment-context';
-import { ConversationDocumentPageError, resolveConversationResponseDocumentPages, type ConversationDocumentPageContextService } from '../documents/conversation-document-page-context';
+import { ConversationDocumentPageError } from '../documents/conversation-document-error';
 import { buildAgentToolInstruction, buildDocumentReadToolInstruction, buildDocumentGenerationToolInstruction, buildDocumentMutationToolInstruction, type ConversationDocumentToolSessionService } from '../documents/conversation-document-tool-session';
-import { buildDocumentGenerationConversationInstruction, isPptGenerationIntent } from '../documents/conversation-document-tool-session';
 
 export interface ConversationResponseArtifactFactoryDependencies {
   readonly nativeSearch?: ConversationNativeSearch;
@@ -47,7 +46,6 @@ export interface ConversationResponseArtifactFactoryDependencies {
   readonly agentContextAssembler?: AgentContextAssembler;
   readonly modelHistory?: Pick<ModelHistoryReader, 'readConversation'>;
   readonly attachments?: Pick<ConversationAttachmentContextService, 'resolve'> & Partial<Pick<ConversationAttachmentContextService, 'resolveImage'>>;
-  readonly documentPages?: Pick<ConversationDocumentPageContextService, 'resolve'>;
   readonly documentTools?: Pick<ConversationDocumentToolSessionService, 'prepare' | 'registerExecution'>;
   readonly executionCoordinator?: ConversationExecutionCoordinator;
   getStartupSignal?(draftId: string): AbortSignal | undefined;
@@ -117,16 +115,12 @@ export class ConversationResponseArtifactFactory
     assertStartupSignal(startupSignal);
     const toolSelection = await awaitStartup(this.dependencies.documentTools?.prepare({ conversation, draft, signal: startupSignal }), startupSignal);
     const bindsExistingDocument = toolSelection !== undefined &&
-      (!('kind' in toolSelection) || toolSelection.kind === 'mutation' ||
-        (toolSelection.kind === 'agent' && toolSelection.mutation !== undefined));
+      (!('kind' in toolSelection) || toolSelection.kind === 'mutation' || toolSelection.kind === 'revision');
     if (toolSelection && (nativeSearch || !input.subject.contextContentHashes.includes(toolSelection.bindingHash))) {
       throw new ConversationDocumentPageError('document_page_unavailable', '文档读取授权范围或版本已变化，请重新提交。');
     }
-    const pageReferences = bindsExistingDocument ? [] : await resolveConversationResponseDocumentPages({
-      conversation, draft, service: this.dependencies.documentPages
-    });
     const selectedContexts = [];
-    for (const selection of pageReferences.length || bindsExistingDocument ? [] : draft.contextSelections) {
+    for (const selection of bindsExistingDocument ? [] : draft.contextSelections) {
       const context = await this.dependencies.contexts.get(selection.contextId);
       if (context) selectedContexts.push(context);
     }
@@ -134,22 +128,19 @@ export class ConversationResponseArtifactFactory
       projectId: this.dependencies.conversations.projectId,
       surface: 'conversation',
       contexts: selectedContexts,
-      selections: pageReferences.length || bindsExistingDocument ? [] : draft.contextSelections
+      selections: bindsExistingDocument ? [] : draft.contextSelections
     });
-    if (pageReferences.some((reference) => !input.subject.contextContentHashes?.includes(reference.contentHash))) {
-      throw new ConversationDocumentPageError('document_page_unavailable', '作品页面在请求准备后发生变化，请重新核对后再提问。');
-    }
     const imageInput = draft.imageQuery ? await this.dependencies.attachments?.resolveImage?.({ conversation, currentUserMessageId: draft.userMessageId }) : undefined;
     if (draft.imageQuery && (!imageInput || input.subject.imageCount !== 1 || !input.subject.materialReferences.some(item => item.referenceId === imageInput.fileId) || !input.subject.contextContentHashes.includes(imageInput.image.checksumSha256))) {
       throw new ConversationAttachmentError('attachment_changed', '图片与已确认的发送范围不一致，请重新确认。');
     }
-    const attachmentReferences = pageReferences.length || bindsExistingDocument ? [] : await this.dependencies.attachments?.resolve({
+    const attachmentReferences = bindsExistingDocument ? [] : await this.dependencies.attachments?.resolve({
       conversation,
       currentUserMessageId: draft.userMessageId,
       query: draft.attachmentQuery ?? userMessage.displayContent ?? userMessage.content,
       ...(imageInput ? { imageFileId: imageInput.fileId } : {})
     }) ?? [];
-    const references: readonly ConversationContextReference[] = [...pageReferences, ...attachmentReferences, ...contextSnapshots.map(
+    const references: readonly ConversationContextReference[] = [...attachmentReferences, ...contextSnapshots.map(
       (snapshot) => ({
         sourceId: snapshot.contextId,
         sourceType: 'project' as const,
@@ -178,13 +169,9 @@ export class ConversationResponseArtifactFactory
           conversation: modelConversation,
           currentUserMessageId: draft.userMessageId,
           currentUserContent: input.subject.outboundTextSnapshot,
-          omitHistory: pageReferences.length > 0 || !!nativeSearch || !!toolSelection,
+          omitHistory: !!nativeSearch || !!toolSelection,
           references
         });
-    if (pageReferences.some((page) => !contextEnvelope.references.some((reference) =>
-      reference.sourceId === page.sourceId && reference.contentHash === page.contentHash && reference.excerpt === page.excerpt))) {
-      throw new ConversationDocumentPageError('document_page_scope_exceeded', '目标页面超过本次完整读取预算，请缩小问题范围后继续。');
-    }
     const messages = toolSelection ? [
       { role: 'system' as const, content: 'kind' in toolSelection
         ? toolSelection.kind === 'generation'
@@ -193,9 +180,6 @@ export class ConversationResponseArtifactFactory
             ? buildDocumentMutationToolInstruction(toolSelection)
             : buildAgentToolInstruction()
         : buildDocumentReadToolInstruction(toolSelection) },
-      ...contextEnvelope.messages
-    ] : isPptGenerationIntent(userMessage.content) ? [
-      { role: 'system' as const, content: buildDocumentGenerationConversationInstruction() },
       ...contextEnvelope.messages
     ] : contextEnvelope.messages;
     const createdAt = toIsoTimestamp(input.createdAt);

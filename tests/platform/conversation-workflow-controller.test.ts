@@ -1,3 +1,4 @@
+import { fixtureSemanticClassifier } from '../fixtures/conversation-semantic-classifier';
 import { mkdtemp, rm } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
@@ -112,10 +113,9 @@ describe('ConversationWorkflowController', () => {
       if (currentMode === 'invalid') return { unsupported: true };
       if (currentMode === 'timeout') return new Promise<never>(() => undefined);
       return { schemaVersion: 1, kind: 'document', action: 'create', documentKind: 'ppt',
-        parameters: {}, sourcePolicy: 'none', missing: [], ambiguities: [], confidence: 'high', needsConfirmation: false };
+        parameters: {}, sourcePolicy: 'none', missing: ['document_topic'], ambiguities: [], confidence: 'low', needsConfirmation: false };
     });
-    const workflowService = new ConversationWorkflowService(workflows, new ConversationIntentOrchestrator({
-      routingMode: 'agent_first', classifierTimeoutMs: 10, classifier: { classify }
+    const workflowService = new ConversationWorkflowService(workflows, new ConversationIntentOrchestrator({ classifierTimeoutMs: 10, classifier: { classify }
     }), now, () => toConversationWorkflowId('workflow-semantic-' + ++sequence));
     const makeController = () => new ConversationWorkflowController({
       getSession: () => ({ projectId, projectName: '合成测试', rootDirectory: root }),
@@ -233,7 +233,7 @@ describe('ConversationWorkflowController', () => {
       confirmationId: 'confirmation-binding', planHash: 'a'.repeat(64), confirmationExpiresAt: toIsoTimestamp('2026-09-10T00:10:00.000Z')
     });
     await workflows.create(workflow);
-    const workflowService = new ConversationWorkflowService(workflows, new ConversationIntentOrchestrator(), now);
+    const workflowService = new ConversationWorkflowService(workflows, new ConversationIntentOrchestrator({ classifier: fixtureSemanticClassifier }), now);
     const answer = vi.spyOn(workflowService, 'answer');
     const pin = vi.fn();
     const controller = new ConversationWorkflowController({
@@ -267,7 +267,7 @@ describe('ConversationWorkflowController', () => {
       nextMessageId: (() => { let index = 0; return () => toMessageId(`message-native-document-${++index}`); })()
     };
     const conversationService = new ConversationApplicationService(conversations, ids, now);
-    const workflowService = new ConversationWorkflowService(workflowRepository, new ConversationIntentOrchestrator(), now,
+    const workflowService = new ConversationWorkflowService(workflowRepository, new ConversationIntentOrchestrator({ classifier: fixtureSemanticClassifier }), now,
       () => toConversationWorkflowId('workflow-native-document-settlement'));
     const conversation = await conversationService.create({ title: 'Native document', projectId });
     const withUser = await conversationService.addUserMessage({ conversationId: conversation.id, expectedRevision: 0, content: '写一份关于龙的 PPT' });

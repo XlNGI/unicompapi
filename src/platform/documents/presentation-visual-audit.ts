@@ -30,7 +30,17 @@ export function auditPresentationRenderPlan(plan: PresentationRenderPlan): Prese
   const diagnostics: PresentationVisualAuditDiagnostic[] = [];
   const fontFamilies = new Set<string>();
   for (const page of plan.pages) {
-    const occupied = page.elements.reduce((sum, element) => sum + element.geometry.width * element.geometry.height, 0);
+    // Backdrops are not content. Estimate text ink within its allocated box,
+    // then union the foreground rectangles so nesting does not count twice.
+    const boxes = page.elements.filter(element => element.type !== 'shape').map(element => {
+      const box = element.geometry;
+      if (element.content.type !== 'text') return box;
+      const font = Math.max(element.style.fontSize, ...(element.style.textSpans ?? []).map(span => span.style.fontSize ?? element.style.fontSize));
+      const width = [...element.content.text].reduce((sum, char) => sum + (char.codePointAt(0)! > 0x7f ? 1 : 0.52), 0) * font / 72;
+      const height = Math.min(box.height, Math.max(1, Math.ceil(width / Math.max(0.05, box.width))) * font / 72 * (element.style.lineSpacingMultiple ?? 1.2));
+      return { ...box, width: Math.min(box.width, width), height };
+    });
+    const occupied = unionArea(boxes);
     const ratio = occupied / (plan.canvas.width * plan.canvas.height);
     if (ratio > 0.86) diagnostics.push({ code: 'visual_crowded_page', severity: 'warning', pageNumber: page.pageNumber,
       message: 'Element occupancy leaves little safe whitespace' });
@@ -43,8 +53,10 @@ export function auditPresentationRenderPlan(plan: PresentationRenderPlan): Prese
         message: 'Text sizes do not establish a clear hierarchy' });
     }
     for (const element of page.elements) {
-      fontFamilies.add(element.style.fontFamily);
-      if (element.type === 'text' && contrastRatio(element.style.fill ?? page.backgroundColor, element.style.color) < (element.style.fontSize >= 24 ? 3 : 4.5)) {
+      if (element.type !== 'shape') fontFamilies.add(element.style.fontFamily);
+      const background = element.style.fill ?? page.elements.filter(candidate => candidate.type === 'shape' && candidate.style.fill &&
+        candidate.zIndex < element.zIndex && contains(candidate.geometry, element.geometry)).at(-1)?.style.fill ?? page.backgroundColor;
+      if (element.type === 'text' && contrastRatio(background, element.style.color) < (element.style.fontSize >= 24 ? 3 : 4.5)) {
         diagnostics.push({ code: 'visual_low_contrast', severity: 'warning', pageNumber: page.pageNumber,
           message: 'Text color has insufficient deterministic contrast against the page background' });
       }
@@ -53,6 +65,24 @@ export function auditPresentationRenderPlan(plan: PresentationRenderPlan): Prese
   if (fontFamilies.size > 2) diagnostics.push({ code: 'visual_style_inconsistent', severity: 'warning',
     message: 'The deck uses more than two font families' });
   return { status: diagnostics.length === 0 ? 'passed' : 'warning', multimodalReview: 'not_available', diagnostics };
+}
+
+type Box = { readonly x: number; readonly y: number; readonly width: number; readonly height: number };
+function contains(outer: Box, inner: Box): boolean {
+  return inner.x >= outer.x && inner.y >= outer.y && inner.x + inner.width <= outer.x + outer.width && inner.y + inner.height <= outer.y + outer.height;
+}
+function unionArea(boxes: readonly Box[]): number {
+  const edges = [...new Set(boxes.flatMap(box => [box.x, box.x + box.width]))].sort((a, b) => a - b);
+  let area = 0;
+  for (let index = 1; index < edges.length; index += 1) {
+    const left = edges[index - 1], right = edges[index];
+    const ranges = boxes.filter(box => box.x < right && box.x + box.width > left)
+      .map(box => [box.y, box.y + box.height]).sort((a, b) => a[0] - b[0]);
+    let end = -Infinity, height = 0;
+    for (const [start, stop] of ranges) { height += Math.max(0, stop - Math.max(start, end)); end = Math.max(end, stop); }
+    area += (right - left) * height;
+  }
+  return area;
 }
 
 function contrastRatio(background: string, foreground: string): number {

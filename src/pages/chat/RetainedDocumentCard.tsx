@@ -11,7 +11,7 @@ interface RetainedDocumentCardProps {
 }
 
 export function RetainedDocumentCard({ result, busy, onOpen, onOpenLibrary }: RetainedDocumentCardProps) {
-  return <section className="uc-chat-page__document-card" aria-label="已保留的 PPT 文件">
+  return <section className="uc-chat-page__document-card" aria-label={result.kind === 'ppt' ? '已保留的 PPT 文件' : '已保留的 Office 文件'}>
     <LuFileText aria-hidden="true" />
     <div className="uc-chat-page__document-card-main">
       <strong>{result.fileName}</strong>

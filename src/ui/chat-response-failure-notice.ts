@@ -10,11 +10,12 @@ export interface ResponseFailureFacts {
 
 /** This receipt concerns the verified file, not the stopped response outcome. */
 export function retainedDocumentSummary(result: NonNullable<MessageDto['retainedDocumentResult']>): string {
+  if (result.kind !== 'ppt') return `已保留${result.kind === 'word' ? ' Word 文档' : ' Excel 工作簿'}。`;
   const actual = `已保留 ${result.actualPageCount} 页 PPT`;
   const goal = result.planningTargetTotalPages;
   if (goal === undefined) return `${actual}。`;
-  if (result.actualPageCount < goal) return `${actual}，${goal} 页规划目标尚未达到。`;
-  if (result.actualPageCount > goal) return `${actual}，与 ${goal} 页规划目标有偏差。`;
+  if (result.actualPageCount! < goal) return `${actual}，${goal} 页规划目标尚未达到。`;
+  if (result.actualPageCount! > goal) return `${actual}，与 ${goal} 页规划目标有偏差。`;
   return `${actual}，达到 ${goal} 页规划目标。`;
 }
 
@@ -77,6 +78,9 @@ export function failedResponseNotice(
   const diagnostic = controlledCode ? `（${controlledCode}）` : '';
   const stop = stopFromSafeCode(controlledCode) ?? (facts?.stopReason ? facts : undefined);
   const registeredWork = Boolean(message?.documentResult || message?.retainedDocumentResult || facts?.registeredWork);
+  if (reasonCode === 'prepare_failed') {
+    return `会话在本地准备阶段未完成${preserved}，本轮内容请求尚未发出。请查看执行记录，核对当前会话和任务状态后再继续。`;
+  }
   if (reasonCode === 'execution_journal_failed') {
     return `执行记录未能确认写入${preserved}，任务已停止以避免重复操作。${registeredWork ? '已有作品保留。' : ''}请先核对执行记录，再决定下一步。`;
   }
@@ -153,7 +157,7 @@ export function failedResponseNotice(
     return `模型返回的数据格式异常${diagnostic}${preserved}，请重试或切换模型。`;
   }
   if (message?.failureReason === 'unavailable') {
-    return `模型连接超时或服务暂时不可用${preserved}，请稍后重试或切换模型。`;
+    return `当前回复未能完成${preserved}。具体原因尚未确认，请查看执行记录后再决定下一步。`;
   }
   return `模型请求未正常完成${diagnostic}${preserved}，请重试。`;
 }

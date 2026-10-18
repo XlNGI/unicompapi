@@ -4,7 +4,6 @@ import { ConversationCompletionError, type ConversationCompletionCoordinator } f
 import { projectConversationParentRun } from './conversation-parent-run-projection';
 import { NativeSearchAuthorizationError, type ConversationNativeSearch } from '../providers/conversation-native-search';
 import { FeatureSubmissionError } from '../providers/provider-feature-candidates';
-import { isConversationImageRequest, declinesConversationImageInput } from '../../application/conversation-image-request';
 import {
   createConversationResponseDraft,
   attachConversationAgentRunExecution,
@@ -65,8 +64,6 @@ import { chatContextFailure, failure } from './chat-context-errors';
 import { toConversationDto } from './conversation-controller';
 import { ConversationAttachmentError, conversationAttachmentBatch, isImageAttachment, type ConversationAttachmentContextService } from '../documents/conversation-attachment-context';
 import { conversationAttachmentQuery } from '../../application/conversation-attachment-query';
-import { declinesWebResearch } from '../../application/conversation-intent-orchestrator';
-import type { ConversationDocumentPageContextService } from '../documents/conversation-document-page-context';
 import { emitProductionEvent, withProductionTrace } from '../conversation-production-trace';
 import { buildDocumentOutlinePrompt } from '../../shared/document-outline-contract';
 import type { ConversationDocumentToolSelection, ConversationDocumentToolSessionService } from '../documents/conversation-document-tool-session';
@@ -103,7 +100,6 @@ export interface ConversationResponseControllerRuntime {
     abandon?(input: { readonly sessionId: string; readonly cancelled: boolean }): Promise<void>;
   };
   readonly attachments?: Pick<ConversationAttachmentContextService, 'pin' | 'resolve'>;
-  readonly documentPages?: Pick<ConversationDocumentPageContextService, 'resolve'>;
   readonly documentTools?: Pick<ConversationDocumentToolSessionService, 'select' | 'pinDraft'> &
     Partial<Pick<ConversationDocumentToolSessionService, 'prepare'>>;
   /** Completes startup recovery before accessing persisted response state or executing writes. */
@@ -176,16 +172,10 @@ export class ConversationResponseController {
       }
       const attachmentQuery = conversationAttachmentQuery(undefined, message);
       const isPlainUserMessage = message.displayContent === undefined || message.displayContent === message.content;
-      const toolSelection = isPlainUserMessage ? await runtime.documentTools?.select({
-        conversation, currentUserMessageId: message.id, query: attachmentQuery
-      }) : undefined;
-      const pageReferences = isPlainUserMessage && !toolSelection ? await runtime.documentPages?.resolve({
-        conversation, currentUserMessageId: message.id, query: attachmentQuery
-      }) ?? [] : [];
-      if (!pageReferences.length && !toolSelection) await runtime.attachments?.resolve({
+      await runtime.attachments?.resolve({
         conversation, currentUserMessageId: message.id, query: attachmentQuery
       });
-      const imageQuery = isPlainUserMessage && !toolSelection && !pageReferences.length && !declinesConversationImageInput(attachmentQuery) && (isConversationImageRequest(attachmentQuery) || conversationAttachmentBatch(conversation).some(item => isImageAttachment(item.fileName ?? ''))) ? attachmentQuery : undefined;
+      const imageQuery = isPlainUserMessage && conversationAttachmentBatch(conversation).some(item => isImageAttachment(item.fileName ?? '')) ? attachmentQuery : undefined;
       const draft = createConversationResponseDraft({
         id: toConversationResponseDraftId(this.dependencies.nextResponseDraftId()),
         projectId: runtime.conversations.projectId,
@@ -195,7 +185,6 @@ export class ConversationResponseController {
         userMessageRevision: message.revision,
         attachmentQuery,
       ...(imageQuery ? { imageQuery } : {}),
-        ...(pageReferences.length ? { documentPageQuery: attachmentQuery } : {}),
         productFeature: input.productFeature,
         createdAt: toIsoTimestamp(this.now())
       });
@@ -382,7 +371,8 @@ export class ConversationResponseController {
 
   private startCommand(request: unknown): Promise<ChatContextIpcResult<ConversationAgentResponseStartDto>> {
     return this.execute(async () => {
-      const input = chatContextRequestParsers.startResponse(request);
+      const parsed = chatContextRequestParsers.startResponse(request);
+      const input = { ...parsed, agentNative: true };
       const runtime = await this.requireRuntime({ waitForReady: false });
       const commandKey = `${runtime.conversations.projectId}:${input.clientCommandId}`;
       const existing = this.startCommands.get(commandKey);
@@ -774,33 +764,23 @@ export class ConversationResponseController {
     // Fail locally before candidate authorization or provider dispatch. Factory
     // revalidates the pinned hashes immediately before forming provider messages.
     const attachmentQuery = conversationAttachmentQuery(workflow?.plan, userMessage);
-    // Agent-native requests must reach the model before any query-shaped
-    // document selection. The Agent chooses whether to read or mutate after
-    // seeing the available tools and conversation context.
-    const isPageQuestion = input.agentNative ? false : workflow ? workflow.plan.kind === 'chat'
-      : userMessage.displayContent === undefined || userMessage.displayContent === userMessage.content;
-    const documentPageQuery = isPageQuestion ? attachmentQuery : undefined;
-    let toolSelection: ConversationDocumentToolSelection | undefined = documentPageQuery && runtime.documentTools ? await step(() => runtime.documentTools!.select({
-      conversation, currentUserMessageId: userMessage.id, query: documentPageQuery
-    })) : undefined;
-    const pageReferences = documentPageQuery && !toolSelection && runtime.documentPages ? await step(() => runtime.documentPages!.resolve({
-      conversation, currentUserMessageId: userMessage.id, query: documentPageQuery
-    })) ?? [] : [];
-    if (!input.agentNative && !pageReferences.length && !toolSelection && runtime.attachments) await step(() => runtime.attachments!.resolve({
+    // The semantic plan determines whether this task uses attachments or a bound document.
+    // Verify attachment scope before authorizing the execution request.
+    let toolSelection: ConversationDocumentToolSelection | undefined;
+    if (runtime.attachments && !(workflow?.plan.kind === 'document' && workflow.plan.action !== 'create')) await step(() => runtime.attachments!.resolve({
       conversation,
       currentUserMessageId: userMessage.id,
       query: attachmentQuery
     }));
-    const imageQuery = isPageQuestion && !toolSelection && !pageReferences.length && !declinesConversationImageInput(attachmentQuery) && (isConversationImageRequest(attachmentQuery) || conversationAttachmentBatch(conversation).some(item => isImageAttachment(item.fileName ?? ''))) ? attachmentQuery : undefined;
-    const lastUserText = [...conversation.messages].reverse().find(m => m.role === 'user')?.content ?? '';
-    const declinedSearch = declinesWebResearch(lastUserText);
+    const imageQuery = workflow?.plan.kind !== 'document' && conversationAttachmentBatch(conversation).some(item => isImageAttachment(item.fileName ?? '')) ? attachmentQuery : undefined;
+    const declinedSearch = workflow?.plan.sourcePolicy === 'none' || workflow?.plan.sourcePolicy === 'internal';
     if (workflow && (declinedSearch || workflow.plan.sourcePolicy === 'internal')) {
       if (runtime.nativeSearch) await step(() => runtime.nativeSearch!.revoke(conversation.id));
     }
     const localSources = Boolean(workflow?.plan.sourcePolicy === 'mixed' && runtime.nativeSearch &&
       await step(() => runtime.nativeSearch!.preferLocal(conversation, workflow!)));
     const prepareNativeSearch = Boolean(workflow && !toolSelection && runtime.nativeSearch && !declinedSearch && !localSources &&
-      (['web', 'mixed'].includes(workflow.plan.sourcePolicy) || await step(() => runtime.nativeSearch!.allowsConversation(conversation.id))));
+      ['web', 'mixed'].includes(workflow.plan.sourcePolicy));
     if (workflow?.plan.kind === 'document' && !prepareNativeSearch) {
       // Persist source disclosure before pinning the conversation revision for
       // execution. This local reply is excluded from the model's history.
@@ -839,7 +819,6 @@ export class ConversationResponseController {
         : {}),
       attachmentQuery,
       ...(imageQuery ? { imageQuery } : {}),
-      ...(pageReferences.length ? { documentPageQuery } : {}),
       productFeature: input.productFeature,
       createdAt: toIsoTimestamp(this.now())
     });
@@ -965,18 +944,7 @@ export class ConversationResponseController {
         if (attached !== latestRun) await runtime.agentRuns.save(attached, latestRun.revision);
         agentRun = attached;
         execution = await runtime.executions.readModel(execution.responseExecutionId);
-        if (runtime.completion && !runtime.executionCoordinator.has(toConversationResponseExecutionId(execution.responseExecutionId))) {
-          const settled = await runtime.completion.settle(toConversationResponseExecutionId(execution.responseExecutionId));
-          if (settled) agentRun = settled.run;
-        } else if (!runtime.completion && ['completed', 'failed', 'cancelled', 'interrupted'].includes(execution.state)) {
-          const settled = transitionConversationAgentRun(
-            agentRun,
-            execution.state === 'completed' ? 'completed' : execution.state === 'cancelled' ? 'cancelled' : 'failed',
-            toIsoTimestamp(this.now())
-          );
-          await runtime.agentRuns.save(settled, agentRun.revision);
-          agentRun = settled;
-        }
+
       } catch (error) {
         this.dependencies.onError?.(error);
       }
@@ -1301,8 +1269,8 @@ function buildDocumentGenerationPrompt(
     JSON.stringify(contract),
     '【当前用户需求】',
     rawText,
-    ...(agentNative && plan.documentKind === 'ppt' ? [
-      '【执行要求】应用已确认此计划。新建 PPT 必须调用 generate_pptx，生成后通过 read_document_structure 读取实际文件并核对；修改 PPT 使用当前获准的修改工具。',
+    ...(agentNative ? [
+      `【执行要求】应用已确认此计划。新建 ${outlineKind === 'ppt' ? 'PPT' : outlineKind === 'word' ? 'Word' : 'Excel'} 必须调用 ${outlineKind === 'ppt' ? 'generate_pptx' : outlineKind === 'word' ? 'generate_docx' : 'generate_xlsx'}，生成后通过 read_document_structure 读取实际文件并核对；修改文档使用当前获准的修改工具。`,
       '不要用大纲 JSON 代替文件交付。只有工具确认本地文件校验、作品登记与读回后才能声明文档已交付；失败或未知结果须如实说明，不得自动重发。',
       '正文内容必须服从上述合同；合同未提供的事实不得臆造。不得输出路径、凭证、Provider、模型选择或权限信息。'
     ] : [

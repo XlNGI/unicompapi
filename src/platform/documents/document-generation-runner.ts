@@ -127,6 +127,9 @@ export interface DocumentGenerationPlanInput {
   readonly artDirectionTimeoutMs?: number;
   readonly parentWorkId?: WorkId;
   readonly sourceChecksumSha256?: string;
+  readonly validateSource?: () => Promise<void>;
+  readonly designCorrectionCount?: number;
+  readonly designRevisionTargetPages?: readonly number[];
   readonly revisionTargetSectionHeading?: string;
   readonly revisionPatch?: DocumentRevisionPatch;
   readonly revisionPatches?: readonly DocumentRevisionPatch[];
@@ -217,6 +220,12 @@ export class DocumentGenerationRunner {
     input: DocumentGenerationPlanInput
   ): Promise<DocumentGenerationResult> {
     input.executionBudget?.assertCanProceed('prepare');
+    if (input.designCorrectionCount !== undefined && (!Number.isInteger(input.designCorrectionCount) || input.designCorrectionCount < 0 || input.designCorrectionCount > 2) ||
+      input.designRevisionTargetPages !== undefined && (input.kind !== 'ppt' || !input.designRevisionTargetPages.length ||
+        input.designRevisionTargetPages.length > presentationDocumentPageLimits.maximumPages || new Set(input.designRevisionTargetPages).size !== input.designRevisionTargetPages.length ||
+        input.designRevisionTargetPages.some(page => !Number.isInteger(page) || page < 1 || page > input.outline.sections.length + 2))) {
+      throw new DocumentGenerationError('invalid_plan', 'Invalid bounded design revision policy');
+    }
     const now = this.options.now ?? (() => new Date().toISOString());
     const createId = this.options.createId ?? (() => randomUUID());
     const context = this.context();
@@ -471,7 +480,7 @@ export class DocumentGenerationRunner {
       generated = initial.candidate;
       repairDiagnostics = initial.diagnostics;
       if (currentDesignIR?.pages.some(page => page.designTree) && input.requestArtDirection) {
-        for (let attempt = 1; attempt <= 2 - (artDirection?.correctionCount ?? 0) && repairDiagnostics.some(diagnostic => diagnostic.severity === 'error'); attempt += 1) {
+        for (let attempt = 1; attempt <= 2 - (artDirection?.correctionCount ?? input.designCorrectionCount ?? 0) && repairDiagnostics.some(diagnostic => diagnostic.severity === 'error'); attempt += 1) {
           const errors = repairDiagnostics.filter(diagnostic => diagnostic.severity === 'error');
           if (errors.some(diagnostic => !repairableDiagnosticCodes.has(diagnostic.code))) break;
           const diagnosticPage = (scope: string): number | undefined => {
@@ -481,6 +490,7 @@ export class DocumentGenerationRunner {
           };
           const targetPages = [...new Set(errors.flatMap(diagnostic => diagnosticPage(diagnostic.scope) === undefined
             ? currentDesignIR!.pages.map(page => page.pageNumber) : [diagnosticPage(diagnostic.scope)!]))];
+          if (input.designRevisionTargetPages && targetPages.some(page => !input.designRevisionTargetPages!.includes(page))) break;
           repairDiagnosisCodes = [...new Set(errors.map(diagnostic => diagnostic.code))];
           repairTargetIndexes = targetPages.filter(page => page > 1 && page <= canonicalOutline.sections.length + 1).map(page => page - 2);
           repairTargetSystemPages = [...(targetPages.includes(1) ? ['cover' as const] : []),
@@ -599,6 +609,7 @@ export class DocumentGenerationRunner {
       const validatedOutline = input.kind === 'ppt' && (input.revisionPatch || input.revisionPatches)
          ? await this.readRevisedOutline(input, verifiedGenerated.temporaryPath) : undefined;
       await this.observe(input, 'document_publish', 'document-atomic-publish', async () => {
+        await input.validateSource?.();
         await syncFile(verifiedGenerated.temporaryPath);
         this.assertNotCancelled(input.signal);
         input.executionBudget?.assertCanProceed('publish');
@@ -624,6 +635,7 @@ export class DocumentGenerationRunner {
       const registeringExecution = execution;
       const registeredFile = file;
       const work = await this.observe(input, 'document_register', 'document-work-register', async () => {
+        await input.validateSource?.();
         const registered = registerWork({
           id: workId,
           task: await this.requireTask(context, registeringExecution.taskId),
@@ -1214,7 +1226,7 @@ export class DocumentGenerationRunner {
     }
     for (const patch of patches) {
       if (patch.operation === 'replace_text' || patch.operation === 'update_cells') {
-        this.assertFineGrainedRevisionScope(source, candidate, patch);
+        this.assertFineGrainedRevisionScope(source, candidate, patch, patches);
       }
     }
   }
@@ -1263,7 +1275,8 @@ export class DocumentGenerationRunner {
   private assertFineGrainedRevisionScope(
     source: DocumentStructureSnapshot,
     candidate: DocumentStructureSnapshot,
-    patch: Extract<DocumentRevisionPatch, { operation: 'replace_text' | 'update_cells' }>
+    patch: Extract<DocumentRevisionPatch, { operation: 'replace_text' | 'update_cells' }>,
+    patches: readonly DocumentRevisionPatch[]
   ): void {
     const sourceSection = source.sections[patch.target.sectionIndex];
     const candidateSection = candidate.sections[patch.target.sectionIndex];
@@ -1276,8 +1289,10 @@ export class DocumentGenerationRunner {
       throw new DocumentGenerationError('verification_failed', 'Fine-grained revision changed the target structure');
     }
     const blockIndex = patch.target.blockIndex;
+    const allowedBlocks = new Set(patches.flatMap(item => (item.operation === 'replace_text' || item.operation === 'update_cells') &&
+      item.target.sectionIndex === patch.target.sectionIndex ? [item.target.blockIndex] : []));
     for (let index = 0; index < sourceSection.blocks.length; index += 1) {
-      if (index === blockIndex) continue;
+      if (allowedBlocks.has(index)) continue;
       if (sourceSection.blocks[index].contentHash !== candidateSection.blocks[index]?.contentHash) {
         throw new DocumentGenerationError('verification_failed', 'Fine-grained revision changed another block');
       }
@@ -1291,7 +1306,7 @@ export class DocumentGenerationRunner {
       if (
         sourceBlock.itemContentHashes.length !== 1 ||
         candidateBlock.itemContentHashes.length !== 1 ||
-        sourceBlock.itemContentHashes[0] === candidateBlock.itemContentHashes[0]
+        candidateBlock.itemContentHashes[0] !== createHash('sha256').update(JSON.stringify(patch.value)).digest('hex')
       ) {
         throw new DocumentGenerationError('verification_failed', 'Fine-grained text target did not change exactly once');
       }
@@ -1306,9 +1321,12 @@ export class DocumentGenerationRunner {
       throw new DocumentGenerationError('verification_failed', 'Fine-grained cell target structure changed');
     }
     const targetItemIndex = columns + patch.target.rowIndex * columns + patch.target.columnIndex;
+    const allowedCells = new Set(patches.flatMap(item => item.operation === 'update_cells' && item.target.sectionIndex === patch.target.sectionIndex &&
+      item.target.blockIndex === blockIndex ? [columns + item.target.rowIndex * columns + item.target.columnIndex] : []));
     for (let index = 0; index < sourceBlock.itemContentHashes.length; index += 1) {
       const changed = sourceBlock.itemContentHashes[index] !== candidateBlock.itemContentHashes[index];
-      if (changed !== (index === targetItemIndex)) {
+      if (changed && !allowedCells.has(index) || index === targetItemIndex &&
+        candidateBlock.itemContentHashes[index] !== createHash('sha256').update(JSON.stringify(patch.value)).digest('hex')) {
         throw new DocumentGenerationError('verification_failed', 'Fine-grained revision changed cells outside the target');
       }
     }

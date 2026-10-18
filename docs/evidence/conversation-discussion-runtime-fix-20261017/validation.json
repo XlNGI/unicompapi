@@ -1,0 +1,253 @@
+{
+  "schemaVersion": 1,
+  "recordedAt": "2026-10-17T13:08:39.280Z",
+  "status": "engineering_passed_actual_startup_directory_ready",
+  "actualStartupDirectory": "C:\\Users\\10698\\Documents\\unicompAPIforwindows\\unicompapi",
+  "baseline": {
+    "branch": "feature/www-video-contract-binding",
+    "head": "c2f8ac696da3fb39dd368233a0142e458e80b9cf",
+    "historyMerged": false,
+    "committed": false,
+    "pushed": false
+  },
+  "findings": {
+    "wrongRuntimeDirectory": true,
+    "persistedFollowupFailures": {
+      "count": 6,
+      "code": "conversation.prepare_failed"
+    },
+    "reproducedCause": "invalid_inherited_execution_budget after an existing PPT when a turn exposes no edit branch",
+    "hostBudgetCeilingsUnchanged": true,
+    "discussionRoutedBeforeClassifier": true,
+    "unavailableDoesNotInventNetworkFailure": true
+  },
+  "checks": {
+    "typecheck": {
+      "status": "passed",
+      "command": "pnpm typecheck"
+    },
+    "lint": {
+      "status": "passed",
+      "command": "pnpm lint"
+    },
+    "build": {
+      "status": "passed",
+      "command": "pnpm build",
+      "files": 474
+    },
+    "nodeUi": {
+      "status": "passed",
+      "passed": 401,
+      "failed": 0,
+      "skipped": 0
+    },
+    "vitest": {
+      "status": "passed",
+      "files": 357,
+      "passed": 3757,
+      "failed": 0,
+      "skipped": 0,
+      "command": "pnpm exec vitest run tests/application tests/domain tests/platform validation tests/evaluation --maxWorkers=2 --minWorkers=1 --testTimeout=15000"
+    },
+    "totalIndependentTests": 4158,
+    "targetedRegression": {
+      "status": "passed",
+      "files": 6,
+      "passed": 229,
+      "includedInFullCount": true
+    },
+    "platform": {
+      "status": "passed",
+      "violations": []
+    },
+    "electron": {
+      "native": {
+        "status": "passed",
+        "exitCode": 0,
+        "report": "electron-native.json",
+        "requestCount": 23,
+        "artDirectionRequestCount": 2,
+        "discussionCases": [
+          {
+            "case": "discussion-sky-content",
+            "state": "completed",
+            "registeredNewWorks": 0,
+            "semanticPlannerCalls": 0,
+            "writeToolsExposed": false,
+            "externalProviderCalls": 0
+          },
+          {
+            "case": "discussion-reject-generation",
+            "state": "completed",
+            "registeredNewWorks": 0,
+            "semanticPlannerCalls": 0,
+            "writeToolsExposed": false,
+            "externalProviderCalls": 0
+          },
+          {
+            "case": "discussion-existing-ppt",
+            "state": "completed",
+            "registeredNewWorks": 0,
+            "semanticPlannerCalls": 0,
+            "writeToolsExposed": false,
+            "externalProviderCalls": 0
+          }
+        ],
+        "externalProviderCalls": 0
+      },
+      "fallback": {
+        "status": "passed",
+        "exitCode": 0,
+        "report": "electron-fallback.json",
+        "requestCount": 16,
+        "artDirectionRequestCount": 3,
+        "discussionCases": [
+          {
+            "case": "discussion-sky-content",
+            "state": "completed",
+            "registeredNewWorks": 0,
+            "semanticPlannerCalls": 0,
+            "writeToolsExposed": false,
+            "externalProviderCalls": 0
+          },
+          {
+            "case": "discussion-reject-generation",
+            "state": "completed",
+            "registeredNewWorks": 0,
+            "semanticPlannerCalls": 0,
+            "writeToolsExposed": false,
+            "externalProviderCalls": 0
+          },
+          {
+            "case": "discussion-existing-ppt",
+            "state": "completed",
+            "registeredNewWorks": 0,
+            "semanticPlannerCalls": 0,
+            "writeToolsExposed": false,
+            "externalProviderCalls": 0
+          }
+        ],
+        "externalProviderCalls": 0
+      },
+      "legacy": {
+        "status": "passed",
+        "exitCode": 0,
+        "report": "electron-legacy.json",
+        "requestCount": 23,
+        "artDirectionRequestCount": 2,
+        "discussionCases": [
+          {
+            "case": "discussion-sky-content",
+            "state": "completed",
+            "registeredNewWorks": 0,
+            "semanticPlannerCalls": 0,
+            "writeToolsExposed": false,
+            "externalProviderCalls": 0
+          },
+          {
+            "case": "discussion-reject-generation",
+            "state": "completed",
+            "registeredNewWorks": 0,
+            "semanticPlannerCalls": 0,
+            "writeToolsExposed": false,
+            "externalProviderCalls": 0
+          },
+          {
+            "case": "discussion-existing-ppt",
+            "state": "completed",
+            "registeredNewWorks": 0,
+            "semanticPlannerCalls": 0,
+            "writeToolsExposed": false,
+            "externalProviderCalls": 0
+          }
+        ],
+        "externalProviderCalls": 0
+      }
+    },
+    "sourceAndBuild": {
+      "status": "passed",
+      "sourceFiles": 52,
+      "buildFiles": 474,
+      "snapshotHash": "ab8f5724f69fdb559a70b07d28a80681dec4a6d6f9dcf42494f8d30c26dd136f"
+    },
+    "worktreeFileParity": {
+      "status": "passed",
+      "checked": 52,
+      "differences": []
+    },
+    "beforeImages": {
+      "status": "passed",
+      "checked": 39
+    },
+    "logArchives": {
+      "status": "passed",
+      "byteExactRoundTrips": 24,
+      "manifest": "log-manifest.json"
+    },
+    "credentialShapeScan": {
+      "status": "passed",
+      "matches": []
+    },
+    "processCleanup": {
+      "recordedAt": "2026-10-17T13:06:37.9907532Z",
+      "ownedIsolatedTestProcessesRemaining": 0,
+      "testDevServersStarted": 0,
+      "userProcessesTerminated": 0,
+      "listening5173": [],
+      "existingUserElectronMain": [],
+      "liveUserApplicationRestartedByAgent": false
+    },
+    "diffCheck": "passed",
+    "documentationAndJson": {
+      "status": "passed",
+      "workspaces": [
+        {
+          "root": "C:/Users/10698/Documents/unicompAPIforwindows/unicompapi",
+          "localLinks": 13,
+          "jsonFiles": 10,
+          "status": "passed"
+        },
+        {
+          "root": "C:/Users/10698/.codex/worktrees/conversation-document-remediation/unicompapi",
+          "localLinks": 12,
+          "jsonFiles": 10,
+          "status": "passed"
+        }
+      ]
+    }
+  },
+  "history": {
+    "redRegression": "3 failed / 194 passed before the planning/notice fix",
+    "redBudgetCase": "valid existing-PPT policy rejected before fix; three above-ceiling cases rejected as required",
+    "electronCounterexample": "existing-PPT discussion failed before content dispatch and passed after Host context profile correction",
+    "interruptedFullRuns": [
+      "before-image tests were discovered before relocation into an excluded node_modules path",
+      "stopped when the budget counterexample required a source fix"
+    ],
+    "intermediateCompileError": "undefined helper caught by typecheck/tests and replaced with immutable Host-issued context metadata",
+    "fullCompatibilityRun": "3755 passed / 2 failed; restored local cancellation priority without changing the golden baseline, updated obsolete network-outage validation; targeted 229 passed before final complete rerun"
+  },
+  "sideEffects": {
+    "userScreenshotAndTargetConversationMetadataRead": true,
+    "userProjectWrites": 0,
+    "rawConversationOrAttachmentsExported": false,
+    "realCredentialsRead": false,
+    "syntheticCredentialsUsed": true,
+    "externalProviderCalls": 0,
+    "paidCalls": 0,
+    "networkSearch": false,
+    "realUserRequestReplayed": false,
+    "liveUserAppRestarted": false
+  },
+  "limitations": {
+    "currentElectronBackend": "live user application not automatically restarted; start or restart pnpm dev in the actual startup directory to load the verified build",
+    "realModelResponseAndVisualQuality": "not_run",
+    "macosHardware": "deferred",
+    "userCurrentPptPageReview": "not_run",
+    "existingWarnings": [
+      "Vite CJS API deprecation",
+      "Vite chunk size warning",
+      "local PDF TT undefined function 32"
+    ]
+  }
+}

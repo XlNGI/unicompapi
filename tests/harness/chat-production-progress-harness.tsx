@@ -206,7 +206,6 @@ const api = {
 };
 const documentGeneration = {
   prepareGeneration: async () => ok({ prepared: true as const }),
-  prepareDeterministicRevision: async () => ok({ conversationId, expectedRevision: 1, messageId: 'assistant' }),
   reconcileGeneration: async () => ok({ interrupted: false }),
   generateFromMessage: async () => {
     emitTrace('document_compile', 'started', { documentKind: 'ppt' }, 'assistant');

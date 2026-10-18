@@ -20,6 +20,7 @@ import type { HostExecutionBudget } from './execution-budget';
 import { presentationPlanningTotalPages, validatePresentationPageRequirement,
   type PresentationPageRequirement } from '../domain/entities/presentation-page-requirement';
 import { presentationDocumentPageLimits } from '../domain/entities/document-generation';
+import type { DocumentWorkspaceKind } from '../domain/entities/document-generation';
 
 /**
  * Host-owned inputs required to turn the business-only generate arguments into
@@ -48,8 +49,17 @@ export function createGeneratePptxBinding(
   dependencies: GeneratePptxToolDependencies,
   options: { readonly registry?: CanonicalToolRegistry } = {}
 ): DocumentAtomicToolBinding {
+  return createGenerateOfficeBinding(dependencies, 'ppt', options);
+}
+
+/** All three formats share execution admission, compilation, cancellation and publication. */
+export function createGenerateOfficeBinding(
+  dependencies: GeneratePptxToolDependencies,
+  kind: DocumentWorkspaceKind,
+  options: { readonly registry?: CanonicalToolRegistry } = {}
+): DocumentAtomicToolBinding {
   const registry = options.registry ?? createCanonicalToolRegistry();
-  const contract = registry.get('generate_pptx');
+  const contract = registry.get(kind === 'ppt' ? 'generate_pptx' : kind === 'word' ? 'generate_docx' : 'generate_xlsx');
   if (!contract) throw new TypeError('tool_not_registered');
   type PreparedContent = { readonly outline: NonNullable<ReturnType<DocumentDraftCompilerPort['compile']>>;
     readonly documentIR: ReturnType<typeof buildDocumentIRFromOutline> };
@@ -58,6 +68,7 @@ export function createGeneratePptxBinding(
   const contentKey = (args: CanonicalToolArguments, context: DocumentAtomicExecutionContext) =>
     JSON.stringify([context.projectContext.projectId, context.taskContext.taskId, context.revision, args]);
   const requirementFor = (args: CanonicalToolArguments): PresentationPageRequirement | undefined => {
+    if (kind !== 'ppt') return undefined;
     const requirement = dependencies.pageRequirement ?? (args.requestedTotalPages === undefined ? undefined
       : { mode: 'target' as const, targetPages: Number(args.requestedTotalPages), countBasis: 'total' as const });
     if (requirement) validatePresentationPageRequirement(requirement);
@@ -66,9 +77,9 @@ export function createGeneratePptxBinding(
   const compileContent = (args: CanonicalToolArguments, context: DocumentAtomicExecutionContext): PreparedContent => {
     const key = contentKey(args, context), cached = preparedContent.get(key);
     if (cached) return cached;
-    const outline = dependencies.compiler.compile({ content: String(args.content), kind: 'ppt', operation: 'create' });
-    if (outline.kind !== 'ppt' || !outline.sections.length || outline.sections.some(section =>
-      section.pageKind === 'cover' || section.pageKind === 'closing')) throw new DocumentDraftCompilationError('invalid_structure', 'Invalid presentation body plan');
+    const outline = dependencies.compiler.compile({ content: String(args.content), kind, operation: 'create' });
+    if (outline.kind !== kind || !outline.sections.length || kind === 'ppt' && outline.sections.some(section =>
+      section.pageKind === 'cover' || section.pageKind === 'closing')) throw new DocumentDraftCompilationError('invalid_structure', 'Invalid document body plan');
     const documentIR = dependencies.compiler.compileIR?.({ outline, operation: 'create',
       identitySeed: JSON.stringify([context.projectContext.projectId, context.taskContext.taskId, context.revision, outline]) }) ??
       buildDocumentIRFromOutline({ outline, operation: 'create' });
@@ -80,11 +91,11 @@ export function createGeneratePptxBinding(
   };
   return {
     contract,
-    authorize: async (_args, context) => authorized(context) &&
+    authorize: async (_args, context) => authorized(context, contract.toolId) &&
       dependencies.revalidateAuthorization(context, 'before'),
     preflight: async (input, context) => {
       if (context.abortSignal.aborted) return failed('cancelled', 'cancelled');
-      if (!authorized(context) || !await dependencies.revalidateAuthorization(context, 'before')) return failed('authorization_or_revision_invalid');
+      if (!authorized(context, contract.toolId) || !await dependencies.revalidateAuthorization(context, 'before')) return failed('authorization_or_revision_invalid');
       try {
         const args = validateCanonicalToolArguments(contract, input);
         const requirement = requirementFor(args);
@@ -115,7 +126,7 @@ export function createGeneratePptxBinding(
       const args = validateCanonicalToolArguments(contract, input);
       if (context.abortSignal.aborted) return failed('cancelled', 'cancelled');
       try {
-        if (!authorized(context) || !await dependencies.revalidateAuthorization(context, 'before')) {
+        if (!authorized(context, contract.toolId) || !await dependencies.revalidateAuthorization(context, 'before')) {
           return failed('authorization_or_revision_invalid');
         }
         const { outline, documentIR } = compileContent(args, context);
@@ -123,16 +134,23 @@ export function createGeneratePptxBinding(
         if (context.abortSignal.aborted) return failed('cancelled', 'cancelled');
         const executionInput = dependencies.createExecutionInput
           ? await dependencies.createExecutionInput({ args, outline, context })
-          : await defaultExecutionInput(args, outline, context);
+          : await defaultExecutionInput(args, outline, context, kind);
         const pageRequirement = requirementFor(args);
         if (context.abortSignal.aborted) return failed('cancelled', 'cancelled');
         if (!await dependencies.revalidateAuthorization(context, 'before')) return failed('authorization_or_revision_invalid');
         const result = await dependencies.executor.run({
           ...executionInput,
+          kind,
+          validateSource: async () => {
+            await executionInput.validateSource?.();
+            if (context.abortSignal.aborted || !await dependencies.revalidateAuthorization(context, 'before')) {
+              throw new DocumentGenerationApplicationError('revision_conflict', '文档执行依据已变化，文件未获准发布。');
+            }
+          },
           ...(dependencies.executionBudget ? { executionBudget: dependencies.executionBudget } : {}),
           ...(pageRequirement ? { pageRequirement, requestedTotalPages: presentationPlanningTotalPages(pageRequirement) } : {}),
           documentIR,
-          ...(dependencies.artDirection ? { userRequirement: dependencies.artDirection.userRequirement,
+          ...(kind === 'ppt' && dependencies.artDirection ? { userRequirement: dependencies.artDirection.userRequirement,
             requestArtDirection: dependencies.artDirection.request } : {}),
           // Runtime cancellation must reach the existing runner and its writer.
           signal: context.abortSignal
@@ -165,11 +183,12 @@ export function createGeneratePptxBinding(
 async function defaultExecutionInput(
   args: CanonicalToolArguments,
   outline: NonNullable<ReturnType<DocumentDraftCompilerPort['compile']>>,
-  context: DocumentAtomicExecutionContext
+  context: DocumentAtomicExecutionContext,
+  kind: DocumentWorkspaceKind
 ): Promise<DocumentGenerationExecutionInput> {
   return {
     executionId: context.taskContext.taskId,
-    kind: 'ppt',
+    kind,
     title: String(args.title),
     contentFingerprint: await sha256(JSON.stringify([context.taskContext.taskId, context.revision ?? 0,
       Object.entries(args).sort(([a], [b]) => a.localeCompare(b))])),
@@ -228,10 +247,10 @@ async function sha256(value: string): Promise<string> {
   return Array.from(new Uint8Array(digest), byte => byte.toString(16).padStart(2, '0')).join('');
 }
 
-function authorized(context: DocumentAtomicExecutionContext): boolean {
+function authorized(context: DocumentAtomicExecutionContext, toolId: DocumentAtomicToolBinding['contract']['toolId']): boolean {
   const authorization = context.authorization as typeof context.authorization & {
     readonly generationAuthorization?: 'not_requested' | 'awaiting_user' | 'approved' | 'revoked';
   };
-  return context.authorization.canWrite && context.authorization.allowedToolIds.includes('generate_pptx') &&
+  return context.authorization.canWrite && context.authorization.allowedToolIds.includes(toolId) &&
     authorization.generationAuthorization === 'approved' && !context.abortSignal.aborted;
 }

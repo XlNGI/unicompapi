@@ -209,7 +209,7 @@ describe('semantic groups and relationships reach the real PPTX geometry', () =>
         userRequirement: '按已声明的页面分组组织全部内容，不允许丢失、重复或跨页借用事实。', designIR: proposed, requestArtDirection: planner });
       if (invalid === 'missing_source') await expect(execution).rejects.toMatchObject({ code: 'document_layout_overflow' });
       else await expect(execution).rejects.toMatchObject({ code: 'invalid_plan' });
-      expect(planner).toHaveBeenCalledTimes(1);
+      expect(planner).toHaveBeenCalledTimes(invalid === 'missing_source' ? 1 : 3);
       expect(await new JsonWorkRepository(new NodeProjectStorage(rootDirectory), projectId).list(projectId)).toEqual([]);
     });
 

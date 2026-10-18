@@ -5,24 +5,24 @@ import path from 'node:path';
 import JSZip from 'jszip';
 import PptxGenJS from 'pptxgenjs';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { ConversationIntentOrchestrator, ConversationWorkflowService, DocumentGenerationApplicationService, ConversationStreamingService } from '../../src/application';
-import { runLocalDocumentRevisionAgent } from '../../src/application/document-revision-agent';
+
+
 import { mappedPresentationTarget } from '../../src/application/presentation-revision-map';
-import { addUserMessage, createConversation, toConversationId, toMessageId, toProjectId, toIsoTimestamp, type DocumentOutline } from '../../src/domain';
+import { toProjectId, type DocumentOutline } from '../../src/domain';
 import { NodeProjectStorage } from '../../src/platform/storage';
-import { JsonProjectConversationRepository, JsonConversationWorkflowRepository, JsonConversationResponseExecutionRepository } from '../../src/platform/repositories';
+
 import { JsonWorkRepository, JsonExecutionRepository, JsonTaskRepository } from '../../src/platform/repositories/json-repositories';
 import { DocumentGenerationRunner } from '../../src/platform/documents/document-generation-runner';
 import { generateTemporaryDocumentFile } from '../../src/platform/documents/office-document-generator';
 import { readPptxDocument, readPptxPage } from '../../src/platform/documents/pptx-page-reader';
-import { RegisteredPresentationReader, buildPresentationRevisionMap, createPresentationWorkflowScope } from '../../src/platform/documents/registered-presentation-reader';
-import { PlatformDocumentDraftCompiler, PlatformDocumentGenerationExecutor } from '../../src/platform/documents/document-generation-application-adapters';
-import { createDocumentWorkflowSettlement } from '../../src/platform/documents/conversation-document-workflow';
-import { ConversationDocumentInputStore } from '../../src/platform/documents/conversation-document-inputs';
-import { applyStructuredDocumentPatch, readStructuredDocument } from '../../src/platform/documents/structured-document-tools';
-import { toWorkflowDto } from '../../src/platform/ipc/conversation-workflow-controller';
-import { documentGenerationRequestParsers } from '../../src/shared/document-generation-ipc';
-import { createChatContextRuntime } from '../../src/platform/ipc/chat-context-runtime';
+import { RegisteredPresentationReader, buildPresentationRevisionMap } from '../../src/platform/documents/registered-presentation-reader';
+
+
+
+
+
+
+
 
 const roots: string[] = [];
 afterEach(async () => { vi.restoreAllMocks(); await Promise.all(roots.splice(0).map((root) => rm(root, { recursive: true, force: true }))); });
@@ -88,142 +88,7 @@ async function assertOnlySlidesChanged(before: Uint8Array, after: Uint8Array, al
   }
 }
 
-async function conversationFixture(request = '将第7章内容清空') {
-  const f = await fixture();
-  const conversationId = toConversationId('conversation-revision-map');
-  const conversations = new JsonProjectConversationRepository(f.storage, f.projectId, now);
-  await conversations.create(createConversation({ id: conversationId, projectId: f.projectId, title: '保存回归', createdAt: toIsoTimestamp(now()) }));
-  let messageSequence = 0;
-  const streaming = new ConversationStreamingService(conversations, {
-    nextConversationId: () => conversationId, nextMessageId: () => toMessageId(`revision-message-${++messageSequence}`)
-  }, now);
-  const appendAssistant = async (content: string) => streaming.createCompletedLocalAssistantMessage({
-    conversationId, expectedRevision: (await conversations.get(conversationId))!.revision, content
-  });
-  const parent = await appendAssistant(JSON.stringify(baseOutline));
-  await streaming.attachDocumentResult({ conversationId, messageId: parent.messageId,
-    expectedRevision: (await conversations.get(conversationId))!.revision,
-    documentResult: { kind: 'ppt', workId: f.base.work.id, fileName: '十三页章节验收.pptx', sizeBytes: f.base.file.sizeBytes!, validatedContent: JSON.stringify(baseOutline) }
-  });
-  const appendUser = async (content: string) => {
-    const conversation = (await conversations.get(conversationId))!;
-    const id = toMessageId(`revision-message-${++messageSequence}`);
-    await conversations.save(addUserMessage(conversation, { id, content, createdAt: toIsoTimestamp(now()) }), conversation.revision);
-    return id;
-  };
-  await appendUser('第7页是什么内容？');
-  await appendAssistant('第7页是第4章标题。');
-  const sourceMessageId = await appendUser(request);
-  const scope = createPresentationWorkflowScope(f);
-  const workflows = new ConversationWorkflowService(new JsonConversationWorkflowRepository(f.storage, f.projectId, now),
-    new ConversationIntentOrchestrator(), now, undefined, undefined, scope);
-  const workflow = await workflows.create({ projectId: f.projectId, conversationId, sourceMessageId, rawText: request,
-    context: { documents: [{ messageId: parent.messageId, kind: 'ppt', fileName: '十三页章节验收.pptx' }] } });
-  const attachResult = vi.fn(async (input: Parameters<typeof streaming.attachDocumentResult>[0]) => { await streaming.attachDocumentResult(input); });
-  const makeApplication = () => new DocumentGenerationApplicationService({
-    projectId: f.projectId,
-    conversations: { load: (id) => conversations.get(id), createCompletedLocalAssistantMessage: (input) => streaming.createCompletedLocalAssistantMessage(input),
-      attachDocumentResult: attachResult, updateDocumentGenerationStatus: async (input) => { await streaming.updateDocumentGenerationStatus(input); } },
-    workflows: { load: (id) => workflows.get(id), beginExecution: async (input) => { await workflows.beginExecution(input); },
-      bindDocumentMessage: (executionId, messageId) => workflows.bindDocumentMessage(executionId, messageId),
-      finishExecution: async (id, status) => { await workflows.finishExecution(id, status); },
-      settleDocumentResult: createDocumentWorkflowSettlement({ workflows, conversations, executions: new JsonConversationResponseExecutionRepository(f.storage, f.projectId) }) },
-    compiler: new PlatformDocumentDraftCompiler(), generator: new PlatformDocumentGenerationExecutor(f.runner),
-    resolvePresentationMap: async (workId, outline) => (await f.reader.read(workId, outline)).map!,
-    validatePresentationSelection: scope.validatePresentationSelection, canRetryMessage: scope.canRetryMessage,
-    generationInputs: new ConversationDocumentInputStore(f.storage, f.projectId), fingerprint: hash,
-    revisionAgent: (input) => runLocalDocumentRevisionAgent(input, { readStructure: readStructuredDocument,
-      applyPatch: (outline, patch) => { const result = applyStructuredDocumentPatch(outline, patch); return {
-        document: result.document, changed: result.change.changed, affectedSections: result.change.affectedSections
-      }; } })
-  });
-  const prepare = async () => {
-    const confirmed = await workflows.confirm({ workflowId: workflow.id, expectedRevision: workflow.revision });
-    const app = makeApplication();
-    const prepared = await app.prepareDeterministicRevision({ conversationId, expectedRevision: (await conversations.get(conversationId))!.revision,
-      workflowId: confirmed.id, expectedWorkflowRevision: confirmed.revision, kind: 'ppt', parentWorkId: f.base.work.id });
-    return { app, input: { ...prepared, kind: 'ppt' as const, parentWorkId: f.base.work.id, images: [] } };
-  };
-  return { ...f, conversations, conversationId, workflows, workflow, scope, prepare, makeApplication, attachResult };
-}
-
 describe('registered PPT revision and save recovery', () => {
-  it('confirms chapter seven as pages ten to eleven after page-seven QA and saves through the real application', async () => {
-    const f = await conversationFixture();
-    expect(f.workflow).toMatchObject({ status: 'needs_confirmation', resolvedTarget: { presentation: {
-      unit: 'section', ordinal: 7, pages: [10, 11], heading: '第7章标题', checksumSha256: hash(f.bytes)
-    } } });
-    expect(JSON.stringify(toWorkflowDto(f.workflow))).not.toContain('checksumSha256');
-    expect(() => documentGenerationRequestParsers.generateFromMessage({ conversationId: f.conversationId, expectedRevision: 0,
-      messageId: 'fake', kind: 'ppt', sourceChecksumSha256: hash(f.bytes) })).toThrow();
-    const { app, input } = await f.prepare();
-    const result = await app.generateFromMessage(input);
-    expect((await f.workflows.get(f.workflow.id))?.status).toBe('completed');
-    const reopened = await new JsonProjectConversationRepository(f.storage, f.projectId).get(f.conversationId);
-    expect(reopened?.messages.find((message) => message.id === input.messageId)?.documentResult?.workId).toBe(result.workId);
-    const child = await f.reader.read(result.workId);
-    await assertOnlySlidesChanged(f.bytes, child.buffer, ['ppt/slides/slide10.xml', 'ppt/slides/slide11.xml']);
-  });
-
-  it('rejects a changed version between confirmation and generation before creating another file', async () => {
-    const f = await conversationFixture(); const { app, input } = await f.prepare();
-    const changedMap = { ...(await f.reader.read(f.base.work.id, baseOutline)).map!, checksumSha256: '0'.repeat(64) };
-    await expect(f.scope.validatePresentationSelection(input, changedMap, { unit: 'section', ordinal: 7 })).rejects.toMatchObject({ code: 'revision_scope_violation' });
-    const originalRead = f.reader.read.bind(f.reader);
-    vi.spyOn(f.reader, 'read').mockImplementation(async (workId, outline) => ({ ...await originalRead(workId, outline), map: changedMap }));
-    await expect(app.generateFromMessage(input)).rejects.toMatchObject({ code: 'revision_scope_violation' });
-    expect(f.generator).toHaveBeenCalledTimes(1);
-    const failed = (await f.workflows.get(f.workflow.id))!;
-    expect(failed.deliveries?.[0].failureReason).toBe('input_required');
-    await expect(f.workflows.resumeFailedDelivery({ workflowId: failed.id, expectedRevision: failed.revision })).rejects.toMatchObject({ code: 'workflow_not_ready' });
-    await expect(f.makeApplication().generateFromMessage(input)).rejects.toMatchObject({ code: 'revision_scope_violation' });
-    expect(f.generator).toHaveBeenCalledTimes(1);
-  });
-
-  it('recovers result synchronization after reopening without a duplicate document or paid generation', async () => {
-    const f = await conversationFixture(); const { app, input } = await f.prepare();
-    f.attachResult.mockRejectedValueOnce(new Error('conversation storage temporarily unavailable'));
-    await expect(app.generateFromMessage(input)).rejects.toMatchObject({ code: 'result_sync_pending' });
-    const failed = (await f.workflows.get(f.workflow.id))!;
-    const status = (await new JsonProjectConversationRepository(f.storage, f.projectId).get(f.conversationId))!.messages.find((message) => message.id === input.messageId)?.documentGenerationStatus;
-    expect(status).toMatchObject({ state: 'failed', errorCode: 'result_sync_pending' });
-    const before = await new JsonWorkRepository(f.storage, f.projectId).list(f.projectId);
-    expect(before).toHaveLength(2);
-    await f.workflows.resumeFailedDelivery({ workflowId: failed.id, expectedRevision: failed.revision });
-    const result = await f.makeApplication().generateFromMessage(input);
-    expect(before.map((work) => work.id)).toContain(result.workId);
-    expect(f.generator).toHaveBeenCalledTimes(2);
-    expect(await new JsonWorkRepository(f.storage, f.projectId).list(f.projectId)).toHaveLength(2);
-    expect((await f.workflows.get(f.workflow.id))?.status).toBe('completed');
-  });
-
-  it('restores the saved-result retry after both conversation attachment and workflow settlement were interrupted', async () => {
-    const f = await conversationFixture(); const { app, input } = await f.prepare();
-    f.attachResult.mockRejectedValueOnce(new Error('conversation temporarily unavailable'));
-    const finish = vi.spyOn(f.workflows, 'finishDocumentExecution').mockRejectedValueOnce(new Error('workflow temporarily unavailable'));
-    await expect(app.generateFromMessage(input)).rejects.toMatchObject({ code: 'result_sync_pending' });
-    expect((await f.workflows.get(f.workflow.id))?.status).toBe('executing');
-    finish.mockRestore();
-    const runtime = createChatContextRuntime({
-      getSession: () => ({ projectId: f.projectId, projectName: '保存回归', rootDirectory: f.rootDirectory }),
-      userDataDirectory: path.join(f.rootDirectory, 'user-data'), now
-    });
-    const pending = await runtime.workflows.getPending({ conversationId: f.conversationId });
-    expect(pending).toMatchObject({ ok: true, value: { status: 'failed', deliveries: [{ failureReason: 'execution_failed' }] } });
-    const failed = (await f.workflows.get(f.workflow.id))!;
-    await f.workflows.resumeFailedDelivery({ workflowId: failed.id, expectedRevision: failed.revision });
-    await f.makeApplication().generateFromMessage(input);
-    expect(f.generator).toHaveBeenCalledTimes(2);
-    expect(await new JsonWorkRepository(f.storage, f.projectId).list(f.projectId)).toHaveLength(2);
-  });
-
-  it('rejects a changed file at the confirmation boundary', async () => {
-    const f = await conversationFixture();
-    const filePath = path.join(f.rootDirectory, f.base.file.locator.kind === 'project' ? f.base.file.locator.relativePath : '');
-    await writeFile(filePath, Buffer.concat([f.bytes, Buffer.from('changed')]));
-    await expect(f.workflows.confirm({ workflowId: f.workflow.id, expectedRevision: f.workflow.revision })).rejects.toMatchObject({ code: 'document_page_ambiguous' });
-    expect(f.generator).toHaveBeenCalledTimes(1);
-  });
 
   it('clears numeric body content equal to the page number instead of mistaking it for a footer', async () => {
     const f = await fixture(); const result = await clear(f, 'page', 11);

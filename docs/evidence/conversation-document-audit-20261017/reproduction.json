@@ -1,0 +1,204 @@
+{
+  "schemaVersion": 1,
+  "date": "2026-10-17",
+  "recordedAt": "2026-10-17T07:03:30.818Z",
+  "status": "audit_complete_defects_reproduced_not_fixed",
+  "baseline": {
+    "branch": "feature/www-video-contract-binding",
+    "head": "c2f8ac696da3fb39dd368233a0142e458e80b9cf"
+  },
+  "scope": {
+    "syntheticInputsOnly": true,
+    "businessSourceChanged": false,
+    "userDataChanged": false,
+    "credentialFilesRead": false,
+    "externalProviderRequests": 0,
+    "generatedPptFiles": 0,
+    "applicationRestarts": 0,
+    "imageFeatureExcluded": true,
+    "proposalAndDesignStarted": false
+  },
+  "evidenceMeaning": "Successful reproduction means an observed audit finding was confirmed. It does not mean the product defect passed acceptance.",
+  "intentCases": [
+    {
+      "query": "先讨论PPT方案，不要直接生成",
+      "kind": "agent",
+      "generationRequired": true,
+      "generationAuthorization": "approved"
+    },
+    {
+      "query": "不要马上制作PPT，先讨论",
+      "kind": "agent",
+      "generationRequired": true,
+      "generationAuthorization": "approved"
+    },
+    {
+      "query": "我不想立即生成PPT，先分析内容",
+      "kind": "agent",
+      "generationRequired": true,
+      "generationAuthorization": "approved"
+    },
+    {
+      "query": "先帮我设计PPT结构",
+      "kind": "agent",
+      "generationRequired": false,
+      "generationAuthorization": "approved"
+    },
+    {
+      "query": "先讨论 Word 报告，不生成文件",
+      "kind": "agent",
+      "generationRequired": false,
+      "generationAuthorization": "approved"
+    },
+    {
+      "query": "现在生成一份Excel预算表",
+      "kind": "agent",
+      "generationRequired": false,
+      "generationAuthorization": "approved"
+    },
+    {
+      "query": "立即生成PPT",
+      "kind": "agent",
+      "generationRequired": true,
+      "generationAuthorization": "approved"
+    }
+  ],
+  "providerTools": [
+    {
+      "toolId": "read_document_structure",
+      "fields": [
+        "scope",
+        "ordinal"
+      ]
+    },
+    {
+      "toolId": "update_element",
+      "fields": [
+        "elementId",
+        "text"
+      ]
+    },
+    {
+      "toolId": "add_element",
+      "fields": [
+        "pageId",
+        "type",
+        "text",
+        "placement"
+      ]
+    },
+    {
+      "toolId": "delete_element",
+      "fields": [
+        "elementId"
+      ]
+    },
+    {
+      "toolId": "add_slide",
+      "fields": [
+        "position",
+        "referencePageId",
+        "title"
+      ]
+    },
+    {
+      "toolId": "generate_pptx",
+      "fields": [
+        "title",
+        "content",
+        "theme",
+        "presentationTemplate",
+        "requestedTotalPages"
+      ]
+    }
+  ],
+  "revisionCases": [
+    {
+      "query": "第二页更简洁一点",
+      "status": "rejected",
+      "errorCode": "presentation_design_ir_invalid",
+      "diagnostics": [
+        {
+          "code": "invalid_shape",
+          "path": "$.pages[1].designTree"
+        }
+      ]
+    },
+    {
+      "query": "把第二页改成科技感流程图",
+      "status": "rejected",
+      "errorCode": "presentation_design_ir_invalid",
+      "diagnostics": [
+        {
+          "code": "invalid_shape",
+          "path": "$.pages[1].designTree"
+        }
+      ]
+    }
+  ],
+  "colorCase": {
+    "query": "第二页颜色更克制一些",
+    "targetPages": [
+      2
+    ],
+    "globalColorDirection": [
+      "accent-led",
+      "restrained"
+    ],
+    "beforeStatus": "valid",
+    "afterStatus": "valid",
+    "renderedPagesUnchanged": true
+  },
+  "contextCase": {
+    "completedUserMessages": 42,
+    "truncated": true,
+    "initialConstraintPresent": false
+  },
+  "briefCase": {
+    "helper": "collectArtDirectionRequestText",
+    "selectedUserMessages": 8,
+    "initialConstraintPresent": false,
+    "nativePathEquivalentBound": "conversation-document-tool-session.ts:1104 uses brief.length < 8"
+  },
+  "planningCase": {
+    "planningRequests": 1,
+    "validSecondResponseAvailable": true,
+    "designReturned": false,
+    "diagnostics": [
+      {
+        "code": "invalid_json"
+      }
+    ]
+  },
+  "deterministicVisualAudit": {
+    "baselineRenderPlanStatus": "valid",
+    "visualAudit": {
+      "status": "warning",
+      "multimodalReview": "not_available",
+      "diagnostics": [
+        {
+          "code": "visual_crowded_page",
+          "severity": "warning",
+          "pageNumber": 2,
+          "message": "Element occupancy leaves little safe whitespace"
+        }
+      ]
+    }
+  },
+  "sourceHashes": {
+    "src/platform/documents/conversation-document-tool-session.ts": "e7bd0e3ea157492aad86455a853c2e4d3f4025b20b71e563187244f6b405ebdd",
+    "src/domain/entities/canonical-tool-contract.ts": "34ad96fef337dd6577f884e4dcaca447c721d391fac2911f909322d0265899e6",
+    "src/application/conversation-context-builder.ts": "5a2f3193f3556ca8db6461342265ea369d4cc5743ad89225b5b1f662e038af95",
+    "src/application/agent-context-assembler.ts": "f2dc7e94678a8d82af8e98d0390e28627005045499d20c9c26d17dc6373ca743",
+    "src/application/document-generation-service.ts": "74dcda8b878559b065e00af8b9cf987bb342253cb4f35bb8c1369cb280259c0b",
+    "src/application/presentation-design-revision.ts": "81686e85bcdc2a131bac00b6ca47c25e35aef00f8c5e4ff1aa43e55441278e29",
+    "src/domain/entities/presentation-design-contract.ts": "09ad92ecfd54a152b9435fc356a7d6a5779bc0e5b612b65e2dd45a922877906f",
+    "src/platform/documents/presentation-design-planning.ts": "a1b474e21a07c73848356943c6980407f374ad82d76f0c67dd63f0c391d7cc77",
+    "src/platform/documents/presentation-render-plan-compiler.ts": "df5a65218205d2fd482f9c9f365cb5dcc232c34da41d5136ea1752a0a4fb8ccb",
+    "src/platform/documents/presentation-visual-audit.ts": "fa43eef12fe733ba93e6f7fafc4419351d80c2de62e4b234f0ef87544260bee7",
+    "src/platform/documents/document-generation-runner.ts": "aa9da0100d7fca9e305824f569b27c4534faf0d4b2032bdd979e5edbe5b25d72",
+    "src/pages/chat/ChatPage.tsx": "82453a2a59378bced0af0e47ef3e6934cf603edf14fa6b3ff959f5d214c939f8",
+    "scripts/verify-agent-provider-mock-electron.cjs": "2f692d86ca863da0165e7d7a14e54eefb2478c2a470d9bba25dc1c33ea866dc8",
+    "tests/fixtures/presentation-autonomous-design.ts": "2a59b5c06d1c251e593ff2ca93e9748fe4c04a07664cb5c615b3caea24d965ce"
+  }
+}

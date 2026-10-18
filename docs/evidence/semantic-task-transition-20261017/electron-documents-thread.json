@@ -1,0 +1,133 @@
+{
+  "schemaVersion": 1,
+  "status": "passed",
+  "boundary": "real Electron BrowserWindow + production preload + production IPC + controlled in-process Provider transport",
+  "checks": [
+    "normal Agent response",
+    "persistent execution identity",
+    "cancel start boundary",
+    "Provider tool call through the real Electron IPC path",
+    "Word physical file generation",
+    "Excel physical file generation"
+  ],
+  "requestCount": 33,
+  "artDirectionRequestCount": 3,
+  "abortCount": 0,
+  "toolCalling": {
+    "state": "completed",
+    "toolCallCount": 1,
+    "toolCallId": "mock-generate-pptx-1",
+    "observationReturned": true,
+    "artifactRegistered": true,
+    "generatedWorkCount": 1,
+    "autonomousDesignExecuted": true,
+    "designExecution": {
+      "status": "passed",
+      "authoredPageCount": 3,
+      "nodeCount": 7,
+      "verifiedElementCount": 7
+    },
+    "designPath": "design-aware",
+    "documentResult": {
+      "workId": "work-document-a674fdc4-32cf-4de0-8484-aadae483060f",
+      "fileName": "Electron Tool Calling 验收-20261017185315-56d5aa2f-adb4-4dd9-8e19-86fe0a53d3c1.pptx",
+      "kind": "ppt",
+      "sizeBytes": 59807
+    },
+    "threadDocumentReceipt": {
+      "fileName": "Electron Tool Calling 验收-20261017185315-56d5aa2f-adb4-4dd9-8e19-86fe0a53d3c1.pptx",
+      "kind": "ppt",
+      "sizeBytes": 59807,
+      "workId": "work-document-a674fdc4-32cf-4de0-8484-aadae483060f"
+    },
+    "threadToolParentState": "completed",
+    "entry": "responses.startAgent",
+    "threadToolFacts": [
+      {
+        "itemType": "tool_call_projection",
+        "status": "completed",
+        "eventSystem": "agent_runtime",
+        "responseExecutionId": "response-execution-e801ae24-0547-4b1e-af6f-d87ea75dec54"
+      },
+      {
+        "itemType": "tool_result_projection",
+        "status": "completed",
+        "eventSystem": "agent_runtime",
+        "responseExecutionId": "response-execution-e801ae24-0547-4b1e-af6f-d87ea75dec54"
+      },
+      {
+        "itemType": "tool_call_projection",
+        "status": "completed",
+        "eventSystem": "agent_runtime",
+        "responseExecutionId": "response-execution-e801ae24-0547-4b1e-af6f-d87ea75dec54"
+      },
+      {
+        "itemType": "tool_result_projection",
+        "status": "completed",
+        "eventSystem": "agent_runtime",
+        "responseExecutionId": "response-execution-e801ae24-0547-4b1e-af6f-d87ea75dec54"
+      }
+    ],
+    "threadArtifact": {
+      "workId": "work-document-a674fdc4-32cf-4de0-8484-aadae483060f",
+      "fileName": "Electron Tool Calling 验收-20261017185315-56d5aa2f-adb4-4dd9-8e19-86fe0a53d3c1.pptx",
+      "kind": "ppt",
+      "sizeBytes": 59807
+    }
+  },
+  "threadRuntimeControls": true,
+  "discussionCases": [
+    {
+      "case": "discussion-sky-content",
+      "state": "completed",
+      "registeredNewWorks": 0,
+      "semanticPlannerCalls": 1,
+      "writeToolsExposed": false,
+      "externalProviderCalls": 0
+    },
+    {
+      "case": "discussion-reject-generation",
+      "state": "completed",
+      "registeredNewWorks": 0,
+      "semanticPlannerCalls": 1,
+      "writeToolsExposed": false,
+      "externalProviderCalls": 0
+    },
+    {
+      "case": "discussion-existing-ppt",
+      "state": "completed",
+      "registeredNewWorks": 0,
+      "semanticPlannerCalls": 1,
+      "writeToolsExposed": false,
+      "externalProviderCalls": 0
+    }
+  ],
+  "office": {
+    "word": {
+      "workId": "work-document-7849b339-54cf-4af0-aa4e-cac486d32d1b",
+      "fileName": "原生 Office 端到端验收-20261017185341-f7a0f012-3c5a-4dd0-8724-f0e8ba0417a8.docx",
+      "kind": "word",
+      "sizeBytes": 8842,
+      "nativeBusinessTool": true,
+      "threadArtifact": true
+    },
+    "excel": {
+      "workId": "work-document-569f7f3a-6825-4a29-b82f-4728b8f126d6",
+      "fileName": "原生 Office 端到端验收-20261017185349-d83aa95f-0899-49ca-b96a-b13babce66a5.xlsx",
+      "kind": "excel",
+      "sizeBytes": 6788,
+      "nativeBusinessTool": true,
+      "threadArtifact": true
+    }
+  },
+  "nativeRevision": {
+    "status": "passed",
+    "targetPage": 2,
+    "untouchedPagesPreserved": true,
+    "fileReadBack": true,
+    "workId": "work-document-49bf0e75-d480-4ae2-864b-2a0470d53718",
+    "unchangedRequestReusedWork": true
+  },
+  "externalProvider": "blocked: no authorized external credentials used",
+  "externalProviderCalls": 0
+}

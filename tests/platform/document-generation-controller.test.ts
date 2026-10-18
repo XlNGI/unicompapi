@@ -169,66 +169,6 @@ describe('document generation controller', () => {
     const result = await controller.prepareGeneration({ conversationId: 'budget-conversation', expectedRevision: 0, messageId: 'budget-message', kind: 'ppt' });
     expect(result).toMatchObject({ ok: false, error: { code: code === 'cancelled' ? 'generation_cancelled' : 'generation_failed' } });
   });
-  it('only exposes message-based generation that can be cancelled and deduplicated', async () => {
-    const { controller } = await createEnvironment();
-    expect(controller).not.toHaveProperty('generateFromConversation');
-    expect(controller).toHaveProperty('generateFromMessage');
-    expect(controller).toHaveProperty('prepareDeterministicRevision');
-    expect(controller).toHaveProperty('prepareGeneration');
-    expect(controller).toHaveProperty('reconcileGeneration');
-    expect(controller).toHaveProperty('cancelGeneration');
-  });
-
-  it('exposes a strict deterministic revision preparation contract', async () => {
-    const application = {
-      prepareDeterministicRevision: async () => ({
-        conversationId: toConversationId('document-local-conversation'),
-        expectedRevision: 8,
-        messageId: toMessageId('document-local-message')
-      })
-    } as unknown as DocumentGenerationApplicationService;
-    const controller = new DocumentGenerationController({
-      getSession: () => ({
-        projectId: toProjectId('document-local-project'),
-        projectName: 'Document local project',
-        rootDirectory: process.cwd()
-      }),
-      getApplication: () => application,
-      openPath: async () => ''
-    });
-
-    await expect(controller.prepareDeterministicRevision({
-      conversationId: 'document-local-conversation',
-      expectedRevision: 7,
-      workflowId: 'document-local-workflow',
-      expectedWorkflowRevision: 2,
-      kind: 'ppt',
-      parentWorkId: 'document-local-parent'
-    })).resolves.toEqual({
-      ok: true,
-      value: {
-        conversationId: 'document-local-conversation',
-        expectedRevision: 8,
-        messageId: 'document-local-message'
-      }
-    });
-    await expect(controller.prepareDeterministicRevision({
-      conversationId: 'document-local-conversation',
-      expectedRevision: 7,
-      workflowId: 'document-local-workflow',
-      expectedWorkflowRevision: 2,
-      kind: 'ppt',
-      parentWorkId: 'document-local-parent',
-      outputPath: 'D:\\unsafe\\result.pptx'
-    })).resolves.toEqual({
-      ok: false,
-      error: {
-        code: 'invalid_request',
-        message:
-          'prepareDeterministicRevision contains unsupported field outputPath'
-      }
-    });
-  });
 
   it.each([
     ['revision_scope_violation', 'Revision target is outside the document'],
@@ -663,7 +603,7 @@ describe('document generation controller', () => {
     expect(await works.list(toProjectId('doc-ipc-project'))).toHaveLength(2);
   }, 15_000);
 
-  it('registers a revision as a new work and preserves the previous document', async () => {
+  it('rejects the retired local revision entry and preserves the registered document', async () => {
     const { controller, conversationId, now, repository, rootDirectory } =
       await createEnvironment();
     const firstMessageId = 'message-word-version-1';
@@ -698,16 +638,13 @@ describe('document generation controller', () => {
       kind: 'word',
       parentWorkId: first.value.workId
     });
-    expect(second.ok).toBe(true);
-    if (!second.ok) throw new Error(second.error.message);
+    expect(second).toMatchObject({ ok: false, error: { code: 'invalid_outline' } });
 
     const works = await new JsonWorkRepository(
       new NodeProjectStorage(rootDirectory),
       toProjectId('doc-ipc-project')
     ).list(toProjectId('doc-ipc-project'));
-    expect(works).toHaveLength(2);
-    expect(works.find((work) => work.id === second.value.workId)?.parentWorkId)
-      .toBe(first.value.workId);
+    expect(works).toHaveLength(1);
     expect(works.some((work) => work.id === first.value.workId)).toBe(true);
   }, 15_000);
 
