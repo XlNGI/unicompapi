@@ -1,0 +1,46 @@
+{
+  "status": "ready_to_commit_and_merge",
+  "checkedAt": "2026-10-19T12:17:02.206Z",
+  "phase": "Maintenance; user explicitly authorized merge to develop and push",
+  "scope": "All current conversation modifications, tests, engineering records and evidence",
+  "featureBranch": "feature/www-model-binding-repair-20261019",
+  "developBefore": "e29b7a833ba3f473a8d9fc3dc473d9f6cc39959f",
+  "originDevelopAfterFetch": "e29b7a833ba3f473a8d9fc3dc473d9f6cc39959f",
+  "sourceVerification": {
+    "files": 1123,
+    "mismatches": []
+  },
+  "validation": {
+    "totalRegressionPassed": 3925,
+    "vitestPassed": 3531,
+    "nodeUiPassed": 394,
+    "finalTargetedPassed": 68,
+    "typecheck": "passed",
+    "lint": "passed",
+    "productionBuild": "passed",
+    "platformAudit": "passed",
+    "electronSyntheticCases": 13,
+    "reactChecks": 9,
+    "evidence": "../www-official-parameters-20261019/validation.json",
+    "freshTestRun": false,
+    "basis": "Same source hashes as completed validation; this turn packages evidence and records delivery"
+  },
+  "credentialsScan": {
+    "scannedTextAndCompressedLogs": 192,
+    "findings": [],
+    "forbiddenArtifacts": [],
+    "scope": "Actual staged blobs including compressed logs; no build/runtime outputs or credential files"
+  },
+  "mergePolicy": {
+    "noFastForward": true,
+    "retainLocalAndRemoteFeatureBranch": true,
+    "forcePush": false
+  },
+  "boundaries": {
+    "otherBranchesNotIncluded": true,
+    "existingAppRetained": true,
+    "liveGeneration": 0,
+    "settlement": 0
+  },
+  "stagedFiles": 202
+}

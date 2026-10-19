@@ -35,7 +35,7 @@ import {
   UNICOMPAPI_WWW_PROVIDER_PACKAGE_ID,
   UNICOMPAPI_PROVIDER_PACKAGE_VERSION
 } from './newapi/unicompapi-contracts';
-import type { ControlledWwwVideoPort } from './newapi/www-video-adapter';
+import type { ControlledWwwVideoPort, WwwVideoQuoteApprovalPort } from './newapi/www-video-adapter';
 import {
   MINIMAX_H3_PROVIDER_PACKAGE_ID,
   MINIMAX_H3_PROVIDER_PACKAGE_VERSION,
@@ -104,6 +104,7 @@ export interface VideoFeatureSubmissionRuntimes {
   readonly providerPackages: ProviderPackageRegistry;
   readonly materials: ControlledImageMaterialPort;
   readonly videoMaterials?: ControlledWwwVideoPort;
+  readonly wwwVideoQuoteApproval?: WwwVideoQuoteApprovalPort;
   readonly usage: NewApiVideoUsageObservationSinkPort
     & ViduUsageObservationSinkPort
     & MiniMaxVideoUsageObservationSinkPort
@@ -302,7 +303,7 @@ export function createMiniMaxVideoAdapterFromRuntimes(
 export function createNewApiVideoAdapterFromRuntimes(
   options: Pick<
     VideoFeatureSubmissionRuntimes,
-    'newApiRuntime' | 'credentialVault' | 'providerRegistry' | 'materials' | 'usage' | 'videoMaterials'
+    'newApiRuntime' | 'credentialVault' | 'providerRegistry' | 'materials' | 'usage' | 'videoMaterials' | 'wwwVideoQuoteApproval'
   > & {
     readonly newApiRuntime: NewApiSharedRuntime;
   }
@@ -326,7 +327,8 @@ export function createNewApiVideoAdapterFromRuntimes(
         toProviderUsageObservationId(`usage-${randomUUID()}`)
     },
     undefined,
-    options.videoMaterials
+    options.videoMaterials,
+    options.wwwVideoQuoteApproval
   );
 }
 

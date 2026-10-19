@@ -74,7 +74,6 @@ test('the buffer module owns parsing, keeps invalid text and reuses the validato
 test('both submission panels flush pending edits and re-validate before dispatch', () => {
   for (const panel of [videoPanel, imagePanel]) {
     assert.match(panel, /useRef<DynamicParameterFormHandle>\(null\)/);
-    assert.match(panel, /ref=\{parameterFormRef\}/);
     assert.match(panel, /function commitPendingParameterEdits\(\)/);
     assert.match(panel, /handle\.flush\(\)/);
     assert.match(panel, /commitPendingParameterEdits\(\)/);
@@ -85,6 +84,8 @@ test('both submission panels flush pending edits and re-validate before dispatch
     assert.match(panel, /draftRef\.current = next;/);
     assert.doesNotMatch(panel, /featureSelection\.parameterValues \} as Record/);
   }
+  assert.match(imagePanel, /ref=\{parameterFormRef\}/);
+  assert.match(videoPanel, /ref=\{parameterFormRef\}/);
   assert.match(videoPanel, /surface="video_generation"/);
   assert.match(imagePanel, /surface="image_generation"/);
 });

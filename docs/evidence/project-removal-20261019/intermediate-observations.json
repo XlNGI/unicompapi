@@ -1,0 +1,29 @@
+[
+  {
+    "gate": "vitest",
+    "result": "38 passed / 40",
+    "source": "Tool output retained in conversation",
+    "reason": "Invalid fixture assumed empty entity history validates manifest; unsupported matcher. Fixed fixture and matcher; final 53 passed."
+  },
+  {
+    "gate": "node-ui",
+    "result": "393 passed / 394",
+    "source": "Tool output retained in conversation",
+    "reason": "Platform audit disallowed direct process.platform and win32 literal in new production module. Replaced with path.relative semantics; final 394 passed."
+  },
+  {
+    "gate": "electron",
+    "attempts": [
+      1,
+      2,
+      3
+    ],
+    "source": "electron-attempt-1/2/3.json and .log",
+    "reason": "Harness selected a hidden RSuite menu item for a different synthetic project. Exact-directory assertion prevented trash. Visible-only selectors and dialog identity checks fixed."
+  },
+  {
+    "gate": "visual",
+    "source": "electron-pass-before-visual.json",
+    "reason": "Hidden window compositor returned older frames. Final screenshot helper primes capture, then captures current frame; five final screenshots visually reviewed."
+  }
+]

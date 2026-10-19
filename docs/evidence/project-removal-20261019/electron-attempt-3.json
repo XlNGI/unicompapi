@@ -1,0 +1,82 @@
+{
+  "passed": false,
+  "externalRequests": 0,
+  "rendererErrors": [],
+  "nativeTrashCalls": 0,
+  "observations": {
+    "escapePreservesRecord": true,
+    "removals": [
+      {
+        "request": {
+          "projectId": "project-removal-missing",
+          "mode": "forget"
+        },
+        "reply": {
+          "ok": true,
+          "value": {
+            "projectId": "project-removal-missing",
+            "filesTrashed": false,
+            "sessionClosed": false
+          }
+        }
+      },
+      {
+        "request": {
+          "projectId": "project-removal-broken",
+          "mode": "forget"
+        },
+        "reply": {
+          "ok": true,
+          "value": {
+            "projectId": "project-removal-broken",
+            "filesTrashed": false,
+            "sessionClosed": false
+          }
+        }
+      },
+      {
+        "request": {
+          "projectId": "project-removal-missing2",
+          "mode": "forget"
+        },
+        "reply": {
+          "ok": true,
+          "value": {
+            "projectId": "project-removal-missing2",
+            "filesTrashed": false,
+            "sessionClosed": false
+          }
+        }
+      },
+      {
+        "request": {
+          "projectId": "project-removal-keep",
+          "mode": "trash"
+        },
+        "reply": {
+          "ok": false,
+          "error": {
+            "code": "project_remove_failed",
+            "message": "The project could not be removed; you can remove its record while keeping files"
+          }
+        }
+      }
+    ],
+    "libraryMissingRemoval": true,
+    "corruptProjectFilesRetained": true,
+    "sidebarMissingRemoval": true,
+    "hostErrors": [
+      {
+        "name": "AssertionError",
+        "message": "Expected values to be strictly equal:\n+ actual - expected\n\n+ 'C:\\\\Users\\\\MSI\\\\AppData\\\\Local\\\\Temp\\\\uc-project-removal-electron-XZUv9n\\\\keep'\n- 'C:\\\\Users\\\\MSI\\\\AppData\\\\Local\\\\Temp\\\\uc-project-removal-electron-XZUv9n\\\\trash'"
+      }
+    ],
+    "failedTrashRetainsRecordAndFiles": true,
+    "failure": {
+      "name": "AssertionError",
+      "message": "{\"escapePreservesRecord\":true,\"removals\":[{\"request\":{\"projectId\":\"project-removal-missing\",\"mode\":\"forget\"},\"reply\":{\"ok\":true,\"value\":{\"projectId\":\"project-removal-missing\",\"filesTrashed\":false,\"sessionClosed\":false}}},{\"request\":{\"projectId\":\"project-removal-broken\",\"mode\":\"forget\"},\"reply\":{\"ok\":true,\"value\":{\"projectId\":\"project-removal-broken\",\"filesTrashed\":false,\"sessionClosed\":false}}},{\"request\":{\"projectId\":\"project-removal-missing2\",\"mode\":\"forget\"},\"reply\":{\"ok\":true,\"value\":{\"projectId\":\"project-removal-missing2\",\"filesTrashed\":false,\"sessionClosed\":false}}},{\"request\":{\"projectId\":\"project-removal-keep\",\"mode\":\"trash\"},\"reply\":{\"ok\":false,\"error\":{\"code\":\"project_remove_failed\",\"message\":\"The project could not be removed; you can remove its record while keeping files\"}}}],\"libraryMissingRemoval\":true,\"corruptProjectFilesRetained\":true,\"sidebarMissingRemoval\":true,\"hostErrors\":[{\"name\":\"AssertionError\",\"message\":\"Expected values to be strictly equal:\\n+ actual - expected\\n\\n+ 'C:\\\\\\\\Users\\\\\\\\MSI\\\\\\\\AppData\\\\\\\\Local\\\\\\\\Temp\\\\\\\\uc-project-removal-electron-XZUv9n\\\\\\\\keep'\\n- 'C:\\\\\\\\Users\\\\\\\\MSI\\\\\\\\AppData\\\\\\\\Local\\\\\\\\Temp\\\\\\\\uc-project-removal-electron-XZUv9n\\\\\\\\trash'\"}],\"failedTrashRetainsRecordAndFiles\":true}\n\n0 !== 1\n",
+      "stack": "AssertionError [ERR_ASSERTION]: {\"escapePreservesRecord\":true,\"removals\":[{\"request\":{\"projectId\":\"project-removal-missing\",\"mode\":\"forget\"},\"reply\":{\"ok\":true,\"value\":{\"projectId\":\"project-removal-missing\",\"filesTrashed\":false,\"sessionClosed\":false}}},{\"request\":{\"projectId\":\"project-removal-broken\",\"mode\":\"forget\"},\"reply\":{\"ok\":true,\"value\":{\"projectId\":\"project-removal-broken\",\"filesTrashed\":false,\"sessionClosed\":false}}},{\"request\":{\"projectId\":\"project-removal-missing2\",\"mode\":\"forget\"},\"reply\":{\"ok\":true,\"value\":{\"projectId\":\"project-removal-missing2\",\"filesTrashed\":false,\"sessionClosed\":false}}},{\"request\":{\"projectId\":\"project-removal-keep\",\"mode\":\"trash\"},\"reply\":{\"ok\":false,\"error\":{\"code\":\"project_remove_failed\",\"message\":\"The project could not be removed; you can remove its record while keeping files\"}}}],\"libraryMissingRemoval\":true,\"corruptProjectFilesRetained\":true,\"sidebarMissingRemoval\":true,\"hostErrors\":[{\"name\":\"AssertionError\",\"message\":\"Expected values to be strictly equal:\\n+ actual - expected\\n\\n+ 'C:\\\\\\\\Users\\\\\\\\MSI\\\\\\\\AppData\\\\\\\\Local\\\\\\\\Temp\\\\\\\\uc-project-removal-electron-XZUv9n\\\\\\\\keep'\\n- 'C:\\\\\\\\Users\\\\\\\\MSI\\\\\\\\AppData\\\\\\\\Local\\\\\\\\Temp\\\\\\\\uc-project-removal-electron-XZUv9n\\\\\\\\trash'\"}],\"failedTrashRetainsRecordAndFiles\":true}\n\n0 !== 1\n\n    at E:\\UniComp\\unicompapi\\scripts\\verify-project-removal-electron.cjs:186:12"
+    }
+  },
+  "boundary": "production main/preload/renderer; synthetic project/profile only; one synthetic folder moved with real shell.trashItem; no model calls"
+}

@@ -1,0 +1,67 @@
+{
+  "capturedAt": "2026-10-19T09:17:10.312Z",
+  "model": "MiniMax-H3",
+  "remoteTaskId": "485aeb85-6812-4b69-9a20-618421b509db",
+  "localState": "failed",
+  "localFailure": {
+    "stage": "queued",
+    "message": "远端结果查询中断，结果尚未确认，勿重复提交。",
+    "retryability": "unknown"
+  },
+  "requests": [
+    {
+      "method": "GET",
+      "path": "/v1/h3/tasks/485aeb85-6812-4b69-9a20-618421b509db",
+      "status": 200
+    }
+  ],
+  "paidGenerationPosts": 0,
+  "settlementPosts": 0,
+  "responseSha256": "c6baaedb4a559d4a1cc88dab2f58f07e9e5147b77ba2e2bff78fa55a2c23bf57",
+  "response": {
+    "id": "485aeb85-6812-4b69-9a20-618421b509db",
+    "object": "h3.task",
+    "model": "MiniMax-H3",
+    "action": "generate",
+    "output_type": "video",
+    "status": "succeeded",
+    "created": 1792395670,
+    "poll_url": {
+      "type": "string",
+      "length": 49
+    },
+    "provider_task_id": {
+      "type": "string",
+      "length": 36
+    },
+    "usage": {
+      "action": "generate",
+      "input_image_count": "[redacted]",
+      "input_seconds": "[redacted]",
+      "output_seconds": 4,
+      "total_seconds": 4,
+      "prompt_tokens": "[redacted]",
+      "completion_tokens": "[redacted]",
+      "total_tokens": "[redacted]"
+    },
+    "ledger_id": {
+      "type": "string",
+      "length": 36
+    },
+    "billing": {
+      "currency": "CNY_MICRO",
+      "price_version": "pv_1220535b1604e8a5a3b2bfe4f12fe8c5e3797d354428abc51f11b42982cc7e46",
+      "quoted_amount": 7040000,
+      "reserved_amount": 0,
+      "actual_amount": 7040000,
+      "charged_amount": 7040000,
+      "settlement_pending": false
+    },
+    "data": {
+      "asset_id": "485aeb85-6812-4b69-9a20-618421b509db",
+      "url": "/v1/videos/485aeb85-6812-4b69-9a20-618421b509db/content?asset_id=485aeb85-6812-4b69-9a20-618421b509db",
+      "mime_type": "video/mp4"
+    }
+  },
+  "localRecordsUnchanged": true
+}

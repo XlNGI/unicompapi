@@ -1,0 +1,19 @@
+{
+  "capturedAt": "2026-10-19T09:28:15.856Z",
+  "code": "ERR_ASSERTION",
+  "name": "AssertionError",
+  "requests": [
+    {
+      "method": "GET",
+      "path": "/v1/h3/tasks/485aeb85-6812-4b69-9a20-618421b509db",
+      "status": 200
+    },
+    {
+      "method": "GET",
+      "path": "/v1/videos/485aeb85-6812-4b69-9a20-618421b509db/content",
+      "status": 200
+    }
+  ],
+  "generationPosts": 0,
+  "settlementPosts": 0
+}

@@ -1,0 +1,10 @@
+{
+  "capturedAt": "2026-10-19T09:40:21.4432943+00:00",
+  "pid": 17184,
+  "mainWindowTitle": "UniComp",
+  "responding": true,
+  "visible": true,
+  "httpStatus": 200,
+  "launchCommand": "pnpm dev",
+  "retainedForUser": true
+}

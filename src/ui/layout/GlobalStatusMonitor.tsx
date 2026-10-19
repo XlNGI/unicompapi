@@ -8,7 +8,7 @@ import {
 import type {
   StorageLocalStorageSummaryDto
 } from '../../shared/storage-ipc';
-import { PROJECT_SESSION_CHANGED_EVENT } from '../project-session-events';
+import { PROJECT_CATALOG_CHANGED_EVENT, PROJECT_SESSION_CHANGED_EVENT } from '../project-session-events';
 import { tasksForProject, useTaskReadStore } from '../task-read-store';
 import { summarizeTasks } from './TaskStatusDock';
 
@@ -46,12 +46,14 @@ export function GlobalStatusMonitor() {
     const unsubscribe = storageApi?.onLocalStorageChanged(handleProjectChange);
     window.addEventListener('focus', handleFocus);
     window.addEventListener(PROJECT_SESSION_CHANGED_EVENT, handleProjectChange);
+    window.addEventListener(PROJECT_CATALOG_CHANGED_EVENT, handleProjectChange);
     return () => {
       active = false;
       window.clearInterval(timer);
       unsubscribe?.();
       window.removeEventListener('focus', handleFocus);
       window.removeEventListener(PROJECT_SESSION_CHANGED_EVENT, handleProjectChange);
+      window.removeEventListener(PROJECT_CATALOG_CHANGED_EVENT, handleProjectChange);
     };
   }, [storageApi]);
 

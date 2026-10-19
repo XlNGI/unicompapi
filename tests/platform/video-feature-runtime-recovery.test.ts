@@ -133,12 +133,14 @@ describe('video feature result recovery', () => {
       release();
       await operation;
       const saved = await fixture.executions.get(initial.id);
+      if (outcome !== 'polling_exhausted') expect(query).toHaveBeenCalledTimes(1);
       expect(saved?.state).toBe(outcome === 'completed' ? 'completed' : outcome === 'cancelled' ? 'cancelled' : 'failed');
       if (outcome === 'query_error') expect(saved?.failure?.retryability).toBe('unknown');
       if (outcome === 'receiver_error') expect(saved?.failure).toMatchObject({ stage: 'downloading', retryability: 'retryable' });
     });
   it('restores a Vidu operation context and reuses the failed execution', async () => {
     const fixture = await createFixture(VIDU_REFERENCE_VIDEO_V2_ADAPTER_ID);
+    const initialization = vi.spyOn(fixture.providerRegistry, 'mutateIfChanged');
     const rememberVideoOperation = vi.fn();
 
     const runtime = createRuntime(fixture, {
@@ -161,6 +163,7 @@ describe('video feature result recovery', () => {
     expect(fixture.receive).toHaveBeenCalledWith(fixture.execution.id);
     await expect(fixture.executions.list(fixture.task.id)).resolves.toHaveLength(1);
     expect(runtime.submit).toBeUndefined();
+    expect(initialization).not.toHaveBeenCalled();
   });
 
   it('keeps the NewAPI recovery attachment path working', async () => {

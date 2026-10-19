@@ -205,7 +205,7 @@ export type ProviderCancelOutcome =
   | { readonly state: 'unknown' };
 
 export interface ProviderAsyncOperationPort {
-  query(providerOperationId: string): Promise<ProviderAsyncOperationStatus>;
+  query(providerOperationId: string, signal?: AbortSignal): Promise<ProviderAsyncOperationStatus>;
   cancel(providerOperationId: string): Promise<ProviderCancelOutcome>;
 }
 
@@ -220,11 +220,24 @@ export class ProviderAsyncOperationCoordinator {
   async refresh(recordId: ProviderOperationRecordId): Promise<Execution> {
     const context = await this.loadAsyncContext(recordId);
     const status = await this.port.query(context.providerOperationId);
+    return this.applyObservedStatus(recordId, context.providerOperationId, status);
+  }
+
+  /** Persist the status already observed by the poller, without another GET. */
+  async applyObservedStatus(recordId: ProviderOperationRecordId, providerOperationId: string,
+    status: ProviderAsyncOperationStatus): Promise<Execution> {
+    const context = await this.loadAsyncContext(recordId);
+    if (context.providerOperationId !== providerOperationId) throw new TypeError('provider operation ID mismatch');
     let execution = context.execution;
+    if (isTerminalExecutionState(execution.state) || execution.state === 'remote_completed') return execution;
     const updatedAt = toIsoTimestamp(this.now());
-    if (status.state === execution.state) return execution;
-    if (status.state === 'queued' && execution.state === 'processing') {
-      return execution;
+    if (status.state === execution.state || status.state === 'queued' && execution.state === 'processing') {
+      // A successful query is a heartbeat even when the provider state has not
+      // changed. History must not label an actively polled task as stale.
+      if (updatedAt <= execution.updatedAt) return execution;
+      const current = { ...execution, updatedAt };
+      await this.executionRepository.save(current);
+      return current;
     }
     if (status.state === 'queued' || status.state === 'processing') {
       execution = transitionExecution(execution, status.state, updatedAt);

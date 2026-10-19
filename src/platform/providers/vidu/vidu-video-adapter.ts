@@ -318,6 +318,7 @@ export interface ViduPollerOptions {
   readonly jitterRatio?: number;
   readonly random?: () => number;
   readonly wait?: (delayMs: number, signal?: AbortSignal) => Promise<void>;
+  readonly onStatus?: (status: ProviderAsyncOperationStatus) => Promise<void>;
 }
 
 export class ViduBoundedPoller {
@@ -327,6 +328,7 @@ export class ViduBoundedPoller {
   private readonly jitterRatio: number;
   private readonly random: () => number;
   private readonly wait: (delayMs: number, signal?: AbortSignal) => Promise<void>;
+  private readonly onStatus?: ViduPollerOptions['onStatus'];
 
   constructor(
     private readonly operations: ProviderAsyncOperationPort,
@@ -341,6 +343,7 @@ export class ViduBoundedPoller {
     }
     this.random = options.random ?? Math.random;
     this.wait = options.wait ?? waitForDelay;
+    this.onStatus = options.onStatus;
   }
 
   async poll(
@@ -349,16 +352,28 @@ export class ViduBoundedPoller {
   ): Promise<ProviderAsyncOperationStatus | { readonly state: 'polling_exhausted' }> {
     for (let attempt = 0; attempt < this.maximumAttempts; attempt += 1) {
       if (signal?.aborted) throw new ViduRuntimeError('cancelled', 'not_retryable');
+      let status: ProviderAsyncOperationStatus | undefined;
+      let retryAfterMs = 0;
       try {
-        const status = await this.operations.query(providerOperationId);
-        if (status.state !== 'queued' && status.state !== 'processing') return status;
+        status = await this.operations.query(providerOperationId, signal);
       } catch (error) {
-        if (!(error instanceof ViduRuntimeError) || error.retryability !== 'retryable') {
+        // Queries are read-only. Honor all adapters' retry classifications,
+        // including transport ambiguity on GET, while leaving submits untouched.
+        if (!(error instanceof Error) || !('retryability' in error) ||
+          !(error.retryability === 'retryable' || error.retryability === 'unknown' && 'code' in error && error.code === 'network_error')) {
           throw error;
         }
+        if ('retryAfterMs' in error && typeof error.retryAfterMs === 'number' && Number.isFinite(error.retryAfterMs)) {
+          retryAfterMs = Math.max(0, Math.min(this.maximumDelayMs, error.retryAfterMs));
+        }
+      }
+      if (signal?.aborted) throw new ViduRuntimeError('cancelled', 'not_retryable');
+      if (status) {
+        await this.onStatus?.(status);
+        if (status.state !== 'queued' && status.state !== 'processing') return status;
       }
       if (attempt + 1 < this.maximumAttempts) {
-        await this.wait(this.delayForAttempt(attempt), signal);
+        await this.wait(Math.max(this.delayForAttempt(attempt), retryAfterMs), signal);
       }
     }
     return { state: 'polling_exhausted' };

@@ -1,0 +1,568 @@
+{
+  "schemaVersion": 1,
+  "capturedAt": "2026-10-19T09:43:14.049Z",
+  "status": "passed",
+  "branch": "feature/www-model-binding-repair-20261019",
+  "tests": {
+    "vitest": {
+      "files": 349,
+      "total": 3515,
+      "passed": 3515,
+      "failed": 0,
+      "skipped": 0,
+      "timeoutMs": 15000,
+      "fullCommand": "pnpm exec vitest run tests/application tests/domain tests/platform validation tests/evaluation --maxWorkers=2 --minWorkers=2 --testTimeout=15000"
+    },
+    "nodeUi": {
+      "total": 394,
+      "passed": 394,
+      "failed": 0,
+      "skipped": 0,
+      "verifiedLog": true
+    },
+    "uniqueTotal": 3909,
+    "targetedRunsExcludedFromTotal": true
+  },
+  "checks": {
+    "typecheck": "passed",
+    "lint": "passed",
+    "productionBuild": "passed",
+    "platformAudit": "passed",
+    "diffCheck": "passed"
+  },
+  "integration": {
+    "electron": {
+      "status": "passed",
+      "combinations": 13,
+      "models": 9,
+      "externalRequests": 0,
+      "realPaidPosts": 0,
+      "h3Sequence": "original GET network error -> processing -> succeeded; content GET network error -> verified local Work",
+      "boundary": "synthetic transport with actual production Electron/preload/IPC/Host and local receiver"
+    },
+    "productionReact": [
+      {
+        "status": "passed",
+        "checks": [
+          "H3 generate types allow audio off and free resolution; no inherited action limits",
+          "five gateway parameters and separate cost authorization",
+          "same-turn buffered model and cost edits saved together before preflight"
+        ],
+        "externalRequests": 0
+      },
+      {
+        "status": "passed",
+        "checks": [
+          "original video decodes in production workbench; edit model selected; image addition hidden",
+          "quote cap rendered in separate cost authorization; model parameters contain only gateway inputs",
+          "production Generate action saves exact video_edit selection before local preflight",
+          "deleting video restores image mode and removes stale edit parameters",
+          "controlled Select video action restores video edit and preview"
+        ],
+        "externalRequests": 0
+      }
+    ],
+    "startup": {
+      "capturedAt": "2026-10-19T09:40:21.4432943+00:00",
+      "pid": 17184,
+      "mainWindowTitle": "UniComp",
+      "responding": true,
+      "visible": true,
+      "httpStatus": 200,
+      "launchCommand": "pnpm dev",
+      "retainedForUser": true
+    }
+  },
+  "originalRecovery": [
+    {
+      "originalInspection": {
+        "capturedAt": "2026-10-19T09:17:10.312Z",
+        "model": "MiniMax-H3",
+        "remoteTaskId": "485aeb85-6812-4b69-9a20-618421b509db",
+        "localState": "failed",
+        "localFailure": {
+          "stage": "queued",
+          "message": "远端结果查询中断，结果尚未确认，勿重复提交。",
+          "retryability": "unknown"
+        },
+        "requests": [
+          {
+            "method": "GET",
+            "path": "/v1/h3/tasks/485aeb85-6812-4b69-9a20-618421b509db",
+            "status": 200
+          }
+        ],
+        "paidGenerationPosts": 0,
+        "settlementPosts": 0,
+        "responseSha256": "c6baaedb4a559d4a1cc88dab2f58f07e9e5147b77ba2e2bff78fa55a2c23bf57",
+        "response": {
+          "id": "485aeb85-6812-4b69-9a20-618421b509db",
+          "object": "h3.task",
+          "model": "MiniMax-H3",
+          "action": "generate",
+          "output_type": "video",
+          "status": "succeeded",
+          "created": 1792395670,
+          "poll_url": {
+            "type": "string",
+            "length": 49
+          },
+          "provider_task_id": {
+            "type": "string",
+            "length": 36
+          },
+          "usage": {
+            "action": "generate",
+            "input_image_count": "[redacted]",
+            "input_seconds": "[redacted]",
+            "output_seconds": 4,
+            "total_seconds": 4,
+            "prompt_tokens": "[redacted]",
+            "completion_tokens": "[redacted]",
+            "total_tokens": "[redacted]"
+          },
+          "ledger_id": {
+            "type": "string",
+            "length": 36
+          },
+          "billing": {
+            "currency": "CNY_MICRO",
+            "price_version": "pv_1220535b1604e8a5a3b2bfe4f12fe8c5e3797d354428abc51f11b42982cc7e46",
+            "quoted_amount": 7040000,
+            "reserved_amount": 0,
+            "actual_amount": 7040000,
+            "charged_amount": 7040000,
+            "settlement_pending": false
+          },
+          "data": {
+            "asset_id": "485aeb85-6812-4b69-9a20-618421b509db",
+            "url": "/v1/videos/485aeb85-6812-4b69-9a20-618421b509db/content?asset_id=485aeb85-6812-4b69-9a20-618421b509db",
+            "mime_type": "video/mp4"
+          }
+        },
+        "localRecordsUnchanged": true
+      },
+      "validation": {
+        "capturedAt": "2026-10-19T09:31:38.101Z",
+        "status": "passed",
+        "model": "MiniMax-H3",
+        "remoteTaskId": "485aeb85-6812-4b69-9a20-618421b509db",
+        "taskId": "task-video-a423cbb8-8a9c-459d-9b0e-c7e416e54f46",
+        "executionId": "execution-video-e59c0e52-2fc9-4dd3-aa74-9e5676384b8a",
+        "workId": "work-video-result-beac40bf-de4d-436c-9d43-25ef40161aa5",
+        "state": "completed",
+        "workCount": 1,
+        "file": {
+          "relativePath": "files/results/work-video-result-beac40bf-de4d-436c-9d43-25ef40161aa5.mp4",
+          "state": "available",
+          "checksumSha256": "904623bd445a1e2fab8e5d90fc074cafaf11b1fa2e87d1a916c3938d4e649c59",
+          "metadata": {
+            "mimeType": "video/mp4",
+            "container": "mp4",
+            "durationMs": 4459,
+            "width": 2560,
+            "height": 1440,
+            "sizeBytes": 6312220
+          }
+        },
+        "usage": [
+          {
+            "status": "reported",
+            "facts": [
+              {
+                "metricId": "charged_amount",
+                "quantity": "7040000",
+                "unit": "CNY_MICRO",
+                "source": "provider_body"
+              }
+            ]
+          }
+        ],
+        "requests": [],
+        "generationPosts": 0,
+        "settlementPosts": 0,
+        "originalTaskAndRouteAndRegistryUnchanged": true,
+        "boundary": "Production recovery runtime, adapter and verified local receiver; recover the accepted original only, no generation or settlement"
+      },
+      "originalRecoveryRequests": [
+        {
+          "method": "GET",
+          "path": "/v1/h3/tasks/485aeb85-6812-4b69-9a20-618421b509db",
+          "status": 200
+        },
+        {
+          "method": "GET",
+          "path": "/v1/videos/485aeb85-6812-4b69-9a20-618421b509db/content",
+          "status": 200
+        }
+      ],
+      "decode": {
+        "exitCode": 0,
+        "errorBytes": 0
+      },
+      "previousChargeCny": 7.04,
+      "newGenerationPosts": 0,
+      "newSettlementPosts": 0,
+      "repeatedQueryRequests": 0
+    },
+    {
+      "originalInspection": {
+        "capturedAt": "2026-10-19T09:27:04.569Z",
+        "model": "MiniMax-H3",
+        "remoteTaskId": "c67c5363-474b-405e-a7fa-f91675e0e88c",
+        "localState": "failed",
+        "localFailure": {
+          "stage": "queued",
+          "message": "远端结果查询中断，结果尚未确认，勿重复提交。",
+          "retryability": "unknown"
+        },
+        "requests": [
+          {
+            "method": "GET",
+            "path": "/v1/h3/tasks/c67c5363-474b-405e-a7fa-f91675e0e88c",
+            "status": 200
+          }
+        ],
+        "paidGenerationPosts": 0,
+        "settlementPosts": 0,
+        "responseSha256": "bf534f75fa58a43b56f4d706df23f95a7e77c66ed94ba3b94fa785bb96fab0f2",
+        "response": {
+          "id": "c67c5363-474b-405e-a7fa-f91675e0e88c",
+          "object": "h3.task",
+          "model": "MiniMax-H3",
+          "action": "generate",
+          "output_type": "video",
+          "status": "succeeded",
+          "created": 1792394463,
+          "poll_url": {
+            "type": "string",
+            "length": 49
+          },
+          "provider_task_id": {
+            "type": "string",
+            "length": 36
+          },
+          "usage": {
+            "action": "generate",
+            "input_image_count": "[redacted]",
+            "input_seconds": "[redacted]",
+            "output_seconds": 4,
+            "total_seconds": 4,
+            "prompt_tokens": "[redacted]",
+            "completion_tokens": "[redacted]",
+            "total_tokens": "[redacted]"
+          },
+          "ledger_id": {
+            "type": "string",
+            "length": 36
+          },
+          "billing": {
+            "currency": "CNY_MICRO",
+            "price_version": "pv_1220535b1604e8a5a3b2bfe4f12fe8c5e3797d354428abc51f11b42982cc7e46",
+            "quoted_amount": 7040000,
+            "reserved_amount": 0,
+            "actual_amount": 7040000,
+            "charged_amount": 7040000,
+            "settlement_pending": false
+          },
+          "data": {
+            "asset_id": "c67c5363-474b-405e-a7fa-f91675e0e88c",
+            "url": "/v1/videos/c67c5363-474b-405e-a7fa-f91675e0e88c/content?asset_id=c67c5363-474b-405e-a7fa-f91675e0e88c",
+            "mime_type": "video/mp4"
+          }
+        },
+        "localRecordsUnchanged": true
+      },
+      "validation": {
+        "capturedAt": "2026-10-19T09:38:23.184Z",
+        "status": "passed",
+        "model": "MiniMax-H3",
+        "remoteTaskId": "c67c5363-474b-405e-a7fa-f91675e0e88c",
+        "taskId": "task-video-e01d588c-1049-44e0-a18d-dd9b99ca2d31",
+        "executionId": "execution-video-3b280bce-4423-4b06-98f3-df49d3c1c78d",
+        "workId": "work-video-result-5a4cf8d1-a004-4d13-960c-94a3044fcce3",
+        "state": "completed",
+        "workCount": 1,
+        "file": {
+          "relativePath": "files/results/work-video-result-5a4cf8d1-a004-4d13-960c-94a3044fcce3.mp4",
+          "state": "available",
+          "checksumSha256": "a529dbbb9e0cfb0e31315c7c60cccc2fa690b95752402fcf06ea2bf0d7c5fc60",
+          "metadata": {
+            "mimeType": "video/mp4",
+            "container": "mp4",
+            "durationMs": 4459,
+            "width": 2560,
+            "height": 1440,
+            "sizeBytes": 4747848
+          }
+        },
+        "usage": [
+          {
+            "status": "reported",
+            "facts": [
+              {
+                "metricId": "charged_amount",
+                "quantity": "7040000",
+                "unit": "CNY_MICRO",
+                "source": "provider_body"
+              }
+            ]
+          }
+        ],
+        "requests": [],
+        "generationPosts": 0,
+        "settlementPosts": 0,
+        "originalTaskAndRouteAndRegistryUnchanged": true,
+        "boundary": "Production recovery runtime, adapter and verified local receiver; recover the accepted original only, no generation or settlement"
+      },
+      "originalRecoveryRequests": [
+        {
+          "method": "GET",
+          "path": "/v1/h3/tasks/c67c5363-474b-405e-a7fa-f91675e0e88c",
+          "status": 200
+        },
+        {
+          "method": "GET",
+          "path": "/v1/videos/c67c5363-474b-405e-a7fa-f91675e0e88c/content",
+          "status": 200
+        }
+      ],
+      "decode": {
+        "exitCode": 0,
+        "errorBytes": 0
+      },
+      "previousChargeCny": 7.04,
+      "newGenerationPosts": 0,
+      "newSettlementPosts": 0,
+      "repeatedQueryRequests": 0
+    }
+  ],
+  "sourceVerification": {
+    "snapshot": "source-snapshot.json",
+    "files": 57,
+    "changesAfterFullTests": []
+  },
+  "intermediateFailures": [
+    {
+      "artifact": "vitest-final.json",
+      "result": "3511/3515; three document tests exceeded default 5s, one old Retry-After assertion; final full rerun passed at 15s"
+    },
+    {
+      "artifact": "node-ui-final.log",
+      "result": "392/394; static assertions assumed one form; updated assertions and behavioral Electron checks passed"
+    },
+    {
+      "artifact": "ui-h3-initial.log",
+      "result": "verification script selected the wrong RSuite switch DOM node; corrected and reran"
+    },
+    {
+      "artifact": "recovery-latest/recovery-failure.json",
+      "result": "video already registered, final guard found H3 profile migration from eager candidate initialization; deferred initialization and verified existing video without network"
+    },
+    {
+      "artifact": "recovery-earlier/recovery-failure.json",
+      "result": "temporary original GET network error; all protected file hashes unchanged; same original subsequently recovered"
+    },
+    {
+      "artifact": "initial-latest-query-error.log",
+      "result": "initial original GET network error; later original GET succeeded"
+    },
+    {
+      "artifact": "initial-earlier-query-error.log",
+      "result": "initial original GET network error; later original GET succeeded"
+    }
+  ],
+  "boundaries": {
+    "publicDocs": "retained 2026-10-15 WWW snapshot; no new web research",
+    "h3ParameterEvidence": "generate example names and primitive types; quote validates actual accepted combinations, no claim of complete upstream schema",
+    "acceptedV1Contracts": "query and download only; new submit requires v2",
+    "paidGeneration": "none",
+    "originalTaskNetworking": "same-origin original task GET and private content GET only",
+    "actualRegistry": "initial recovery triggered H3 binding revision 2 upgrade; later recovery preserves registry hash",
+    "userMediaCommitted": false,
+    "macos": "not tested on hardware",
+    "committed": false,
+    "pushed": false,
+    "released": false
+  },
+  "artifacts": [
+    "docs/current/video-schema-polling-20261019.md",
+    "PLANS.md",
+    {
+      "file": "baseline.json",
+      "sha256": "7d03cb1b51e5b346d4607fa6388b7e1d6b7cf735bfb6e19c3a06effee02b6805"
+    },
+    {
+      "file": "build-final.log",
+      "sha256": "10690422572e448784577b3813d90388e84f1c99ddb025394ce9f4f240ae4fb4"
+    },
+    {
+      "file": "build-release.log",
+      "sha256": "59c9c03bcea5fc6be94d99dd76220ab978e6a605166b4a7acba27409006ed9d9"
+    },
+    {
+      "file": "build-verified.log",
+      "sha256": "5bf4feaedac893a84ea539a511aa943134bbf11fe9b57e3535935aec815911c0"
+    },
+    {
+      "file": "build.log",
+      "sha256": "cc82501306e210bb3edcb22793b113c9bfdd80b42786a5589334f3bde44f1363"
+    },
+    {
+      "file": "earlier-decode.log",
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "file": "electron-final.log",
+      "sha256": "242926841a476df37e4b44c5be4bcf58914abfff00da2aab92354da56bb8c806"
+    },
+    {
+      "file": "electron-initial.log",
+      "sha256": "62b9d214b914aa2c427c403cbd20e395252bdf92c39fc7da8f09d34b568d6592"
+    },
+    {
+      "file": "electron-validation.json",
+      "sha256": "1d274793dbd887c04a2e585749f2de55080213145353815dc37a5f26a61e69d0"
+    },
+    {
+      "file": "electron-verified.log",
+      "sha256": "560768c797478f915d4eb60d8422cfa47346e5b1fb5e6b6a2a5d5df5efd9f117"
+    },
+    {
+      "file": "h3-schema-cost.png",
+      "sha256": "bcc2097f8310f2ad7891e8aa7fe5ff612fbbd64f5aa3debe88c004daff22cc77"
+    },
+    {
+      "file": "initial-earlier-query-error.log",
+      "sha256": "ba2356c7d710272aac1117f1051691c1cdd42e06b046db9df7588b534ad8511f"
+    },
+    {
+      "file": "initial-latest-query-error.log",
+      "sha256": "ba2356c7d710272aac1117f1051691c1cdd42e06b046db9df7588b534ad8511f"
+    },
+    {
+      "file": "latest-decode.log",
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "file": "lint-final.log",
+      "sha256": "b82d4e84fd71366ac9eedac1f51146a0fcf888d88b7bcfb4ae647538cddc0c22"
+    },
+    {
+      "file": "lint.log",
+      "sha256": "0a2a14e898ea9ff1e6fdb988d5c4f96def08ed58c6f3f8dd54a67c24cf3db26b"
+    },
+    {
+      "file": "node-ui-final.log",
+      "sha256": "72d8e0010b28d9af52bf92bafa3eaabefd617047fd2ba2209c726ef382ab9657"
+    },
+    {
+      "file": "node-ui-repaired.log",
+      "sha256": "402d67838a9519d7596eb294b88237cb1d78a5a8e03aa7e5b15a9bd6d03493b3"
+    },
+    {
+      "file": "node-ui-verified.log",
+      "sha256": "06392a64a9ec9c57776d83ce4e1d36077dcba0eb9d9459a1530fff08ea9f20b0"
+    },
+    {
+      "file": "original-earlier-read.log",
+      "sha256": "5b3e4e27d2c39ef00d4a5777d7d76d7d314602450380eea132dab4883d9ee9bc"
+    },
+    {
+      "file": "original-get-diagnostic.log",
+      "sha256": "ac568c0299dca9c1614bcbc6032c1a28fe487db062c95a9b3640d77e002b699b"
+    },
+    {
+      "file": "platform-audit.log",
+      "sha256": "fd3f9d4d537e3d5910b11f9e48b805369b7ecc5c23931cfc64b997befb66aa65"
+    },
+    {
+      "file": "recovery-earlier-repeat.log",
+      "sha256": "c8828e7189fb93577866e9f15f00f99dfe8cd6b47ec3b3876ef751134f0df32c"
+    },
+    {
+      "file": "recovery-earlier-retry.log",
+      "sha256": "b056b678b9cbedb7ae0c70e559bb254eba9bb03feb81cba48d22ac3cde904aeb"
+    },
+    {
+      "file": "recovery-earlier.log",
+      "sha256": "884c9ea0dd7ea4173dbb6dc06fb11a97969f113e693bf4d76cfdca6687e1f1fc"
+    },
+    {
+      "file": "recovery-latest-repeat.log",
+      "sha256": "187f3c79b9abf8667d0690b5691d41aee78f95a53e2da4104ae2bfa0ce25b657"
+    },
+    {
+      "file": "recovery-latest.log",
+      "sha256": "d53138a226ad7f2f210e2beaa047c34cfc789d99367ca1d3024c20f52d97522a"
+    },
+    {
+      "file": "source-snapshot.json",
+      "sha256": "8e97ef2165a6e435eb1839d4b60d2b99fc5eb25cd4e8598057f0127b9c3dc88a"
+    },
+    {
+      "file": "startup-validation.json",
+      "sha256": "97e3af1ee6bfef6611aa23bd1d318acbb3a99e535a18a681e3fce6d1a381d695"
+    },
+    {
+      "file": "startup.log",
+      "sha256": "0a524efddc637b2f8d63f59c53d736e8ab48caaac70e590fa4139eaacbc78190"
+    },
+    {
+      "file": "targeted-initial.log",
+      "sha256": "e81582815628fd00892569864376315c6bf68f9d666e10b0084655cea2888003"
+    },
+    {
+      "file": "transport-diagnostic.log",
+      "sha256": "0501ee4e4af086f9db423def21bfc43d2cbbe08f25b708bded7b5839374af308"
+    },
+    {
+      "file": "typecheck-final.log",
+      "sha256": "7c12f8a055c9d6b7a88117742d1c91ae611891f5662d6453a0872e5cb6144296"
+    },
+    {
+      "file": "typecheck.log",
+      "sha256": "d293572c508df1d7168a90e64078b2db7273bef67f9b5d78978973957d7b53c6"
+    },
+    {
+      "file": "ui-edit-final.log",
+      "sha256": "e30e79ecd6d676fce00b09c24b4cd6155aa649bf27659a4b6a58469cf408289f"
+    },
+    {
+      "file": "ui-edit-validation.json",
+      "sha256": "59002de26cd7192f6d6e6386b07c197a2438b8a250e5b4b98091264a34a9f5a8"
+    },
+    {
+      "file": "ui-h3-final.log",
+      "sha256": "adeb30602fbda611eaa66a8f273485df360bf7d32b9b50db5fa2099be9f10b45"
+    },
+    {
+      "file": "ui-h3-initial.log",
+      "sha256": "0ce6fc1d57063cdeed45f9bd5a888471d82b025c1f1aeb0a5f12b3b7e3764651"
+    },
+    {
+      "file": "ui-h3-validation.json",
+      "sha256": "4e77d2a202eb997405d6bb68a160fd030a878f713556fc2080ac9a3b078df704"
+    },
+    {
+      "file": "ui-h3-verified.log",
+      "sha256": "dbecfae52fc3f3efc582ada8d3639fb5184c846bf80e9f4e26600c6ce6dcde16"
+    },
+    {
+      "file": "vitest-final.json",
+      "sha256": "559eb46a545ff5bbbe9b5a6a56e2f9094f177970ee0e78c472446a984e468c32"
+    },
+    {
+      "file": "vitest-final.log",
+      "sha256": "6b48d55b1ec3b31662b6d78abbec87e6a23cbebaff344133d4d8d6968e101098"
+    },
+    {
+      "file": "vitest-verified.json",
+      "sha256": "80f0848410e0fa2a1cdbb6f93aa53b7dfae1ad0361b0a7d8033ef1cdc6661735"
+    },
+    {
+      "file": "vitest-verified.log",
+      "sha256": "3a25bad6c85e965c2de8b4b361df02b5f0256f2286bac420e4729184babe62fc"
+    }
+  ]
+}

@@ -19,6 +19,8 @@ export default defineConfig({
         '**/.cache/**',
         '**/.tools/**',
         '**/.workbuddy/**',
+        // Engineering receipts can be exclusively locked while being written.
+        '**/docs/evidence/**',
         '**/chrome-profile/**',
         '**/chrome-profile-*/**',
         '**/dist-electron/**',

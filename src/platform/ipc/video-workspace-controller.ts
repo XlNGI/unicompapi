@@ -33,6 +33,7 @@ import {
 } from '../files';
 import type { StorageProjectSession } from './storage-ipc-controller';
 import { VideoWorkspaceMutationCoordinator } from './video-workspace-mutations';
+import { migrateRetiredWwwVideoCost } from '../repositories/video-workspace-parameter-migration';
 
 export interface VideoWorkspaceControllerDependencies {
   getSession(): StorageProjectSession | undefined;
@@ -133,7 +134,7 @@ export class VideoWorkspaceController {
         }
 
         const updatedAt = this.now();
-        const candidate = createVideoWorkspaceDraft({
+        const candidate = migrateRetiredWwwVideoCost(createVideoWorkspaceDraft({
           ...requested,
           id: stored.id,
           projectId: stored.projectId,
@@ -141,7 +142,7 @@ export class VideoWorkspaceController {
           origin: stored.origin,
           createdAt: stored.createdAt,
           updatedAt
-        } as VideoWorkspaceDraft);
+        } as VideoWorkspaceDraft));
         const updated = applyVideoWorkspaceChangeStaleness(
           stored,
           candidate,

@@ -84,16 +84,23 @@ export interface ProviderCandidateRuntimeAuthorizationPort {
 }
 
 export class RegistryFeatureCandidateSource implements FeatureCandidateSourcePort {
+  private initialization?: Promise<void>;
   constructor(
     private readonly registry: JsonProviderRegistryStore,
     private readonly packages: ProviderPackageRegistry,
     private readonly contracts: ProviderFeatureContractRegistry,
     private readonly authorization: ProviderCandidateRuntimeAuthorizationPort,
-    private readonly ready?: Promise<void>
-  ) { void ready?.catch(() => undefined); }
+    private readonly ready?: Promise<void> | (() => Promise<void>)
+  ) {
+    if (typeof ready !== 'function') {
+      this.initialization = ready;
+      void ready?.catch(() => undefined);
+    }
+  }
 
   async list(subject: ResolvedFeatureSubjectV1): Promise<readonly ResolvedFeatureCandidateV1[]> {
-    await this.ready;
+    if (!this.initialization && typeof this.ready === 'function') this.initialization = this.ready();
+    await this.initialization;
     const snapshot = await this.registry.load();
     const candidates: ResolvedFeatureCandidateV1[] = [];
 

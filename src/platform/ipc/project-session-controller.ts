@@ -23,6 +23,8 @@ import {
   type ProjectCatalogService
 } from './project-catalog';
 import type { StorageProjectSummaryDto } from '../../shared/storage-ipc';
+import type { StorageRemoveProjectDto } from '../../shared/storage-ipc';
+import { validateProjectTrashTarget } from './project-removal';
 
 export class StorageProjectSessionRegistry {
   private session: StorageProjectSession | undefined;
@@ -45,6 +47,8 @@ export interface ProjectSessionControllerDependencies {
   readonly registry: StorageProjectSessionRegistry;
   chooseProjectDirectory(): Promise<string | undefined>;
   catalog?: ProjectCatalogService;
+  trashProjectDirectory?(directory: string): Promise<void>;
+  readonly protectedDirectories?: readonly string[];
   beforeSessionChange?(): Promise<void>;
   afterSessionChange?(): Promise<void>;
   prepareProjectStorage?(rootDirectory: string): Promise<void>;
@@ -231,6 +235,47 @@ export class ProjectSessionController {
       await this.dependencies.beforeSessionChange?.();
       this.dependencies.registry.clear();
       return { ok: true, value: { closed: true } };
+    });
+  }
+
+  removeProject(request: unknown): Promise<StorageIpcResult<StorageRemoveProjectDto>> {
+    return this.enqueueSessionChange(async () => {
+      try {
+        if (typeof request !== 'object' || request === null || Array.isArray(request) ||
+          !('mode' in request) || (request.mode !== 'forget' && request.mode !== 'trash') ||
+          Object.keys(request).some(key => key !== 'projectId' && key !== 'mode')) {
+          return { ok: false, error: { code: 'invalid_request', message: 'A project id and removal mode are required' } };
+        }
+        const projectId = parseRecentProjectId(request);
+        const catalog = this.dependencies.catalog;
+        if (!catalog) throw new Error('Project catalog is unavailable');
+        const entries = await catalog.getEntries();
+        const entry = entries.find(candidate => candidate.projectId === projectId);
+        const session = this.dependencies.registry.get();
+        const sessionClosed = session?.projectId === projectId;
+        // Retrying a removal never guesses a directory or repeats a filesystem action.
+        if (!entry) return { ok: true, value: { projectId, filesTrashed: false, sessionClosed: false } };
+        if (request.mode === 'trash') {
+          if (sessionClosed) return { ok: false, error: { code: 'project_in_use', message: 'Close the project before moving it to trash' } };
+          if (!this.dependencies.trashProjectDirectory) throw new Error('System trash is unavailable');
+          await validateProjectTrashTarget(entry, entries, session?.rootDirectory, this.dependencies.protectedDirectories);
+          await this.dependencies.trashProjectDirectory(entry.rootDirectory);
+        } else if (sessionClosed) {
+          await this.dependencies.beforeSessionChange?.();
+        }
+        await catalog.remove(projectId);
+        if (sessionClosed) {
+          this.dependencies.registry.clear();
+          // Removal has committed. Optional maintenance must not report it as failed.
+          try { await this.dependencies.afterSessionChange?.(); }
+          catch (error) { this.dependencies.onError?.(error); }
+        }
+        return { ok: true, value: { projectId, filesTrashed: request.mode === 'trash', sessionClosed } };
+      } catch (error) {
+        this.dependencies.onError?.(error);
+        return { ok: false, error: { code: error instanceof ProjectSessionError ? 'invalid_request' : 'project_remove_failed',
+          message: 'The project could not be removed; you can remove its record while keeping files' } };
+      }
     });
   }
 

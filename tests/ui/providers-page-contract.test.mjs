@@ -205,7 +205,8 @@ test('model summary stays in the catalog flow without overlapping the global tas
 test('native search configuration belongs only to the selected text model and opens on demand', () => {
   assert.match(manage, /feature === 'text_chat' \|\| feature === 'text_reasoning'/);
   assert.match(manage, /selectedModel && canConfigureNativeSearch && providersApi\?\.setNativeSearch/);
-  assert.match(manage, /<details className="uc-provider-page__native-search" key=\{selectedModel\.modelId\}>/);
+  assert.match(manage, /<details className="uc-provider-page__native-search" key=\{'native-search-' \+ selectedModel\.modelId\}>/);
+  assert.match(manage, /<ModelContractBinding key=\{'api-contract-' \+ selectedModel\.modelId\}/);
   assert.match(manage, /setSearchProtocol\(selectedModel\?\.nativeSearch\?\.protocol \?\? null\)/);
   assert.match(manage, /setSearchEvidence\(selectedModel\?\.nativeSearch\?\.evidenceUrl \?\? ''\)/);
   assert.match(manage, /\[selectedModel\?\.modelId, selectedModel\?\.nativeSearch\?\.protocol, selectedModel\?\.nativeSearch\?\.evidenceUrl\]/);

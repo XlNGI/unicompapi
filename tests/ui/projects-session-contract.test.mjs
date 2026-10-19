@@ -3,6 +3,8 @@ import { readFile } from 'node:fs/promises';
 import test from 'node:test';
 
 const source = await readFile('src/pages/projects/ProjectsPage.tsx', 'utf8');
+const removalDialog = await readFile('src/components/ProjectRemovalDialog.tsx', 'utf8');
+const library = await readFile('src/pages/library/LibraryPage.tsx', 'utf8');
 
 test('projects page uses the controlled project session API', () => {
   for (const operation of [
@@ -20,6 +22,19 @@ test('projects page uses the controlled project session API', () => {
   assert.match(source, /projectName/);
   assert.match(source, /notifyProjectSessionChanged/);
   assert.doesNotMatch(source, /rootDirectory|absolutePath|readFile|writeFile/);
+});
+
+test('project removal stays available for unavailable entries and uses ids with explicit file semantics', () => {
+  assert.match(source, /aria-label=\{`删除项目 \$\{project\.projectName\}`\} disabled=\{busy\}/);
+  assert.match(source, /ProjectRemovalDialog/);
+  assert.match(removalDialog, /storage\.removeProject\(project\.projectId, mode\)/);
+  assert.match(removalDialog, /仅从列表移除/);
+  assert.match(removalDialog, /系统回收站/);
+  assert.match(removalDialog, /notifyProjectSessionChanged/);
+  assert.match(removalDialog, /event\.preventDefault\(\)/);
+  assert.match(library, /setRemovingProject\(issue\)/);
+  assert.match(library, /allowTrash=\{false\}/);
+  assert.doesNotMatch(removalDialog, /rootDirectory|absolutePath|readFile|writeFile/);
 });
 
 test('recent project cards open available projects through a controlled id', () => {

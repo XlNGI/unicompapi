@@ -1,3 +1,4 @@
+import { migrateRetiredWwwVideoCost } from './video-workspace-parameter-migration';
 import type {
   Asset,
   AssetId,
@@ -345,16 +346,17 @@ export class JsonVideoWorkspaceRepository
     );
   }
 
-  get(id: DraftId) {
-    return this.collection.get(id);
+  async get(id: DraftId) {
+    const draft = await this.collection.get(id);
+    return draft ? migrateRetiredWwwVideoCost(draft) : undefined;
   }
 
-  list(projectId: ProjectId) {
-    return this.collection.list(projectId);
+  async list(projectId: ProjectId) {
+    return (await this.collection.list(projectId)).map(migrateRetiredWwwVideoCost);
   }
 
   save(draft: VideoWorkspaceDraft) {
-    return this.collection.save(draft);
+    return this.collection.save(migrateRetiredWwwVideoCost(draft));
   }
 }
 

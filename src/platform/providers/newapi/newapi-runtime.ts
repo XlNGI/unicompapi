@@ -491,7 +491,7 @@ export class NewApiSharedRuntime {
     if (input.connection.packageId !== UNICOMPAPI_WWW_PROVIDER_PACKAGE_ID || input.connection.endpoint !== UNICOMPAPI_WWW_BASE_URL) {
       throw new NewApiRuntimeError('endpoint_not_allowed', 'not_retryable');
     }
-    const collection = input.h3 ? ['h3', 'tasks'] : ['videos'];
+    const collection = input.h3 && input.operation !== 'content' ? ['h3', 'tasks'] : ['videos'];
     const operation = input.operation;
     if (!['asset', 'quote', 'submit', 'query', 'content', 'request_lookup'].includes(operation)) {
       throw new NewApiRuntimeError('invalid_request', 'not_retryable');

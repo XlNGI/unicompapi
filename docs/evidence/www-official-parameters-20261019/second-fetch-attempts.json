@@ -1,0 +1,658 @@
+{
+  "records": [
+    {
+      "modelKey": "MiniMax-H3",
+      "url": "https://www.unicompapi.com/docs/models/MiniMax-H3",
+      "retrievedAt": "2026-10-19T10:04:52.698Z",
+      "status": null,
+      "error": "TypeError"
+    },
+    {
+      "modelKey": "doubao-seedance-2-0-260128",
+      "url": "https://www.unicompapi.com/docs/models/doubao-seedance-2-0-260128",
+      "retrievedAt": "2026-10-19T10:04:57.706Z",
+      "status": null,
+      "error": "TypeError"
+    },
+    {
+      "modelKey": "happyhorse-1.1-t2v",
+      "url": "https://www.unicompapi.com/docs/models/happyhorse-1.1-t2v",
+      "retrievedAt": "2026-10-19T10:04:58.870Z",
+      "status": 200,
+      "sha256": "1a6b76a2899e3ab0ba70d8ed857222cc78b795c27e8c4a27d8551eb2e77aee0f",
+      "tables": [
+        [
+          "字段",
+          "类型",
+          "范围 / 默认值"
+        ],
+        [
+          "model",
+          "string",
+          "精确使用 happyhorse-1.1-t2v"
+        ],
+        [
+          "prompt",
+          "string",
+          "生成描述；按所选生成方式的必填规则"
+        ],
+        [
+          "parameters.resolution",
+          "string · 可选",
+          "480P、720P、1080P；默认 720P"
+        ],
+        [
+          "parameters.aspect_ratio",
+          "string · 可选",
+          "16:9、9:16、1:1、4:3、3:4、4:5、5:4、9:21、21:9；默认 16:9"
+        ],
+        [
+          "parameters.duration_seconds",
+          "integer · 可选",
+          "3 – 15；默认 5"
+        ],
+        [
+          "parameters.watermark",
+          "boolean · 可选",
+          "true / false；默认 false"
+        ],
+        [
+          "parameters.seed",
+          "integer · 可选",
+          "0 – 2147483647"
+        ],
+        [
+          "assetIds / generatedAssetIds",
+          "string[] · 按型号参考能力",
+          "此型号不支持参考素材"
+        ],
+        [
+          "expected_price_version",
+          "string · 可选",
+          "原quote.price_version，防止价格版本变化"
+        ],
+        [
+          "expected_quote_amount",
+          "integer · 可选",
+          "原quote.quoted_amount，正整数人民币微元"
+        ]
+      ],
+      "notes": [
+        "请求参数以本页定义为准；未知字段、超范围或不同层级冲突会被拒绝，不会静默忽略。",
+        "此接口不接受 assetIds、generatedAssetIds 或远程图片地址。",
+        "计费单位：seconds。结果未确认时查询原任务，不要重复创建。",
+        "图片和视频完成后通过content私有下载；查询和下载使用创建任务的同一Key。公开分享须审核。结果处理中或未知时保留原任务，继续查询，不重复生成。"
+      ]
+    },
+    {
+      "modelKey": "happyhorse-1.1-i2v",
+      "url": "https://www.unicompapi.com/docs/models/happyhorse-1.1-i2v",
+      "retrievedAt": "2026-10-19T10:05:00.005Z",
+      "status": 200,
+      "sha256": "293a5726935f7de689baf4cdd833ccae0b829058f684a324b794fef216967f4b",
+      "tables": [
+        [
+          "字段",
+          "类型",
+          "范围 / 默认值"
+        ],
+        [
+          "model",
+          "string",
+          "精确使用 happyhorse-1.1-i2v"
+        ],
+        [
+          "prompt",
+          "string",
+          "生成描述；按所选生成方式的必填规则"
+        ],
+        [
+          "parameters.resolution",
+          "string · 可选",
+          "480P、720P、1080P；默认 720P"
+        ],
+        [
+          "parameters.duration_seconds",
+          "integer · 可选",
+          "3 – 15；默认 5"
+        ],
+        [
+          "parameters.watermark",
+          "boolean · 可选",
+          "true / false；默认 false"
+        ],
+        [
+          "parameters.seed",
+          "integer · 可选",
+          "0 – 2147483647"
+        ],
+        [
+          "assetIds / generatedAssetIds",
+          "string[] · 按型号参考能力",
+          "1–1 张本人素材，不能重复"
+        ],
+        [
+          "expected_price_version",
+          "string · 可选",
+          "原quote.price_version，防止价格版本变化"
+        ],
+        [
+          "expected_quote_amount",
+          "integer · 可选",
+          "原quote.quoted_amount，正整数人民币微元"
+        ]
+      ],
+      "notes": [
+        "请求参数以本页定义为准；未知字段、超范围或不同层级冲突会被拒绝，不会静默忽略。",
+        "素材数量按所选生成方式填写；当前方式为 first_frame，素材数量为 1–1 件。assetIds 引用本人当前账号已上传素材；generatedAssetIds 引用本人已审核作品。两数组合计须满足本页数量和格式限制，不接受裸远程 URL。使用本人Bearer向 /v1/assets 上传文件，取得 data.id 后引用；官网已有本人素材也可复用。",
+        "首帧宽高≥300、边≤8192、像素≤16MP、比例0.4–2.5、总输入≤20MiB；不能传aspect_ratio，输出按首帧比例生成。",
+        "计费单位：seconds。结果未确认时查询原任务，不要重复创建。",
+        "图片和视频完成后通过content私有下载；查询和下载使用创建任务的同一Key。公开分享须审核。结果处理中或未知时保留原任务，继续查询，不重复生成。"
+      ]
+    },
+    {
+      "modelKey": "happyhorse-1.1-r2v",
+      "url": "https://www.unicompapi.com/docs/models/happyhorse-1.1-r2v",
+      "retrievedAt": "2026-10-19T10:05:01.145Z",
+      "status": 200,
+      "sha256": "92ab65b3579db9dbc3ea56433c1aad653bcbeb58b762d45750c25070ba149828",
+      "tables": [
+        [
+          "字段",
+          "类型",
+          "范围 / 默认值"
+        ],
+        [
+          "model",
+          "string",
+          "精确使用 happyhorse-1.1-r2v"
+        ],
+        [
+          "prompt",
+          "string",
+          "生成描述；按所选生成方式的必填规则"
+        ],
+        [
+          "parameters.resolution",
+          "string · 可选",
+          "480P、720P、1080P；默认 720P"
+        ],
+        [
+          "parameters.aspect_ratio",
+          "string · 可选",
+          "16:9、9:16、1:1、4:3、3:4、4:5、5:4、9:21、21:9；默认 16:9"
+        ],
+        [
+          "parameters.duration_seconds",
+          "integer · 可选",
+          "3 – 15；默认 5"
+        ],
+        [
+          "parameters.watermark",
+          "boolean · 可选",
+          "true / false；默认 false"
+        ],
+        [
+          "parameters.seed",
+          "integer · 可选",
+          "0 – 2147483647"
+        ],
+        [
+          "assetIds / generatedAssetIds",
+          "string[] · 按型号参考能力",
+          "1–9 张本人素材，不能重复"
+        ],
+        [
+          "expected_price_version",
+          "string · 可选",
+          "原quote.price_version，防止价格版本变化"
+        ],
+        [
+          "expected_quote_amount",
+          "integer · 可选",
+          "原quote.quoted_amount，正整数人民币微元"
+        ]
+      ],
+      "notes": [
+        "请求参数以本页定义为准；未知字段、超范围或不同层级冲突会被拒绝，不会静默忽略。",
+        "素材数量按所选生成方式填写；当前方式为 reference_images，素材数量为 1–9 件。assetIds 引用本人当前账号已上传素材；generatedAssetIds 引用本人已审核作品。两数组合计须满足本页数量和格式限制，不接受裸远程 URL。使用本人Bearer向 /v1/assets 上传文件，取得 data.id 后引用；官网已有本人素材也可复用。",
+        "参考图短边≥400、边≤8192、像素≤16MP、总输入≤20MiB；aspect_ratio按本页支持的参数选择。",
+        "计费单位：seconds。结果未确认时查询原任务，不要重复创建。",
+        "图片和视频完成后通过content私有下载；查询和下载使用创建任务的同一Key。公开分享须审核。结果处理中或未知时保留原任务，继续查询，不重复生成。"
+      ]
+    },
+    {
+      "modelKey": "wan3.0-video",
+      "url": "https://www.unicompapi.com/docs/models/wan3.0-video",
+      "retrievedAt": "2026-10-19T10:05:02.298Z",
+      "status": 200,
+      "sha256": "4d791b516384b5e5b839100950a8e99034fe29a4b3988056db5783e802710620",
+      "tables": [
+        [
+          "字段",
+          "类型",
+          "范围 / 默认值"
+        ],
+        [
+          "model",
+          "string",
+          "精确使用 wan3.0-video"
+        ],
+        [
+          "prompt",
+          "string",
+          "生成描述；按所选生成方式的必填规则"
+        ],
+        [
+          "parameters.resolution",
+          "string · 可选",
+          "480P、720P、1080P；默认 480P"
+        ],
+        [
+          "parameters.aspect_ratio",
+          "string · 可选",
+          "adaptive、16:9、4:3、1:1、3:4、9:16；默认 16:9"
+        ],
+        [
+          "parameters.duration_seconds",
+          "integer · 可选",
+          "-1、2、3、4、5、6、7、8、9、10、11、12、13、14、15、16、17、18、19、20、21、22、23、24、25、26、27、28、29、30；默认 5设为-1自动选择时长；参考视频输入与生成视频的合计时长不超过30秒。"
+        ],
+        [
+          "parameters.generate_audio",
+          "boolean · 可选",
+          "true / false；默认 true"
+        ],
+        [
+          "parameters.generation_mode",
+          "string · 可选",
+          "text_to_video、first_frame、last_frame、first_last_frame、reference_images、reference_media、file_link；默认 text_to_video"
+        ],
+        [
+          "parameters.watermark",
+          "boolean · 可选",
+          "true / false"
+        ],
+        [
+          "parameters.seed",
+          "integer · 可选",
+          "0 – 2147483647"
+        ],
+        [
+          "assetIds / generatedAssetIds",
+          "string[] · 按型号参考能力",
+          "数量、类型及角色见生成方式表；本人素材不能重复"
+        ],
+        [
+          "wanLinks",
+          "{url, index}[] · 可选",
+          "公开可读取的HTTPS素材链接；与上传素材合计最多32件。index从0开始，按全部参考素材序列指定位置，保留原顺序。"
+        ],
+        [
+          "referenceAssets",
+          "{id, source, role}[]",
+          "按生成方式指定素材角色，与两组ID集合严格一致；source为upload或generated"
+        ],
+        [
+          "expected_input_digest",
+          "string · 可选",
+          "原quote.input_digest，64位hex；输入变化返回409，不能代替原素材授权"
+        ],
+        [
+          "expected_price_version",
+          "string · 可选",
+          "原quote.price_version，防止价格版本变化"
+        ],
+        [
+          "expected_quote_amount",
+          "integer · 可选",
+          "原quote.quoted_amount，正整数人民币微元"
+        ]
+      ],
+      "notes": [
+        "报价后保存input_digest、price_version和quoted_amount，创建传原expected_input_digest、expected_price_version、expected_quote_amount；输入变化须重新报价，未知结果仅查询原任务。",
+        "素材ID是本人已上传素材占位；先按同一原Key、描述、参数与素材报价，再创建原任务；不接受裸远程URL。",
+        "报价后保存input_digest、price_version和quoted_amount，创建传原expected_input_digest、expected_price_version、expected_quote_amount；输入变化须重新报价，未知结果仅查询原任务。",
+        "素材ID是本人已上传素材占位；先按同一原Key、描述、参数与素材报价，再创建原任务；不接受裸远程URL。",
+        "报价后保存input_digest、price_version和quoted_amount，创建传原expected_input_digest、expected_price_version、expected_quote_amount；输入变化须重新报价，未知结果仅查询原任务。",
+        "先携同一原Key、完整prompt/参数/有序素材报价，保存quote.input_digest；创建时传expected_input_digest原64位摘要及原价格版本/金额。修改素材、参数或描述必须重新报价；摘要只是变化校验，不授予素材权限，也不允许未知原单重新POST。",
+        "参考素材支持本人上传的MP4/MOV视频、WAV/MP3音频，以及本人已审核图片；已生成视频和音频不能作为参考。上传时使用seedance-reference配置，大小限制见素材表。",
+        "prompt 为文字描述，不得为空，最多 20000 字符；平台不会自动截断。",
+        "请求参数以本页定义为准；未知字段、超范围或不同层级冲突会被拒绝，不会静默忽略。",
+        "素材数量按所选生成方式填写；不需要素材的方式不得传入参考素材；其他方式的角色、数量和总量以上方生成方式表为准。assetIds 引用本人当前账号已上传素材；generatedAssetIds 引用本人已审核作品。两数组合计须满足本页数量和格式限制，不接受裸远程 URL。使用本人Bearer向 /v1/assets 上传文件，取得 data.id 后引用；官网已有本人素材也可复用。",
+        "计费单位：seconds。结果未确认时查询原任务，不要重复创建。",
+        "图片和视频完成后通过content私有下载；查询和下载使用创建任务的同一Key。公开分享须审核。结果处理中或未知时保留原任务，继续查询，不重复生成。",
+        "素材ID是本人已上传素材占位；先按同一原Key、描述、参数与素材报价，再创建原任务；不接受裸远程URL。",
+        "报价后保存input_digest、price_version和quoted_amount，创建传原expected_input_digest、expected_price_version、expected_quote_amount；输入变化须重新报价，未知结果仅查询原任务。",
+        "素材ID是本人已上传素材占位；先按同一原Key、描述、参数与素材报价，再创建原任务；不接受裸远程URL。",
+        "报价后保存input_digest、price_version和quoted_amount，创建传原expected_input_digest、expected_price_version、expected_quote_amount；输入变化须重新报价，未知结果仅查询原任务。",
+        "素材ID是本人已上传素材占位；先按同一原Key、描述、参数与素材报价，再创建原任务；不接受裸远程URL。",
+        "报价后保存input_digest、price_version和quoted_amount，创建传原expected_input_digest、expected_price_version、expected_quote_amount；输入变化须重新报价，未知结果仅查询原任务。",
+        "PPTX先通过wan3-document上传，网页使用公开HTTPS完整网址及有序wanLinks。单个PPTX平台上限20 MiB；网页不会由平台代理抓取，文件与网页方式不能混用首尾帧。",
+        "先按同一Key、描述、参数与素材报价，再创建任务；文件使用本人素材ID，网页使用wanLinks。",
+        "报价后保存input_digest、price_version和quoted_amount，创建传原expected_input_digest、expected_price_version、expected_quote_amount；输入变化须重新报价，未知结果仅查询原任务。"
+      ]
+    },
+    {
+      "modelKey": "wan3.0-video-ali",
+      "url": "https://www.unicompapi.com/docs/models/wan3.0-video-ali",
+      "retrievedAt": "2026-10-19T10:05:03.456Z",
+      "status": 200,
+      "sha256": "2d40730bd02c2d93e772e448ec56be1f26677ed4211ae9713a4f462f63442427",
+      "tables": [
+        [
+          "字段",
+          "类型",
+          "范围 / 默认值"
+        ],
+        [
+          "model",
+          "string",
+          "精确使用 wan3.0-video-ali"
+        ],
+        [
+          "prompt",
+          "string",
+          "生成描述；按所选生成方式的必填规则"
+        ],
+        [
+          "parameters.generation_mode",
+          "string · 可选",
+          "text_to_video、first_frame、first_last_frame、reference_images、reference_video、reference_audio、reference_media、video_edit、video_extend；默认 text_to_video"
+        ],
+        [
+          "parameters.resolution",
+          "string · 可选",
+          "480P、720P、1080P；默认 720P"
+        ],
+        [
+          "parameters.aspect_ratio",
+          "string · 可选",
+          "adaptive、21:9、16:9、4:3、1:1、3:4、9:16；默认 adaptive"
+        ],
+        [
+          "parameters.duration_seconds",
+          "integer · 可选",
+          "-1、2、3、4、5、6、7、8、9、10、11、12、13、14、15、16、17、18、19、20、21、22、23、24、25、26、27、28、29、30；默认 5"
+        ],
+        [
+          "parameters.generate_audio",
+          "boolean · 可选",
+          "true / false；默认 true"
+        ],
+        [
+          "parameters.watermark",
+          "boolean · 可选",
+          "true / false；默认 false"
+        ],
+        [
+          "parameters.prompt_extend",
+          "boolean · 可选",
+          "true / false；默认 true"
+        ],
+        [
+          "parameters.seed",
+          "integer · 可选",
+          "-1 – 2147483647"
+        ],
+        [
+          "assetIds / generatedAssetIds",
+          "string[] · 按型号参考能力",
+          "数量、类型及角色见生成方式表；本人素材不能重复"
+        ],
+        [
+          "wanLinks",
+          "{url, index}[] · 可选",
+          "公开可读取的HTTPS素材链接；网页最多一个，与文件互斥；与图片、视频、音频合计最多21件。index从0开始，按全部参考素材序列指定位置，保留原顺序。"
+        ],
+        [
+          "referenceAssets",
+          "{id, source, role}[]",
+          "按生成方式指定素材角色，与两组ID集合严格一致；source为upload或generated"
+        ],
+        [
+          "expected_input_digest",
+          "string · 可选",
+          "原quote.input_digest，64位hex；输入变化返回409，不能代替原素材授权"
+        ],
+        [
+          "expected_price_version",
+          "string · 可选"
+        ]
+      ],
+      "notes": [
+        "报价后保存input_digest、price_version和quoted_amount，创建传原expected_input_digest、expected_price_version、expected_quote_amount；输入变化须重新报价，未知结果仅查询原任务。",
+        "素材ID是本人已上传素材占位；先按同一原Key、描述、参数与素材报价，再创建原任务；不接受裸远程URL。",
+        "报价后保存input_digest、price_version和quoted_amount，创建传原expected_input_digest、expected_price_version、expected_quote_amount；输入变化须重新报价，未知结果仅查询原任务。",
+        "素材ID是本人已上传素材占位；先按同一原Key、描述、参数与素材报价，再创建原任务；不接受裸远程URL。",
+        "报价后保存input_digest、price_version和quoted_amount，创建传原expected_input_digest、expected_price_version、expected_quote_amount；输入变化须重新报价，未知结果仅查询原任务。",
+        "可同时引用图片、视频和音频：图片最多10张，视频和音频各最多5段，各类总时长不超过15秒；每段视频或音频为1–15秒。首帧、首尾帧与多模态参考互斥。",
+        "视频编辑和延长使用参考视频与明确描述；可保留其它合法图片、视频、音频参考。延长选自适应比例，提示词写明向前、向后或双向延长。",
+        "先携同一Key、描述、参数与有序素材向 /v1/videos/quote 报价，创建时传原expected_input_digest、expected_price_version和expected_quote_amount；输入变化须重新报价。",
+        "输入视频与输出时长合计不超过30秒；按实际输入视频与输出视频秒数合计结算。智能时长先预留30秒，未用预留返回可用余额。音频开关不改变秒价。",
+        "上传使用aliyun-wan-reference并指定X-Model-Id；图片须无透明通道。参考音频仅使用本人上传素材；作品引用须完成原审核。可加入一个文件或一个公开HTTPS网页，二者互斥；须开启prompt_extend。参考文件支持DOCX/DOC/XLSX/XLS/PPTX/PPT/PDF/TXT/KEY/PAGES/NUMBERS/MD，单文件最多100MB；PDF、DOCX、DOC、PPTX、PPT、KEY、PAGES最多50页。",
+        "prompt 为文字描述，不得为空，最多 20000 字符；平台不会自动截断。",
+        "请求参数以本页定义为准；未知字段、超范围或不同层级冲突会被拒绝，不会静默忽略。",
+        "素材数量按所选生成方式填写；不需要素材的方式不得传入参考素材；其他方式的角色、数量和总量以上方生成方式表为准。assetIds 引用本人当前账号已上传素材；generatedAssetIds 引用本人已审核作品。两数组合计须满足本页数量和格式限制，不接受裸远程 URL。使用本人Bearer向 /v1/assets 上传文件，取得 data.id 后引用；官网已有本人素材也可复用。",
+        "计费单位：seconds。结果未确认时查询原任务，不要重复创建。",
+        "图片和视频完成后通过content私有下载；查询和下载使用创建任务的同一Key。公开分享须审核。结果处理中或未知时保留原任务，继续查询，不重复生成。",
+        "素材ID是本人已上传素材占位；先按同一原Key、描述、参数与素材报价，再创建原任务；不接受裸远程URL。",
+        "报价后保存input_digest、price_version和quoted_amount，创建传原expected_input_digest、expected_price_version、expected_quote_amount；输入变化须重新报价，未知结果仅查询原任务。",
+        "素材ID是本人已上传素材占位；先按同一原Key、描述、参数与素材报价，再创建原任务；不接受裸远程URL。",
+        "报价后保存input_digest、price_version和quoted_amount，创建传原expected_input_digest、expected_price_version、expected_quote_amount；输入变化须重新报价，未知结果仅查询原任务。",
+        "素材ID是本人已上传素材占位；先按同一原Key、描述、参数与素材报价，再创建原任务；不接受裸远程URL。",
+        "报价后保存input_digest、price_version和quoted_amount，创建传原expected_input_digest、expected_price_version、expected_quote_amount；输入变化须重新报价，未知结果仅查询原任务。",
+        "素材ID是本人已上传素材占位；先按同一原Key、描述、参数与素材报价，再创建原任务；不接受裸远程URL。",
+        "报价后保存input_digest、price_version和quoted_amount，创建传原expected_input_digest、expected_price_version、expected_quote_amount；输入变化须重新报价，未知结果仅查询原任务。",
+        "素材ID是本人已上传素材占位；先按同一原Key、描述、参数与素材报价，再创建原任务；不接受裸远程URL。",
+        "报价后保存input_digest、price_version和quoted_amount，创建传原expected_input_digest、expected_price_version、expected_quote_amount；输入变化须重新报价，未知结果仅查询原任务。",
+        "素材ID是本人已上传素材占位；先按同一原Key、描述、参数与素材报价，再创建原任务；不接受裸远程URL。",
+        "报价后保存input_digest、price_version和quoted_amount，创建传原expected_input_digest、expected_price_version、expected_quote_amount；输入变化须重新报价，未知结果仅查询原任务。",
+        "先使用同一Key向 /v1/assets 上传文件；X-Image-Profile: aliyun-wan-document、X-Model-Id: wan3.0-video-ali、X-File-Name: URL编码的完整文件名、Content-Type: 对应文件MIME。单文件最多100MB，部分格式最多50页。",
+        "文件或网页最多一个，二者互斥；可同时加入合法参考图片、视频和音频，不能混用严格首帧或首尾帧。prompt_extend必须为true。",
+        "先使用同一描述、参数及素材向 /v1/videos/quote 报价，再携原报价摘要、版本和金额创建任务。",
+        "网页须为无需登录的公开HTTPS完整地址；平台不抓取网页。index从0起按网页与referenceAssets的完整序列填写。",
+        "最多一个网页，不能同时传文件；可同时加入图片、视频和音频。先使用同一Key和完整输入报价，再携原报价创建任务。"
+      ]
+    },
+    {
+      "modelKey": "wan3.0-video-prime-ali",
+      "url": "https://www.unicompapi.com/docs/models/wan3.0-video-prime-ali",
+      "retrievedAt": "2026-10-19T10:05:04.617Z",
+      "status": 200,
+      "sha256": "7ff4aca7da3f2c29244360fe6efe0944ce74b1f00aa3872a5d28b99badf52fec",
+      "tables": [
+        [
+          "字段",
+          "类型",
+          "范围 / 默认值"
+        ],
+        [
+          "model",
+          "string",
+          "精确使用 wan3.0-video-prime-ali"
+        ],
+        [
+          "prompt",
+          "string",
+          "生成描述；按所选生成方式的必填规则"
+        ],
+        [
+          "parameters.generation_mode",
+          "string · 可选",
+          "text_to_video、first_frame、first_last_frame、reference_images、reference_video、reference_audio、reference_media、video_edit、video_extend；默认 text_to_video"
+        ],
+        [
+          "parameters.resolution",
+          "string · 可选",
+          "480P、720P、1080P；默认 720P"
+        ],
+        [
+          "parameters.aspect_ratio",
+          "string · 可选",
+          "adaptive、21:9、16:9、4:3、1:1、3:4、9:16；默认 adaptive"
+        ],
+        [
+          "parameters.duration_seconds",
+          "integer · 可选",
+          "-1、2、3、4、5、6、7、8、9、10、11、12、13、14、15、16、17、18、19、20、21、22、23、24、25、26、27、28、29、30；默认 5"
+        ],
+        [
+          "parameters.generate_audio",
+          "boolean · 可选",
+          "true / false；默认 true"
+        ],
+        [
+          "parameters.watermark",
+          "boolean · 可选",
+          "true / false；默认 false"
+        ],
+        [
+          "parameters.prompt_extend",
+          "boolean · 可选",
+          "true / false；默认 true"
+        ],
+        [
+          "parameters.seed",
+          "integer · 可选",
+          "-1 – 2147483647"
+        ],
+        [
+          "assetIds / generatedAssetIds",
+          "string[] · 按型号参考能力",
+          "数量、类型及角色见生成方式表；本人素材不能重复"
+        ],
+        [
+          "wanLinks",
+          "{url, index}[] · 可选",
+          "公开可读取的HTTPS素材链接；网页最多一个，与文件互斥；与图片、视频、音频合计最多21件。index从0开始，按全部参考素材序列指定位置，保留原顺序。"
+        ],
+        [
+          "referenceAssets",
+          "{id, source, role}[]",
+          "按生成方式指定素材角色，与两组ID集合严格一致；source为upload或generated"
+        ],
+        [
+          "expected_input_digest",
+          "string · 可选",
+          "原quote.input_digest，64位hex；输入变化返回409，不能代替原素材授权"
+        ],
+        [
+          "expected_price_version",
+          "string · 可选"
+        ]
+      ],
+      "notes": [
+        "报价后保存input_digest、price_version和quoted_amount，创建传原expected_input_digest、expected_price_version、expected_quote_amount；输入变化须重新报价，未知结果仅查询原任务。",
+        "素材ID是本人已上传素材占位；先按同一原Key、描述、参数与素材报价，再创建原任务；不接受裸远程URL。",
+        "报价后保存input_digest、price_version和quoted_amount，创建传原expected_input_digest、expected_price_version、expected_quote_amount；输入变化须重新报价，未知结果仅查询原任务。",
+        "素材ID是本人已上传素材占位；先按同一原Key、描述、参数与素材报价，再创建原任务；不接受裸远程URL。",
+        "报价后保存input_digest、price_version和quoted_amount，创建传原expected_input_digest、expected_price_version、expected_quote_amount；输入变化须重新报价，未知结果仅查询原任务。",
+        "可同时引用图片、视频和音频：图片最多10张，视频和音频各最多5段，各类总时长不超过15秒；每段视频或音频为1–15秒。首帧、首尾帧与多模态参考互斥。",
+        "视频编辑和延长使用参考视频与明确描述；可保留其它合法图片、视频、音频参考。延长选自适应比例，提示词写明向前、向后或双向延长。",
+        "先携同一Key、描述、参数与有序素材向 /v1/videos/quote 报价，创建时传原expected_input_digest、expected_price_version和expected_quote_amount；输入变化须重新报价。",
+        "输入视频与输出时长合计不超过30秒；按实际输入视频与输出视频秒数合计结算。智能时长先预留30秒，未用预留返回可用余额。音频开关不改变秒价。",
+        "上传使用aliyun-wan-reference并指定X-Model-Id；图片须无透明通道。参考音频仅使用本人上传素材；作品引用须完成原审核。可加入一个文件或一个公开HTTPS网页，二者互斥；须开启prompt_extend。参考文件支持DOCX/DOC/XLSX/XLS/PPTX/PPT/PDF/TXT/KEY/PAGES/NUMBERS/MD，单文件最多100MB；PDF、DOCX、DOC、PPTX、PPT、KEY、PAGES最多50页。",
+        "prompt 为文字描述，不得为空，最多 20000 字符；平台不会自动截断。",
+        "请求参数以本页定义为准；未知字段、超范围或不同层级冲突会被拒绝，不会静默忽略。",
+        "素材数量按所选生成方式填写；不需要素材的方式不得传入参考素材；其他方式的角色、数量和总量以上方生成方式表为准。assetIds 引用本人当前账号已上传素材；generatedAssetIds 引用本人已审核作品。两数组合计须满足本页数量和格式限制，不接受裸远程 URL。使用本人Bearer向 /v1/assets 上传文件，取得 data.id 后引用；官网已有本人素材也可复用。",
+        "计费单位：seconds。结果未确认时查询原任务，不要重复创建。",
+        "图片和视频完成后通过content私有下载；查询和下载使用创建任务的同一Key。公开分享须审核。结果处理中或未知时保留原任务，继续查询，不重复生成。",
+        "素材ID是本人已上传素材占位；先按同一原Key、描述、参数与素材报价，再创建原任务；不接受裸远程URL。",
+        "报价后保存input_digest、price_version和quoted_amount，创建传原expected_input_digest、expected_price_version、expected_quote_amount；输入变化须重新报价，未知结果仅查询原任务。",
+        "素材ID是本人已上传素材占位；先按同一原Key、描述、参数与素材报价，再创建原任务；不接受裸远程URL。",
+        "报价后保存input_digest、price_version和quoted_amount，创建传原expected_input_digest、expected_price_version、expected_quote_amount；输入变化须重新报价，未知结果仅查询原任务。",
+        "素材ID是本人已上传素材占位；先按同一原Key、描述、参数与素材报价，再创建原任务；不接受裸远程URL。",
+        "报价后保存input_digest、price_version和quoted_amount，创建传原expected_input_digest、expected_price_version、expected_quote_amount；输入变化须重新报价，未知结果仅查询原任务。",
+        "素材ID是本人已上传素材占位；先按同一原Key、描述、参数与素材报价，再创建原任务；不接受裸远程URL。",
+        "报价后保存input_digest、price_version和quoted_amount，创建传原expected_input_digest、expected_price_version、expected_quote_amount；输入变化须重新报价，未知结果仅查询原任务。",
+        "素材ID是本人已上传素材占位；先按同一原Key、描述、参数与素材报价，再创建原任务；不接受裸远程URL。",
+        "报价后保存input_digest、price_version和quoted_amount，创建传原expected_input_digest、expected_price_version、expected_quote_amount；输入变化须重新报价，未知结果仅查询原任务。",
+        "素材ID是本人已上传素材占位；先按同一原Key、描述、参数与素材报价，再创建原任务；不接受裸远程URL。",
+        "报价后保存input_digest、price_version和quoted_amount，创建传原expected_input_digest、expected_price_version、expected_quote_amount；输入变化须重新报价，未知结果仅查询原任务。",
+        "先使用同一Key向 /v1/assets 上传文件；X-Image-Profile: aliyun-wan-document、X-Model-Id: wan3.0-video-prime-ali、X-File-Name: URL编码的完整文件名、Content-Type: 对应文件MIME。单文件最多100MB，部分格式最多50页。",
+        "文件或网页最多一个，二者互斥；可同时加入合法参考图片、视频和音频，不能混用严格首帧或首尾帧。prompt_extend必须为true。",
+        "先使用同一描述、参数及素材向 /v1/videos/quote 报价，再携原报价摘要、版本和金额创建任务。",
+        "网页须为无需登录的公开HTTPS完整地址；平台不抓取网页。index从0起按网页与referenceAssets的完整序列填写。",
+        "最多一个网页，不能同时传文件；可同时加入图片、视频和音频。先使用同一Key和完整输入报价，再携原报价创建任务。"
+      ]
+    },
+    {
+      "modelKey": "happyhorse-1.0-video-edit",
+      "url": "https://www.unicompapi.com/docs/models/happyhorse-1.0-video-edit",
+      "retrievedAt": "2026-10-19T10:05:05.731Z",
+      "status": 200,
+      "sha256": "6c86e83a223ea7bce39b777f79e20ba26a9c68ec245ea4d9bebef4cad90a0fe2",
+      "tables": [
+        [
+          "字段",
+          "类型",
+          "范围 / 默认值"
+        ],
+        [
+          "model",
+          "string",
+          "精确使用 happyhorse-1.0-video-edit"
+        ],
+        [
+          "prompt",
+          "string",
+          "生成描述；按所选生成方式的必填规则"
+        ],
+        [
+          "parameters.generation_mode",
+          "string · 可选",
+          "reference_video；默认 reference_video"
+        ],
+        [
+          "parameters.resolution",
+          "string · 可选",
+          "720P、1080P；默认 720P"
+        ],
+        [
+          "parameters.duration_seconds",
+          "integer · 可选",
+          "3、4、5、6、7、8、9、10、11、12、13、14、15；默认 5"
+        ],
+        [
+          "assetIds / generatedAssetIds",
+          "string[] · 按型号参考能力",
+          "数量、类型及角色见生成方式表；本人素材不能重复"
+        ],
+        [
+          "referenceAssets",
+          "{id, source, role}[]",
+          "按生成方式指定素材角色，与两组ID集合严格一致；source为upload或generated"
+        ],
+        [
+          "expected_input_digest",
+          "string · 可选",
+          "原quote.input_digest，64位hex；输入变化返回409，不能代替原素材授权"
+        ],
+        [
+          "expected_price_version",
+          "string · 可选",
+          "原quote.price_version，防止价格版本变化"
+        ],
+        [
+          "expected_quote_amount",
+          "integer · 可选",
+          "原quote.quoted_amount，正整数人民币微元"
+        ]
+      ],
+      "notes": [
+        "编辑视频使用 happyhorse-edit-reference 上传配置：完整MP4最多100,000,000字节，参考图片最多20,000,000字节；具体格式与数量见素材表。按实际视频秒数计费，报价是余额预留，不是最终费用。",
+        "prompt 为文字描述，不得为空，最多 2500 字符；平台不会自动截断。",
+        "请求参数以本页定义为准；未知字段、超范围或不同层级冲突会被拒绝，不会静默忽略。",
+        "素材数量按所选生成方式填写；不需要素材的方式不得传入参考素材；其他方式的角色、数量和总量以上方生成方式表为准。assetIds 引用本人当前账号已上传素材；generatedAssetIds 引用本人已审核作品。两数组合计须满足本页数量和格式限制，不接受裸远程 URL。使用本人Bearer向 /v1/assets 上传文件，取得 data.id 后引用；官网已有本人素材也可复用。",
+        "先提交同一Key、描述、参数及有序素材取得原报价。创建示例中的expected_quote_amount=1只是JSON整数占位，必须替换为原quote.quoted_amount；不得按占位金额提交。",
+        "素材ID是本人已上传素材占位；先按同一原Key、描述、参数与素材报价，再创建原任务；不接受裸远程URL。",
+        "计费单位：seconds。结果未确认时查询原任务，不要重复创建。",
+        "图片和视频完成后通过content私有下载；查询和下载使用创建任务的同一Key。公开分享须审核。结果处理中或未知时保留原任务，继续查询，不重复生成。"
+      ]
+    }
+  ],
+  "outboundScope": "public documentation URL GET only",
+  "generationRequests": 0,
+  "credentialReads": 0
+}

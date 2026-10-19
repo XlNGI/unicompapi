@@ -135,11 +135,9 @@ export function createProjectManifest(
 async function isDirectory(directory: string): Promise<boolean> {
   try {
     return (await stat(directory)).isDirectory();
-  } catch (error) {
-    if (isNodeError(error) && (error.code === 'ENOENT' || error.code === 'ENOTDIR')) {
-      return false;
-    }
-    throw error;
+  } catch {
+    // An inaccessible entry must remain visible so its catalog record can be removed.
+    return false;
   }
 }
 

@@ -58,8 +58,7 @@ test('image and video validate visible dynamic parameters before submission', ()
 });
 
 test('quick creation only hides parameters when its selected model has no fields', () => {
-  for (const source of [imagePanel, videoPanel]) {
-    assert.match(source, /oneShot && dynamicParameterFields\.length === 0/);
-  }
+  assert.match(imagePanel, /oneShot && dynamicParameterFields\.length === 0/);
+  assert.match(videoPanel, /oneShot && dynamicParameterFields\.length === 0/);
   assert.doesNotMatch(imagePanel, /defaultQuickImageParameterValues/);
 });

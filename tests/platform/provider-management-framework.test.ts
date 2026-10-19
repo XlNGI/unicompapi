@@ -567,7 +567,7 @@ describe('provider management framework', () => {
     );
   });
 
-  it('enables a present catalog model on an available connection without requiring a profile', async () => {
+  it('requires a usable profile before enabling a catalog model and preserves routing controls', async () => {
     const fixture = await frameworkFixture();
     const created = await createAndValidate(fixture);
     fixture.catalog.entries = [{ providerModelKey: 'model.routable', displayName: 'Routable' }];
@@ -581,7 +581,7 @@ describe('provider management framework', () => {
     await expect(fixture.framework.setModelEnabled({
       modelId: model.id,
       enabled: true
-    })).resolves.toMatchObject({ ok: true, value: { state: 'enabled' } });
+    })).resolves.toMatchObject({ ok: false, error: { code: 'model_profile_unavailable' } });
     await expect(fixture.framework.setModelEnabled({
       modelId: model.id,
       enabled: false
@@ -637,7 +637,7 @@ describe('provider management framework', () => {
       enabled: true
     })).resolves.toMatchObject({
       ok: false,
-      error: { code: 'model_not_routable' }
+      error: { code: 'model_profile_unavailable' }
     });
     await fixture.registry.mutate((current) => ({
       snapshot: {
@@ -912,12 +912,12 @@ describe('provider management framework', () => {
       modelId: model.id,
       enabled: true
     })).resolves.toMatchObject({
-      ok: true,
-      value: { state: 'enabled' }
+      ok: false,
+      error: { code: 'model_profile_unavailable' }
     });
     const afterEnable = await registry.load();
     const enabled = afterEnable.models.find((candidate) => candidate.id === model.id);
-    expect(enabled?.enabled).toBe(true);
+    expect(enabled?.enabled).toBe(false);
     // Closed-world UniCompAPI: unknown model keys stay profile-less until the
     // capability table, schema and routing tests are explicitly extended.
     expect(enabled?.activeProfileId).toBeUndefined();
@@ -958,6 +958,7 @@ describe('provider management framework', () => {
     const afterBinding = await registry.load();
     const profile = afterBinding.modelProfiles?.find(item => item.profileId === afterBinding.models.find(item => item.id === model.id)?.activeProfileId);
     expect(profile).toMatchObject({ status: 'declared', apiContract: { contractId: 'official.moonshot.kimi-k3.chat' } });
+    expect(await framework.setModelEnabled({ modelId: model.id, enabled: true })).toMatchObject({ ok: true });
     expect(await framework.bindModelApiContract({ modelId: model.id, expectedRevision: enabled!.revision,
       binding: { schemaVersion: 1, contractId: 'official.moonshot.kimi-k3.chat', contractRevision: 1, rules: [] }, confirmed: true }))
       .toMatchObject({ ok: false, error: { code: 'provider_registry_conflict' } });

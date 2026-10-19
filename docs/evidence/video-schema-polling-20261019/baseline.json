@@ -1,0 +1,73 @@
+{
+  "capturedAt": "2026-10-19T09:07:11.914Z",
+  "files": [
+    {
+      "path": "src/platform/providers/newapi/www-video-adapter.ts",
+      "sha256": "615ecf398b2b4dea97d6b227c9aab3e0b34a2e4e6632cb007cc94258d0197916"
+    },
+    {
+      "path": "src/platform/providers/newapi/www-video-contracts.ts",
+      "sha256": "732dbce02aaf27d9607b76fa7e209d996b286d0e00ada2b94af0d79531dfb776"
+    },
+    {
+      "path": "src/platform/providers/newapi/www-video-catalog.json",
+      "sha256": "76ee5e434c4af4e3deca8e82ae4000fab027786062f7ee95503ebfdd9be9be85"
+    },
+    {
+      "path": "src/platform/providers/newapi/newapi-video-adapter.ts",
+      "sha256": "335a8627e635a7c3bfc99bad4e90eee20cabb08fc01e1429d0563272987ba816"
+    },
+    {
+      "path": "src/platform/providers/video-feature-submission.ts",
+      "sha256": "55acbd4897c867cc2412a40444d7b0928508509e78944edcdb8613d89e5fb29f"
+    },
+    {
+      "path": "src/platform/providers/provider-execution-lifecycle.ts",
+      "sha256": "b374d29fd29eb5cc3f32cb4ce5d97e2f4f24a4e92ea73c2f15355e7382a21ffb"
+    },
+    {
+      "path": "src/platform/providers/vidu/vidu-video-adapter.ts",
+      "sha256": "50c34aea12bc8d18952432d5a2b4290b593b8946974c4430bd0903598e77eb33"
+    },
+    {
+      "path": "src/platform/ipc/video-feature-runtime.ts",
+      "sha256": "640ed8b29d6db5dd08cbfdc27512aa5b2cbdb1a0abf730aa33dd57ceabcc61a2"
+    },
+    {
+      "path": "src/pages/creation/video/VideoFeatureSubmissionPanel.tsx",
+      "sha256": "42a9d917ee17f0ac4521fa97398d3f0404deb025df871ace799db19cabe23069"
+    },
+    {
+      "path": "electron/ipc/vidu-composition.ts",
+      "sha256": "2af971b10bc3f66d675d8f2bc4696643bdb5a2ec915cabd7c5058e8b85467e1c"
+    },
+    {
+      "path": "src/shared/video-feature-ipc.ts",
+      "sha256": "101de6e8875e8ea3b3c72dab87ee0070656191b3f8009ecba49f7e8f88c2d727"
+    },
+    {
+      "path": "scripts/compile-www-video-contracts.cjs",
+      "sha256": "902b5c0988160b42ee036dd6dd3a3b6c1692bb48c4dc8fc4f1b0f8ab50007043"
+    },
+    {
+      "path": "tests/fixtures/www-video.ts",
+      "sha256": "b7bcfc041a2b205c3e7c399b86f728d84572b629816835ed4624350c905d46e0"
+    },
+    {
+      "path": "tests/platform/www-video.test.ts",
+      "sha256": "808f7c5f3790507aa86c1678f9776a4ad63c6fb6fa6e18d3d63809726d55881c"
+    },
+    {
+      "path": "tests/platform/video-feature-runtime-recovery.test.ts",
+      "sha256": "8182855896b66178e714c47e670649a0cec60e09adb0b672a1519f86ed53f99b"
+    },
+    {
+      "path": "scripts/verify-www-video-electron.cjs",
+      "sha256": "fbb556864e46a1830757364256b2d371feda15cb8f5e1ccc9ca18d73d7c61873"
+    },
+    {
+      "path": "scripts/verify-www-video-ui.cjs",
+      "sha256": "38b64fa590f2ffb30647239fcc2f3cf54b90b11b2f62e0f65036b5ceb9075dd0"
+    }
+  ]
+}

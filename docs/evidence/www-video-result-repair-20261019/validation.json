@@ -1,0 +1,292 @@
+{
+  "schemaVersion": 1,
+  "capturedAt": "2026-10-19T07:38:05.936Z",
+  "status": "fixed_and_original_video_recovered",
+  "branch": "feature/www-model-binding-repair-20261019",
+  "baseline": "e29b7a833ba3f473a8d9fc3dc473d9f6cc39959f",
+  "rootCause": [
+    "H3 omits the generic media review_phase and uses output_type=video.",
+    "H3 data is a single result object, not the generic media array.",
+    "H3 private content is under /v1/videos/:id/content while status is under /v1/h3/tasks/:id.",
+    "Earlier synthetic H3 fixtures mirrored the assumed generic media envelope and failed to detect the real response mismatch."
+  ],
+  "originalTask": {
+    "model": "MiniMax-H3",
+    "remoteTaskId": "b8b8109a-5d6b-431c-b0b8-25d7f1aa80fa",
+    "remoteStatus": "succeeded",
+    "localStateBefore": "failed",
+    "chargedCnyMicro": 7040000,
+    "settlementPending": false,
+    "priorQueryObservation": "Local submit accepted at 06:48 UTC and polling interrupted at 06:52:44 UTC after HTTP 200; original status GET confirms succeeded.",
+    "inspectionArtifact": "original-task-inspection.json"
+  },
+  "recovery": {
+    "status": "passed",
+    "state": "completed",
+    "workId": "work-video-result-e05041f2-f7c3-4971-a188-e5a5132c69ea",
+    "workCount": 1,
+    "file": {
+      "relativePath": "files/results/work-video-result-e05041f2-f7c3-4971-a188-e5a5132c69ea.mp4",
+      "state": "available",
+      "checksumSha256": "5c4c28b29dc54433d20f3da1df1635185eb413dfd5946c2c5d6adfbe829955c8",
+      "metadata": {
+        "mimeType": "video/mp4",
+        "container": "mp4",
+        "durationMs": 4459,
+        "width": 2560,
+        "height": 1440,
+        "sizeBytes": 11128282
+      }
+    },
+    "originalGetRequests": 5,
+    "paidGenerationPosts": 0,
+    "settlementPosts": 0,
+    "originalTaskAndRouteAndRegistryUnchanged": true,
+    "artifact": "recovery-validation.json",
+    "repeat": {
+      "workId": "work-video-result-e05041f2-f7c3-4971-a188-e5a5132c69ea",
+      "workCount": 1,
+      "networkRequests": 0,
+      "artifact": "recovery-repeat-validation.json"
+    },
+    "billingBoundary": "7.04 CNY was charged on the user-created original before this repair; this repair issued no generation, upload or settlement POST and did not change the previous acceptance budget."
+  },
+  "gates": {
+    "targetedVitest": {
+      "status": "passed",
+      "files": 8,
+      "passed": 254,
+      "failed": 0,
+      "skipped": 0,
+      "artifact": "targeted-final.json"
+    },
+    "nodeUi": {
+      "status": "passed",
+      "passed": 393,
+      "failed": 0,
+      "skipped": 0,
+      "artifact": "node-ui.log.gz"
+    },
+    "uniqueRegressionTests": 647,
+    "initialTargeted": {
+      "passed": 212,
+      "overlapsFinal": true,
+      "artifact": "targeted.json"
+    },
+    "fullVitestRerun": false,
+    "productionElectron": {
+      "status": "passed",
+      "modelFeatureCases": 13,
+      "externalRequests": 0,
+      "paidPosts": 0,
+      "artifact": "electron-validation.json"
+    },
+    "typecheck": {
+      "status": "passed",
+      "exitCode": 0,
+      "artifact": "typecheck-final.log.gz"
+    },
+    "lint": {
+      "status": "passed",
+      "exitCode": 0,
+      "artifact": "lint-final-complete.log.gz"
+    },
+    "build": {
+      "status": "passed",
+      "exitCode": 0,
+      "artifact": "build.log.gz"
+    },
+    "platformAudit": {
+      "status": "passed",
+      "violations": [],
+      "artifact": "platform-audit.log.gz"
+    },
+    "originalFile": {
+      "nodeVideoInspector": "passed",
+      "sha256": "passed",
+      "ffprobe": "passed",
+      "ffprobeArtifact": "ffprobe.json",
+      "fullVideoAndAudioDecode": {
+        "exitCode": 0,
+        "errorLogEmpty": true,
+        "artifact": "decode.log.gz"
+      }
+    },
+    "diffCheck": "passed",
+    "documentationLinkTargetsChecked": 5
+  },
+  "intermediateFailures": [
+    {
+      "artifact": "red.json",
+      "passed": 44,
+      "failed": 1,
+      "reason": "Real H3 response regression fails on the original adapter."
+    },
+    {
+      "artifact": "typecheck.log.gz",
+      "reason": "Fixture had a repeated review_phase assignment; corrected branches then final typecheck passed."
+    },
+    {
+      "artifact": "recovery.log.gz",
+      "reason": "First original recovery returned network_error without enough underlying diagnostics; no new generation or settlement. Subsequent bounded original-only GET recovery succeeded."
+    }
+  ],
+  "sourceHashes": {
+    "src/platform/providers/newapi/newapi-runtime.ts": "981da2c277a38466fdb862bb69633cd091cb133b604bbc308194dc1884a2e51e",
+    "src/platform/providers/newapi/www-video-adapter.ts": "615ecf398b2b4dea97d6b227c9aab3e0b34a2e4e6632cb007cc94258d0197916",
+    "tests/fixtures/www-video.ts": "b7bcfc041a2b205c3e7c399b86f728d84572b629816835ed4624350c905d46e0",
+    "tests/platform/www-video.test.ts": "808f7c5f3790507aa86c1678f9776a4ad63c6fb6fa6e18d3d63809726d55881c",
+    "scripts/verify-www-video-electron.cjs": "fbb556864e46a1830757364256b2d371feda15cb8f5e1ccc9ca18d73d7c61873",
+    "scripts/inspect-www-video-task.cjs": "6fb6af668128035741ab24fddbcd94710834a05e53f6d1793c6de9d004b64330",
+    "scripts/recover-www-video-task.cjs": "4e0387c96b75ca45bd795c7e400c4c5a154d6fdbcfc66c75e607dba6876e5bcc"
+  },
+  "preserved": {
+    "priorBindingRepairSourcesUnchanged": true,
+    "startupViteSha256": "37e1b93c76b0e4a04766d80cf83254b560d568b7183a7c81dfaf5389e1c46291",
+    "existingDirtyWorkPreserved": true
+  },
+  "documentationHashes": {
+    "docs/current/www-video-result-repair-20261019.md": "e455e3a918f596d0d34d63446fa92e8c423a8b7930701ac7bc655c98e29c6b1d",
+    "PLANS.md": "d18adbc07ad72e74edbb9f3dc98e41dd9181c44ae5bb854e333edfc6d22487bb"
+  },
+  "boundaries": {
+    "credentials": "Native encrypted vault callback only; no plaintext credentials in evidence, code, environment or logs.",
+    "network": "Only original-task status and original private content GET to www.unicompapi.com; no new public document search.",
+    "userVideoCopiedIntoGit": false,
+    "applicationRestarted": false,
+    "macosDeviceAcceptance": false,
+    "committed": false,
+    "merged": false,
+    "pushed": false
+  },
+  "limitations": [
+    "Running application main process predates this patch; a normal restart loads subsequent-call handling.",
+    "No new paid generation was submitted to validate a fresh H3 operation; this existing real H3 operation was successfully received and decoded.",
+    "No claim that all nine model services passed real generation acceptance; historical unknown task and budget boundaries remain.",
+    "Text compatibility/source gaps and WWW image adapter remain outside this repair."
+  ],
+  "logCopies": [
+    {
+      "raw": "build.log",
+      "gzip": "build.log.gz",
+      "sha256": "0e1b5fd9b21f39538d5aaeed66b42557821228ffe1ab6661791d50ad820c940c"
+    },
+    {
+      "raw": "decode.log",
+      "gzip": "decode.log.gz",
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "raw": "electron.log",
+      "gzip": "electron.log.gz",
+      "sha256": "3f88de7b1d06e63d9b74854d70fc88e65e7c02c7260f49bbe308693f17355000"
+    },
+    {
+      "raw": "lint-final-complete.log",
+      "gzip": "lint-final-complete.log.gz",
+      "sha256": "bc607554b529669fbd03d45edfac793ae4f01a7227a9e884ce41b12b37b3a46b"
+    },
+    {
+      "raw": "lint-final.log",
+      "gzip": "lint-final.log.gz",
+      "sha256": "b35002b145382ad2f79a46292b4fd529c21b323c68f4848da41cd300bee6ad94"
+    },
+    {
+      "raw": "lint.log",
+      "gzip": "lint.log.gz",
+      "sha256": "f6aa1f355bc6616748ee1ae493e9aa64ccc8f1fd7c594b987a0bdd8e5eda2d47"
+    },
+    {
+      "raw": "node-ui.log",
+      "gzip": "node-ui.log.gz",
+      "sha256": "8a61c221ae962ceed0f5e1bef74bcb42821160668986c9c6b0d949695621310b"
+    },
+    {
+      "raw": "platform-audit.log",
+      "gzip": "platform-audit.log.gz",
+      "sha256": "937c7925406369b0c914106fadfb1845a7850fabb7e321f3ed7e6861eef7cfa0"
+    },
+    {
+      "raw": "recovery-repeat.log",
+      "gzip": "recovery-repeat.log.gz",
+      "sha256": "5399cdaf1e1b653bd094294e410dd97d8712f8bc86fa65e1eb90ee07e8468663"
+    },
+    {
+      "raw": "recovery-second.log",
+      "gzip": "recovery-second.log.gz",
+      "sha256": "a30f158922e30dd05b0bb5caa1f660ac99209cf48f585c907a8618f87d29f937"
+    },
+    {
+      "raw": "recovery.log",
+      "gzip": "recovery.log.gz",
+      "sha256": "ba2356c7d710272aac1117f1051691c1cdd42e06b046db9df7588b534ad8511f"
+    },
+    {
+      "raw": "red.log",
+      "gzip": "red.log.gz",
+      "sha256": "9cb8792d384439f2cd0d1900644bd8cd058dd661d404c5a4bbc0b175a8feaf1c"
+    },
+    {
+      "raw": "targeted-final.log",
+      "gzip": "targeted-final.log.gz",
+      "sha256": "3efd2e28f722b756a256401fed73b0832e59bc8a6299513c3023ee63cf3dac3d"
+    },
+    {
+      "raw": "targeted.log",
+      "gzip": "targeted.log.gz",
+      "sha256": "7bb2a610cbb5ec66d9ce6f9a3fecf34c5baa127a7d2f5f2f8e8afd2fbe446e6e"
+    },
+    {
+      "raw": "typecheck-final.log",
+      "gzip": "typecheck-final.log.gz",
+      "sha256": "732fcbb1b3e2d4d785401d83d1c49fb080190c52e2511c0439577d85f664425f"
+    },
+    {
+      "raw": "typecheck.log",
+      "gzip": "typecheck.log.gz",
+      "sha256": "485de74106047af0323a0b7456f4f67d7c96baa22fa2682dde29d6ac433aec6f"
+    }
+  ],
+  "artifactHashes": {
+    "build.log": "0e1b5fd9b21f39538d5aaeed66b42557821228ffe1ab6661791d50ad820c940c",
+    "build.log.gz": "eaf57907c0513d28539bc8add939eedd801bc61dc5d97449e13d1bee2616dc85",
+    "decode.log": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "decode.log.gz": "9e72928e7a01615b4cf090daa617b4ca9d68531748f887f323f695eb4ca3ef63",
+    "electron-validation.json": "0d98d306ab6bb038421e699e904674d17229dad947763cae3bb91b4596174c49",
+    "electron.log": "3f88de7b1d06e63d9b74854d70fc88e65e7c02c7260f49bbe308693f17355000",
+    "electron.log.gz": "2f0d262b503cb21e6ddb9cfd16c179a50f8f9f2a95175bec4986e85c5c114296",
+    "ffprobe.json": "8b374349fdeeb9ae6551c204ae1516784eb371ac07fcafbe79ec55cb0b157d6d",
+    "lint-final-complete.log": "bc607554b529669fbd03d45edfac793ae4f01a7227a9e884ce41b12b37b3a46b",
+    "lint-final-complete.log.gz": "6b7f64a0351da50f64e2cbcf18de288023bf0e3ec5544db55305c20445c47d69",
+    "lint-final.log": "b35002b145382ad2f79a46292b4fd529c21b323c68f4848da41cd300bee6ad94",
+    "lint-final.log.gz": "33daaa138405dd1c540c9cbd881a2a7bf382e3759de98d0161a3c68a97fda213",
+    "lint.log": "f6aa1f355bc6616748ee1ae493e9aa64ccc8f1fd7c594b987a0bdd8e5eda2d47",
+    "lint.log.gz": "d53f79cd8719a1ad8f9026e52ae6f65fdae7a0e3286b815d657ad38cbb26a10c",
+    "node-ui.log": "8a61c221ae962ceed0f5e1bef74bcb42821160668986c9c6b0d949695621310b",
+    "node-ui.log.gz": "4ed884a5af06ed4998b2cef462a93b7c5a3f0a2e9605da0c4e67326f42880530",
+    "original-task-inspection.json": "50f08504b75799896203f86f9e0b5da8ea6e6a88b31b5de072d2bd71db0a2c7a",
+    "platform-audit.log": "937c7925406369b0c914106fadfb1845a7850fabb7e321f3ed7e6861eef7cfa0",
+    "platform-audit.log.gz": "172fa22763296aa2be7893723cb096b25f634a6ed3ab2738a1706f3657417e57",
+    "recovery-repeat-validation.json": "f14b279ecde273b726198901e519867046f9bbf444a25f3770e0f815884ef77b",
+    "recovery-repeat.log": "5399cdaf1e1b653bd094294e410dd97d8712f8bc86fa65e1eb90ee07e8468663",
+    "recovery-repeat.log.gz": "c421b3ff37d372f75c4d1d8db606d21a6ca6405571516df4e66bb11534165506",
+    "recovery-second.log": "a30f158922e30dd05b0bb5caa1f660ac99209cf48f585c907a8618f87d29f937",
+    "recovery-second.log.gz": "c4d462c56999d325d11eb253e1c6425a7efbae14964c83db7391ad39d54873d3",
+    "recovery-validation.json": "d8fd0099b8367db35569c6e99d1e6eabd523142587b22b40891c0825353ce30c",
+    "recovery.log": "ba2356c7d710272aac1117f1051691c1cdd42e06b046db9df7588b534ad8511f",
+    "recovery.log.gz": "c4c3ada4222a8d342a2411131b59849ddc8fbeefe4e1b768d6b7564964b8f1a0",
+    "red.json": "3dfcb88af1bb30456f533677fe2797a1284bc24aa889f3148734ef4da22942e7",
+    "red.log": "9cb8792d384439f2cd0d1900644bd8cd058dd661d404c5a4bbc0b175a8feaf1c",
+    "red.log.gz": "becda358901a8df5089598ab618aa97f074e2801015bcf0388dbcbfccae26300",
+    "targeted-final.json": "5655bd33bec0e66091f29c1e64f2122418e29d11dab0618843199e302d69edd9",
+    "targeted-final.log": "3efd2e28f722b756a256401fed73b0832e59bc8a6299513c3023ee63cf3dac3d",
+    "targeted-final.log.gz": "2393c330336661563b1dbb3204d9194c988e0df5ed27c4a5c0ad7efb0daebf35",
+    "targeted.json": "7344c386a45346589c4f5ddbaeceabfab0eac0f6c1246d71f7dbb7c5bbfbb129",
+    "targeted.log": "7bb2a610cbb5ec66d9ce6f9a3fecf34c5baa127a7d2f5f2f8e8afd2fbe446e6e",
+    "targeted.log.gz": "d79af846777f278845e8e1db3ae028580183e15b2ee938dc15574f6f2027b807",
+    "typecheck-final.log": "732fcbb1b3e2d4d785401d83d1c49fb080190c52e2511c0439577d85f664425f",
+    "typecheck-final.log.gz": "5dc3a7eca7a7cb93299544414300299c1ef3f21ce8d6aa311de01ad03ca4acd3",
+    "typecheck.log": "485de74106047af0323a0b7456f4f67d7c96baa22fa2682dde29d6ac433aec6f",
+    "typecheck.log.gz": "23a6e92ad7b96665f8b24fe009fca049843e029fd32bb32cef895e605eb8e9c4"
+  }
+}

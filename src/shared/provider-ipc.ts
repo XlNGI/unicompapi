@@ -51,6 +51,7 @@ export type ProviderFrameworkErrorCode =
   | 'manual_registration_unavailable'
   | 'model_already_exists'
   | 'model_not_routable'
+  | 'model_profile_unavailable'
   | 'active_operations_present'
   | 'provider_registry_conflict'
   | 'audit_store_unavailable'

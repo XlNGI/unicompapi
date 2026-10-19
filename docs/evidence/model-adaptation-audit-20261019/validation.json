@@ -1,0 +1,36 @@
+{
+  "capturedAt": "2026-10-19T03:37:25.817Z",
+  "status": "audit_complete_findings_unfixed",
+  "businessSourceChanged": false,
+  "liveModelConfigurationChanged": false,
+  "counts": {
+    "catalogModels": 52,
+    "boundModels": 9,
+    "unboundModels": 43,
+    "enabledBoundModels": 1,
+    "unboundWithExactVendorSourceCandidate": 6,
+    "unboundWithoutExactSourceCandidate": 37
+  },
+  "offlineReplayScenarios": 8,
+  "regression": {
+    "files": 5,
+    "passed": 91,
+    "failed": 0,
+    "skipped": 0
+  },
+  "sourceHashCount": 22,
+  "sourceUnchanged": true,
+  "liveRegistryUnchanged": true,
+  "credentialAccessAttempts": 0,
+  "externalRequestAttempts": 0,
+  "documentationLinkTargetsChecked": 12,
+  "artifactHashes": {
+    "inspection.json": "12689838b760d7f16e7a5154d3c283ed05ac86f2b718a4edd40df1617feba3ef",
+    "regression.json": "9ca4b86512445a99c975554dcd284759a2cb3245f1dbb5e29486674d75c82904",
+    "inspect.cjs": "4237faf9e518f853048eae9ce95276af2742826b54736b17a8f6909c938ccd9f",
+    "offline-replay.log": "73b9c668949b2f1dd3f2ec6703b8efdc1b15e4ca8470743058f99fd2e0eb2e49"
+  },
+  "buildRun": false,
+  "fullProductRegressionRun": false,
+  "liveProviderAcceptanceRun": false
+}

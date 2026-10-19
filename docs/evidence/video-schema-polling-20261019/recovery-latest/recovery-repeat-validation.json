@@ -1,0 +1,42 @@
+{
+  "capturedAt": "2026-10-19T09:31:38.101Z",
+  "status": "passed",
+  "model": "MiniMax-H3",
+  "remoteTaskId": "485aeb85-6812-4b69-9a20-618421b509db",
+  "taskId": "task-video-a423cbb8-8a9c-459d-9b0e-c7e416e54f46",
+  "executionId": "execution-video-e59c0e52-2fc9-4dd3-aa74-9e5676384b8a",
+  "workId": "work-video-result-beac40bf-de4d-436c-9d43-25ef40161aa5",
+  "state": "completed",
+  "workCount": 1,
+  "file": {
+    "relativePath": "files/results/work-video-result-beac40bf-de4d-436c-9d43-25ef40161aa5.mp4",
+    "state": "available",
+    "checksumSha256": "904623bd445a1e2fab8e5d90fc074cafaf11b1fa2e87d1a916c3938d4e649c59",
+    "metadata": {
+      "mimeType": "video/mp4",
+      "container": "mp4",
+      "durationMs": 4459,
+      "width": 2560,
+      "height": 1440,
+      "sizeBytes": 6312220
+    }
+  },
+  "usage": [
+    {
+      "status": "reported",
+      "facts": [
+        {
+          "metricId": "charged_amount",
+          "quantity": "7040000",
+          "unit": "CNY_MICRO",
+          "source": "provider_body"
+        }
+      ]
+    }
+  ],
+  "requests": [],
+  "generationPosts": 0,
+  "settlementPosts": 0,
+  "originalTaskAndRouteAndRegistryUnchanged": true,
+  "boundary": "Production recovery runtime, adapter and verified local receiver; recover the accepted original only, no generation or settlement"
+}

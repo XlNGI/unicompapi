@@ -14,7 +14,8 @@ import type { NavigationItemId } from '../navigation/navigationItems';
 import {
   canSwitchProject,
   notifyProjectSessionChanged,
-  PROJECT_SESSION_CHANGED_EVENT
+  PROJECT_SESSION_CHANGED_EVENT,
+  PROJECT_CATALOG_CHANGED_EVENT
 } from '../project-session-events';
 import { WindowControls } from './WindowControls';
 
@@ -60,6 +61,12 @@ export function TitleBar({
       window.removeEventListener('focus', refreshProject);
       window.removeEventListener(PROJECT_SESSION_CHANGED_EVENT, refreshProject);
     };
+  }, [storage]);
+
+  useEffect(() => {
+    const refresh = () => { void refreshProjects(); };
+    window.addEventListener(PROJECT_CATALOG_CHANGED_EVENT, refresh);
+    return () => window.removeEventListener(PROJECT_CATALOG_CHANGED_EVENT, refresh);
   }, [storage]);
 
   useEffect(() => {

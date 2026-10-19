@@ -1,0 +1,412 @@
+{
+  "live": false,
+  "status": "passed",
+  "checks": [
+    {
+      "model": "MiniMax-H3",
+      "feature": "text_to_video",
+      "workId": "work-video-result-0f9cdfa5-2dfc-4eee-aca0-2add7ca471d2",
+      "checksumSha256": "db3fbb7c9c6621cd36d92dc1afd4e25db35f27762efb22401eeb6412762bcf8c",
+      "state": "passed"
+    },
+    {
+      "model": "doubao-seedance-2-0-260128",
+      "feature": "text_to_video",
+      "workId": "work-video-result-45dfb53a-958e-4312-a676-469d8892e344",
+      "checksumSha256": "db3fbb7c9c6621cd36d92dc1afd4e25db35f27762efb22401eeb6412762bcf8c",
+      "state": "passed"
+    },
+    {
+      "model": "doubao-seedance-2-0-260128",
+      "feature": "image_to_video",
+      "workId": "work-video-result-ad2d2bf6-141f-4291-b72a-980634ea0f2f",
+      "checksumSha256": "db3fbb7c9c6621cd36d92dc1afd4e25db35f27762efb22401eeb6412762bcf8c",
+      "state": "passed"
+    },
+    {
+      "model": "happyhorse-1.1-t2v",
+      "feature": "text_to_video",
+      "workId": "work-video-result-e8e8dd32-dd1a-44cc-8db7-b723324c3538",
+      "checksumSha256": "db3fbb7c9c6621cd36d92dc1afd4e25db35f27762efb22401eeb6412762bcf8c",
+      "state": "passed"
+    },
+    {
+      "model": "happyhorse-1.1-i2v",
+      "feature": "image_to_video",
+      "workId": "work-video-result-17a87d63-1c24-44c5-9767-d1562ccf4535",
+      "checksumSha256": "db3fbb7c9c6621cd36d92dc1afd4e25db35f27762efb22401eeb6412762bcf8c",
+      "state": "passed"
+    },
+    {
+      "model": "happyhorse-1.1-r2v",
+      "feature": "image_to_video",
+      "workId": "work-video-result-bb272cbf-3d80-4c06-9e34-e699f42751ee",
+      "checksumSha256": "db3fbb7c9c6621cd36d92dc1afd4e25db35f27762efb22401eeb6412762bcf8c",
+      "state": "passed"
+    },
+    {
+      "model": "wan3.0-video",
+      "feature": "text_to_video",
+      "workId": "work-video-result-2594726e-e41c-446b-9e19-2f0e8617d958",
+      "checksumSha256": "db3fbb7c9c6621cd36d92dc1afd4e25db35f27762efb22401eeb6412762bcf8c",
+      "state": "passed"
+    },
+    {
+      "model": "wan3.0-video",
+      "feature": "image_to_video",
+      "workId": "work-video-result-d71cc23f-dac6-454f-afbc-7d337a66c0b7",
+      "checksumSha256": "db3fbb7c9c6621cd36d92dc1afd4e25db35f27762efb22401eeb6412762bcf8c",
+      "state": "passed"
+    },
+    {
+      "model": "wan3.0-video-ali",
+      "feature": "text_to_video",
+      "workId": "work-video-result-5793d902-1edc-4bf3-9ee4-ed1132c6e3db",
+      "checksumSha256": "db3fbb7c9c6621cd36d92dc1afd4e25db35f27762efb22401eeb6412762bcf8c",
+      "state": "passed"
+    },
+    {
+      "model": "wan3.0-video-ali",
+      "feature": "image_to_video",
+      "workId": "work-video-result-a46613b5-f698-43b9-ae46-594225ff4260",
+      "checksumSha256": "db3fbb7c9c6621cd36d92dc1afd4e25db35f27762efb22401eeb6412762bcf8c",
+      "state": "passed"
+    },
+    {
+      "model": "wan3.0-video-prime-ali",
+      "feature": "text_to_video",
+      "workId": "work-video-result-fdcb2718-01ba-4451-a327-9bb880cfee14",
+      "checksumSha256": "db3fbb7c9c6621cd36d92dc1afd4e25db35f27762efb22401eeb6412762bcf8c",
+      "state": "passed"
+    },
+    {
+      "model": "wan3.0-video-prime-ali",
+      "feature": "image_to_video",
+      "workId": "work-video-result-abd42605-1ea8-4675-b3e0-e3ca20deb0c2",
+      "checksumSha256": "db3fbb7c9c6621cd36d92dc1afd4e25db35f27762efb22401eeb6412762bcf8c",
+      "state": "passed"
+    },
+    {
+      "model": "happyhorse-1.0-video-edit",
+      "feature": "video_edit",
+      "workId": "work-video-result-3317a717-2a69-4be0-a5b7-effdd61fd6f5",
+      "checksumSha256": "db3fbb7c9c6621cd36d92dc1afd4e25db35f27762efb22401eeb6412762bcf8c",
+      "state": "passed"
+    }
+  ],
+  "externalRequests": 0,
+  "paidPost": 0,
+  "requests": [
+    {
+      "method": "POST",
+      "path": "/v1/h3/tasks",
+      "operation": "post"
+    },
+    {
+      "method": "POST",
+      "path": "/v1/h3/tasks",
+      "operation": "post"
+    },
+    {
+      "method": "GET",
+      "path": "/v1/h3/tasks/task-www-0",
+      "operation": "read"
+    },
+    {
+      "method": "GET",
+      "path": "/v1/h3/tasks/task-www-0",
+      "operation": "read"
+    },
+    {
+      "method": "GET",
+      "path": "/v1/h3/tasks/task-www-0",
+      "operation": "read"
+    },
+    {
+      "method": "GET",
+      "path": "/v1/videos/task-www-0/content",
+      "operation": "read"
+    },
+    {
+      "method": "GET",
+      "path": "/v1/videos/task-www-0/content",
+      "operation": "read"
+    },
+    {
+      "method": "POST",
+      "path": "/v1/videos/quote",
+      "operation": "post"
+    },
+    {
+      "method": "POST",
+      "path": "/v1/videos",
+      "operation": "post"
+    },
+    {
+      "method": "GET",
+      "path": "/v1/videos/task-www-1",
+      "operation": "read"
+    },
+    {
+      "method": "GET",
+      "path": "/v1/videos/task-www-1/content",
+      "operation": "read"
+    },
+    {
+      "method": "POST",
+      "path": "/v1/assets",
+      "operation": "upload"
+    },
+    {
+      "method": "POST",
+      "path": "/v1/videos/quote",
+      "operation": "post"
+    },
+    {
+      "method": "POST",
+      "path": "/v1/videos",
+      "operation": "post"
+    },
+    {
+      "method": "GET",
+      "path": "/v1/videos/task-www-2",
+      "operation": "read"
+    },
+    {
+      "method": "GET",
+      "path": "/v1/videos/task-www-2/content",
+      "operation": "read"
+    },
+    {
+      "method": "POST",
+      "path": "/v1/videos/quote",
+      "operation": "post"
+    },
+    {
+      "method": "POST",
+      "path": "/v1/videos",
+      "operation": "post"
+    },
+    {
+      "method": "GET",
+      "path": "/v1/videos/task-www-3",
+      "operation": "read"
+    },
+    {
+      "method": "GET",
+      "path": "/v1/videos/task-www-3/content",
+      "operation": "read"
+    },
+    {
+      "method": "POST",
+      "path": "/v1/assets",
+      "operation": "upload"
+    },
+    {
+      "method": "POST",
+      "path": "/v1/videos/quote",
+      "operation": "post"
+    },
+    {
+      "method": "POST",
+      "path": "/v1/videos",
+      "operation": "post"
+    },
+    {
+      "method": "GET",
+      "path": "/v1/videos/task-www-4",
+      "operation": "read"
+    },
+    {
+      "method": "GET",
+      "path": "/v1/videos/task-www-4/content",
+      "operation": "read"
+    },
+    {
+      "method": "POST",
+      "path": "/v1/assets",
+      "operation": "upload"
+    },
+    {
+      "method": "POST",
+      "path": "/v1/videos/quote",
+      "operation": "post"
+    },
+    {
+      "method": "POST",
+      "path": "/v1/videos",
+      "operation": "post"
+    },
+    {
+      "method": "GET",
+      "path": "/v1/videos/task-www-5",
+      "operation": "read"
+    },
+    {
+      "method": "GET",
+      "path": "/v1/videos/task-www-5/content",
+      "operation": "read"
+    },
+    {
+      "method": "POST",
+      "path": "/v1/videos/quote",
+      "operation": "post"
+    },
+    {
+      "method": "POST",
+      "path": "/v1/videos",
+      "operation": "post"
+    },
+    {
+      "method": "GET",
+      "path": "/v1/videos/task-www-6",
+      "operation": "read"
+    },
+    {
+      "method": "GET",
+      "path": "/v1/videos/task-www-6/content",
+      "operation": "read"
+    },
+    {
+      "method": "POST",
+      "path": "/v1/assets",
+      "operation": "upload"
+    },
+    {
+      "method": "POST",
+      "path": "/v1/videos/quote",
+      "operation": "post"
+    },
+    {
+      "method": "POST",
+      "path": "/v1/videos",
+      "operation": "post"
+    },
+    {
+      "method": "GET",
+      "path": "/v1/videos/task-www-7",
+      "operation": "read"
+    },
+    {
+      "method": "GET",
+      "path": "/v1/videos/task-www-7/content",
+      "operation": "read"
+    },
+    {
+      "method": "POST",
+      "path": "/v1/videos/quote",
+      "operation": "post"
+    },
+    {
+      "method": "POST",
+      "path": "/v1/videos",
+      "operation": "post"
+    },
+    {
+      "method": "GET",
+      "path": "/v1/videos/task-www-8",
+      "operation": "read"
+    },
+    {
+      "method": "GET",
+      "path": "/v1/videos/task-www-8/content",
+      "operation": "read"
+    },
+    {
+      "method": "POST",
+      "path": "/v1/assets",
+      "operation": "upload"
+    },
+    {
+      "method": "POST",
+      "path": "/v1/videos/quote",
+      "operation": "post"
+    },
+    {
+      "method": "POST",
+      "path": "/v1/videos",
+      "operation": "post"
+    },
+    {
+      "method": "GET",
+      "path": "/v1/videos/task-www-9",
+      "operation": "read"
+    },
+    {
+      "method": "GET",
+      "path": "/v1/videos/task-www-9/content",
+      "operation": "read"
+    },
+    {
+      "method": "POST",
+      "path": "/v1/videos/quote",
+      "operation": "post"
+    },
+    {
+      "method": "POST",
+      "path": "/v1/videos",
+      "operation": "post"
+    },
+    {
+      "method": "GET",
+      "path": "/v1/videos/task-www-10",
+      "operation": "read"
+    },
+    {
+      "method": "GET",
+      "path": "/v1/videos/task-www-10/content",
+      "operation": "read"
+    },
+    {
+      "method": "POST",
+      "path": "/v1/assets",
+      "operation": "upload"
+    },
+    {
+      "method": "POST",
+      "path": "/v1/videos/quote",
+      "operation": "post"
+    },
+    {
+      "method": "POST",
+      "path": "/v1/videos",
+      "operation": "post"
+    },
+    {
+      "method": "GET",
+      "path": "/v1/videos/task-www-11",
+      "operation": "read"
+    },
+    {
+      "method": "GET",
+      "path": "/v1/videos/task-www-11/content",
+      "operation": "read"
+    },
+    {
+      "method": "POST",
+      "path": "/v1/assets",
+      "operation": "upload"
+    },
+    {
+      "method": "POST",
+      "path": "/v1/videos/quote",
+      "operation": "post"
+    },
+    {
+      "method": "POST",
+      "path": "/v1/videos",
+      "operation": "post"
+    },
+    {
+      "method": "GET",
+      "path": "/v1/videos/task-www-12",
+      "operation": "read"
+    },
+    {
+      "method": "GET",
+      "path": "/v1/videos/task-www-12/content",
+      "operation": "read"
+    }
+  ],
+  "boundaries": "injected transport; no real provider acceptance"
+}

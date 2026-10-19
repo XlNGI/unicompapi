@@ -391,6 +391,7 @@ export type ProviderManagementFrameworkErrorCode =
   | 'manual_registration_unavailable'
   | 'model_already_exists'
   | 'model_not_routable'
+  | 'model_profile_unavailable'
   | 'active_operations_present'
   | 'provider_registry_conflict'
   | 'audit_store_unavailable'
@@ -2140,21 +2141,24 @@ function assertModelRoutableForEnable(
       'Only a present model on an available connection can be enabled'
     );
   }
-  // Catalog-synced models may not have a verified profile yet; still allow the
-  // user to mark them enabled for local selection. If a profile is already
-  // attached, it must remain verified.
-  if (model.activeProfileId) {
-    const profile = snapshot.modelProfiles?.find((candidate) =>
-      candidate.profileId === model.activeProfileId &&
-      candidate.modelId === model.id &&
-      candidate.modelRevision <= model.revision
+  const profiles = (snapshot.modelProfiles ?? []).filter(p => p.modelId === model.id && p.modelRevision <= model.revision);
+  const active = profiles.find(p => p.profileId === model.activeProfileId);
+  const availableStatus = (p: ModelFeatureProfile) => p.status === 'verified' || p.status === 'declared' && Boolean(p.apiContract);
+  // Legacy media routes may have multiple verified profiles without an active
+  // pointer. An explicit contract selects only its own immutable profile.
+  const candidates = active?.apiContract ? [active] : profiles;
+  if (model.activeProfileId && (!active || !availableStatus(active)) || !candidates.some(profile => {
+    if (!availableStatus(profile) || profile.features.length === 0 || profile.packageId !== connection.packageId) return false;
+    if (profile.apiContract && (profile.apiContractConnectionPin?.credentialVersionId !== connection.credentialVersionId ||
+        profile.apiContractConnectionPin?.connectionConfigVersionId !== connection.connectionConfigVersionId)) return false;
+    const protocol = snapshot.protocolBindings.find(p => p.id === profile.protocolBindingId && p.connectionId === connection.id && p.providerId === model.providerId);
+    return protocol && protocol.adapterKind === profile.adapterKey && connection.adapterBindings?.some(a =>
+      a.adapterId === profile.adapterKey && a.protocolId === protocol.protocolId && a.protocolVersion === protocol.protocolVersion);
+  })) {
+    throw new ProviderManagementFrameworkError(
+      'model_profile_unavailable',
+      'An available feature profile or a current declared API contract is required before enabling this model'
     );
-    if (!profile || profile.status !== 'verified' && !(profile.status === 'declared' && profile.apiContract)) {
-      throw new ProviderManagementFrameworkError(
-        'model_not_routable',
-        'Only a present model with an exact verified profile can be enabled'
-      );
-    }
   }
 }
 
@@ -2497,6 +2501,7 @@ function frameworkFailureCode<T>(
     manual_registration_unavailable: 'Exact manual model registration is unavailable',
     model_already_exists: 'The provider model is already registered',
     model_not_routable: 'The provider model cannot be enabled',
+    model_profile_unavailable: 'The model requires an available feature profile or a current API contract binding',
     active_operations_present: 'Active provider operations still use this connection',
     provider_registry_conflict: 'The provider registry changed during the operation',
     audit_store_unavailable: 'The provider management audit is unavailable',

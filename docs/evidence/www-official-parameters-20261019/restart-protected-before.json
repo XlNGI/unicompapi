@@ -1,0 +1,35 @@
+{
+  "at": "2026-10-19T10:23:35.924Z",
+  "records": [
+    {
+      "name": "tasks",
+      "sha256": "589a28369abaf48ba136ce90bf497cc343d8d0ffbd4ced0c193baef7cd6583c3",
+      "count": 3
+    },
+    {
+      "name": "executions",
+      "sha256": "85a0181b4410c58b981355a7d706064a94092bea54319cbb39c26ecc01a4705d",
+      "count": 3,
+      "states": [
+        "failed",
+        "completed",
+        "completed"
+      ]
+    },
+    {
+      "name": "provider-operations",
+      "sha256": "fa0362dbe27f55cb2e83a0138543408249f70fba972be09bca529cffda7bef4a",
+      "count": 2
+    },
+    {
+      "name": "provider-execution-route-snapshots",
+      "sha256": "46262b826566bd69e4f7659b4a81887d63bc25daa4dade1d3a3bdefed5560e31",
+      "count": 0
+    },
+    {
+      "name": "works",
+      "sha256": "36c3d35a5c03b753ebc5da4ac0cf6e8560bc40c393d6145280340188f08e9969",
+      "count": 2
+    }
+  ]
+}

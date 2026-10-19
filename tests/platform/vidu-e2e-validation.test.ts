@@ -250,7 +250,7 @@ describe('Vidu local synthetic service validation', () => {
     await expect(poller.poll('synthetic-video-task')).resolves.toEqual({
       state: 'completed'
     });
-    expect(waits).toEqual([100, 200]);
+    expect(waits).toEqual([1000, 200]);
     await expect(fixture.videoAdapter.cancel('synthetic-video-task')).resolves
       .toEqual({ state: 'cancelled' });
 
