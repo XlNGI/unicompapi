@@ -6,7 +6,8 @@ const Module = require('node:module');
 const { app, BrowserWindow } = require('electron');
 // Production React workbench; synthetic local IPC fixture and decoded local media only.
 const workspace = path.resolve(__dirname, '..');
-const output = path.join(workspace, 'outputs/www-video-contracts/ui');
+const h3 = process.argv.includes('--h3');
+const output = path.join(workspace, 'outputs/www-video-contracts', h3 ? 'ui-parameters-h3' : 'ui-parameters-edit');
 app.setPath('userData', path.join(os.tmpdir(), 'unicomp-www-ui-' + process.pid));
 app.disableHardwareAcceleration();
 app.commandLine.appendSwitch('disable-background-networking');
@@ -33,9 +34,10 @@ async function main() {
   const loaded = new Module(path.join(workspace, 'ui-contract.cjs'));
   loaded.filename = path.join(workspace, 'ui-contract.cjs'); loaded.paths = module.paths;
   loaded._compile(compiled.outputFiles[0].text, loaded.filename);
-  const schema = loaded.exports.wwwVideoParameterSchema(loaded.exports.wwwVideoContract('happyhorse-1.0-video-edit'), 'video_edit');
+  const modelKey = h3 ? 'MiniMax-H3' : 'happyhorse-1.0-video-edit';
+  const schema = loaded.exports.wwwVideoParameterSchema(loaded.exports.wwwVideoContract(modelKey), h3 ? 'text_to_video' : 'video_edit');
   const candidate = { schemaVersion: 1, candidateId: 'candidate-0', providerName: 'WWW local fixture', connectionName: 'Isolated fixture',
-    modelName: 'happyhorse-1.0-video-edit', available: true, unavailableReasons: [], parameterSchema: schema,
+    modelName: modelKey, available: true, unavailableReasons: [], parameterSchema: schema,
     usageSchema: { schemaVersion: 1, schemaId: 'usage.unicompapi-www.video', revision: 1 }, cost: { state: 'unknown' } };
   await require('vite').build({ configFile: false, root: workspace, logLevel: 'silent',
     define: { 'process.env.NODE_ENV': '"production"' }, esbuild: { jsx: 'automatic' },
@@ -47,11 +49,11 @@ async function main() {
       const end = code.indexOf('function makeDraft', start);
       assert.ok(start >= 0 && end > start);
       code = code.slice(0, start) + 'const candidates: VideoFeatureCandidateDto[] = ' + JSON.stringify([candidate]) + ';\n\n' + code.slice(end);
+      if (h3) return code.replace('parameterValues: {}', 'parameterValues: { generate_audio: true }');
       return code.replace("productFeature: textVideo ? 'text_to_video' : 'image_to_video'", "productFeature: 'video_edit'")
         .replace("originalInput: textVideo ? 'Local video prompt' : '', finalPrompt: textVideo ? 'Local video prompt' : ''", "originalInput: '将杯子改成蓝色', finalPrompt: '将杯子改成蓝色'")
-        .replace('parameterValues: {}', 'parameterValues: { maximum_cost_cny: 5 }')
         .replace("assetId: 'fixture-image', mediaKind: 'image' as const", "assetId: 'fixture-video', mediaKind: 'video' as const")
-        .replace("    getMaterial: async () =>", "    selectMaterial: async (id: string) => { const current = drafts.get(id) as any; const draft = { ...current, featureSelection: { productFeature: 'video_edit', candidateId: 'candidate-0', parameterSchemaId: candidates[0].parameterSchema.schemaId, parameterSchemaRevision: 1, parameterValues: { maximum_cost_cny: 5 } }, imageToVideo: { ...current.imageToVideo, referenceImages: undefined, source: { assetId: 'fixture-video', mediaKind: 'video', role: 'source', selectedAt: timestamp } } }; drafts.set(id, draft); return ok({ cancelled: false, draft }); },\n    getMaterial: async () =>")
+        .replace("    getMaterial: async () =>", "    selectMaterial: async (id: string) => { const current = drafts.get(id) as any; const draft = { ...current, featureSelection: { productFeature: 'video_edit', candidateId: 'candidate-0', parameterSchemaId: candidates[0].parameterSchema.schemaId, parameterSchemaRevision: candidates[0].parameterSchema.revision, parameterValues: {} }, imageToVideo: { ...current.imageToVideo, referenceImages: undefined, source: { assetId: 'fixture-video', mediaKind: 'video', role: 'source', selectedAt: timestamp } } }; drafts.set(id, draft); return ok({ cancelled: false, draft }); },\n    getMaterial: async () =>")
         .replace("ok({ url: imageUrl, mediaKind: 'image', mimeType: 'image/png', expiresAt: timestamp })", "ok({ url: videoUrl, mediaKind: 'video', mimeType: 'video/webm', expiresAt: timestamp })");
     } }],
     build: { outDir: temporary, emptyOutDir: false, minify: false,
@@ -63,15 +65,52 @@ async function main() {
     webPreferences: { contextIsolation: true, nodeIntegration: false, backgroundThrottling: false, spellcheck: false, offscreen: true } });
   window.webContents.session.webRequest.onBeforeRequest({ urls: ['http://*/*', 'https://*/*'] }, (_request, callback) => { externalRequests++; callback({ cancel: true }); });
   window.webContents.on('console-message', (_event, level, message) => { if (level >= 3) errors.push(message); });
-  await window.loadFile(path.join(temporary, 'index.html'));
+  await window.loadFile(path.join(temporary, 'index.html'), h3 ? { query: { parameters: '1' } } : {});
+  if (h3) {
+    await until('window.workbenchHarness?.ready && document.body.textContent.includes("MiniMax-H3")');
+    await js('Array.from(document.querySelectorAll("details")).find(e => e.querySelector("summary")?.textContent.includes("模型参数")).open = true');
+    await until('document.querySelector("input[aria-label=分辨率]")');
+    assert.equal(await js('document.body.textContent.includes("费用上限") || document.body.textContent.includes("报价上限") || document.querySelector("section[aria-label=费用授权]") !== null'), false);
+    await js('window.audioSwitch = Array.from(document.querySelectorAll(".uc-dynamic-parameters__field")).find(e => e.textContent.includes("生成音频")).querySelector("[role=switch]")');
+    assert.equal(await js('window.audioSwitch.getAttribute("aria-checked")'), 'true');
+    await js('window.audioSwitch.click()');
+    await until('workbenchHarness.state().drafts[0].featureSelection.parameterValues.generate_audio === false');
+    assert.equal(await js('window.audioSwitch.closest(".uc-dynamic-parameters__field").textContent.includes("关闭")'), true);
+    // Explicit false can return to omission, and omission must display default.
+    await js('document.querySelector("button[aria-label=生成音频使用服务商默认]").click()');
+    await until('!Object.hasOwn(workbenchHarness.state().drafts[0].featureSelection.parameterValues, "generate_audio")');
+    assert.equal(await js('window.audioSwitch.closest(".uc-dynamic-parameters__field").textContent.includes("默认")'), true);
+    await js('window.audioSwitch.click()');
+    await js('window.audioSwitch.click()');
+    // Submit before idle commit; the focused model input must reach preflight.
+    await js(`(() => {
+      const set = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value').set;
+      for (const [label, value] of [['分辨率','768P']]) {
+        const input = document.querySelector('input[aria-label="' + label + '"]');
+        set.call(input, value); input.dispatchEvent(new Event('input', { bubbles: true }));
+      }
+    })()`);
+    await js('Array.from(document.querySelectorAll("button")).find(e => e.textContent.trim() === "生成").click()');
+    await until('workbenchHarness.counters.prepares === 1');
+    const parameters = await js('workbenchHarness.state().drafts[0].featureSelection.parameterValues');
+    assert.equal(parameters.resolution, '768P'); assert.equal(parameters.maximum_cost_cny, undefined); assert.equal(parameters.generate_audio, false);
+    assert.equal(await js('Array.from(document.querySelectorAll("details summary")).find(e => e.textContent.includes("模型参数")).textContent.includes("5 项")'), true);
+    window.webContents.invalidate(); await delay(500);
+    await fs.writeFile(path.join(output, 'h3-official-parameters.png'), (await window.webContents.capturePage()).toPNG());
+    assert.deepEqual(errors, []); assert.equal(externalRequests, 0);
+    checks.push('H3 documented generate names/types; enum and requirement evidence remains incomplete', 'five gateway parameters; no manual budget input anywhere', 'optional booleans distinguish default and false and can return to omission', 'focused model edit saved before preflight without a budget');
+    await fs.writeFile(path.join(output, 'validation.json'), JSON.stringify({ status: 'passed', checks, errors, externalRequests,
+      boundaries: 'production React workbench; isolated local IPC; no provider call; quote approval verified in native Host suite' }, null, 2));
+    console.log(JSON.stringify({ status: 'passed', checks: checks.length, externalRequests })); return;
+  }
   await until('window.workbenchHarness?.ready && document.body.textContent.includes("happyhorse-1.0-video-edit")');
   await until('document.querySelector(".uc-image-professional__reference-thumbnail video")?.readyState >= 2');
   assert.equal(await js('workbenchHarness.state().drafts[0].featureSelection.productFeature'), 'video_edit');
   assert.equal(await js('Boolean(document.querySelector("button[aria-label=继续添加图片]"))'), false);
   checks.push('original video decodes in production workbench; edit model selected; image addition hidden');
   await js('Array.from(document.querySelectorAll("details")).find(e => e.querySelector("summary")?.textContent.includes("模型参数")).open = true');
-  await until('document.querySelector("input[aria-label=本次报价上限（元）]")?.value === "5"');
-  checks.push('WWW edit contract parameters and required RMB quote cap rendered');
+  assert.equal(await js('document.body.textContent.includes("费用上限") || document.body.textContent.includes("报价上限") || document.querySelector("section[aria-label=费用授权]") !== null'), false);
+  checks.push('no manual budget input; model parameters contain only gateway inputs');
   window.webContents.invalidate();
   await delay(500);
   await fs.writeFile(path.join(output, 'video-edit.png'), (await window.webContents.capturePage()).toPNG());

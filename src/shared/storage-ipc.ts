@@ -8,6 +8,7 @@ export const storageIpcChannels = {
   openRecentProject: 'storage:open-recent-project',
   createProject: 'storage:create-project',
   listProjects: 'storage:list-projects',
+  removeProject: 'storage:remove-project',
   listProjectConversationSummaries: 'storage:list-project-conversation-summaries',
   getLocalStorageSummary: 'storage:get-local-storage-summary',
   localStorageChanged: 'storage:local-storage-changed',
@@ -39,6 +40,8 @@ export type StorageIpcErrorCode =
   | 'invalid_project'
   | 'project_open_failed'
   | 'project_create_failed'
+  | 'project_remove_failed'
+  | 'project_in_use'
   | 'read_model_failed'
   | 'work_not_found'
   | 'media_unavailable'
@@ -94,6 +97,14 @@ export interface StorageProjectSummaryDto {
   readonly projectName: string;
   readonly availability: 'available' | 'unavailable';
   readonly lastOpenedAt: string;
+}
+
+export type StorageProjectRemovalMode = 'forget' | 'trash';
+
+export interface StorageRemoveProjectDto {
+  readonly projectId: string;
+  readonly filesTrashed: boolean;
+  readonly sessionClosed: boolean;
 }
 
 export interface StorageLocalStorageSummaryDto {
@@ -509,6 +520,10 @@ export interface StorageApi {
     name: string
   ): Promise<StorageIpcResult<StorageCreateProjectDto>>;
   listProjects(): Promise<StorageIpcResult<readonly StorageProjectSummaryDto[]>>;
+  removeProject(
+    projectId: string,
+    mode: StorageProjectRemovalMode
+  ): Promise<StorageIpcResult<StorageRemoveProjectDto>>;
   listProjectConversationSummaries(
     projectId: string
   ): Promise<StorageIpcResult<readonly StorageProjectConversationSummaryDto[]>>;

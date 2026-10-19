@@ -60,7 +60,6 @@ const parameterLabels: Readonly<Record<string, string>> = {
   duration: '视频时长',
   duration_seconds: '视频时长（秒）',
   generation_mode: '生成模式',
-  maximum_cost_cny: '本次报价上限（元）',
   fps: '帧率',
   frames: '帧数',
   generate_audio: '生成音频',
@@ -203,6 +202,7 @@ export function displayParameterOption(
 }
 
 export interface DynamicParameterFormProps {
+  readonly ariaLabel?: string;
   readonly fields: readonly DynamicParameterField[];
   readonly values: Readonly<Record<string, DynamicParameterValue | undefined>>;
   readonly disabled?: boolean;
@@ -251,6 +251,7 @@ export const DynamicParameterForm = forwardRef<
   DynamicParameterFormHandle,
   DynamicParameterFormProps
 >(function DynamicParameterForm({
+  ariaLabel = '模型参数',
   fields,
   values,
   disabled = false,
@@ -459,7 +460,7 @@ export const DynamicParameterForm = forwardRef<
   }
   return (
     <div className="uc-dynamic-parameters-container">
-      <div className="uc-dynamic-parameters" aria-label="模型参数">
+      <div className="uc-dynamic-parameters" aria-label={ariaLabel}>
         {fields.map((field) => (
           <ParameterField
             buffer={buffers[field.fieldId]}
@@ -670,8 +671,17 @@ function ParameterField({
           disabled={disabled}
           aria-label={displayParameterKey(field.fieldId || field.labelId)}
           onChange={(next) => onDiscreteChange(next)}
-          unCheckedChildren="关闭"
+          unCheckedChildren={value === undefined && !field.required ? '默认' : '关闭'}
         />
+        {!field.required && value !== undefined ? (
+          <button
+            type="button"
+            className="uc-dynamic-parameters__reset"
+            aria-label={`${displayParameterKey(field.fieldId || field.labelId)}使用服务商默认`}
+            disabled={disabled}
+            onClick={() => onDiscreteChange(undefined)}
+          >使用服务商默认</button>
+        ) : null}
       </ParameterShell>
     );
   }

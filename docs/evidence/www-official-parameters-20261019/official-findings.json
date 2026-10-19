@@ -1,0 +1,414 @@
+{
+  "reviewedAt": "2026-10-19T10:21:39.541Z",
+  "outboundScope": "Two bounded GET collection runs to nine known public documentation URLs; no project content, credentials, generation or settlement calls",
+  "cost": "Public documentation GET; no paid model request",
+  "findings": [
+    {
+      "modelKey": "MiniMax-H3",
+      "source": "https://www.unicompapi.com/docs/models/MiniMax-H3",
+      "retrievedAt": "2026-10-19T10:03:38.169Z",
+      "sha256": "9c3d0cbed91e6201b76c1361644200ce8f07b4911480c04163e4f72df80e8dee",
+      "maximumCostCnyPresent": false,
+      "parameterRequirements": [],
+      "evidenceBoundary": "Only generate quote/submit examples; complete generate required/enum/range schema not published on this page. Do not infer generate constraints from regenerate or understand.",
+      "quotedAmountProtocol": "Use returned quote.quoted_amount in expected_quote_amount; JSON integer, CNY_MICRO. No manual maximum cost parameter.",
+      "generateExampleFields": [
+        "resolution",
+        "ratio",
+        "duration",
+        "generate_audio",
+        "watermark"
+      ]
+    },
+    {
+      "modelKey": "doubao-seedance-2-0-260128",
+      "source": "https://www.unicompapi.com/docs/models/doubao-seedance-2-0-260128",
+      "retrievedAt": "2026-10-19T10:03:39.320Z",
+      "sha256": "414d00ad7bf33ec7903bb95a41db6ad7651f4bd7d9db2656967e8cebac9df007",
+      "maximumCostCnyPresent": false,
+      "parameterRequirements": [
+        {
+          "name": "generation_mode",
+          "required": false,
+          "sourceType": "string · 可选",
+          "constraints": "text_to_video、first_frame、first_last_frame、reference_images、reference_media；默认 text_to_video"
+        },
+        {
+          "name": "omni_reference_task_type",
+          "required": false,
+          "sourceType": "string · 可选",
+          "constraints": "auto、reference；默认 auto"
+        },
+        {
+          "name": "resolution",
+          "required": false,
+          "sourceType": "string · 可选",
+          "constraints": "480P、720P、1080P、4K；默认 720P"
+        },
+        {
+          "name": "aspect_ratio",
+          "required": false,
+          "sourceType": "string · 可选",
+          "constraints": "16:9、9:16、4:3、3:4、1:1、21:9、adaptive；默认 16:9"
+        },
+        {
+          "name": "duration_seconds",
+          "required": false,
+          "sourceType": "integer · 可选",
+          "constraints": "-1、4、5、6、7、8、9、10、11、12、13、14、15；默认 4"
+        },
+        {
+          "name": "frames",
+          "required": false,
+          "sourceType": "integer · 可选",
+          "constraints": "29 – 289"
+        },
+        {
+          "name": "generate_audio",
+          "required": false,
+          "sourceType": "boolean · 可选",
+          "constraints": "true / false；默认 true"
+        },
+        {
+          "name": "watermark",
+          "required": false,
+          "sourceType": "boolean · 可选",
+          "constraints": "true / false；默认 false"
+        },
+        {
+          "name": "return_last_frame",
+          "required": false,
+          "sourceType": "boolean · 可选",
+          "constraints": "true / false；默认 false"
+        },
+        {
+          "name": "seed",
+          "required": false,
+          "sourceType": "integer · 可选",
+          "constraints": "-1 – 2147483647"
+        },
+        {
+          "name": "output_format",
+          "required": false,
+          "sourceType": "string · 可选",
+          "constraints": "mp4"
+        },
+        {
+          "name": "camera_fixed",
+          "required": false,
+          "sourceType": "boolean · 可选",
+          "constraints": "true / false省略时使用模型默认设置。"
+        },
+        {
+          "name": "priority",
+          "required": false,
+          "sourceType": "integer · 可选",
+          "constraints": "0 – 9"
+        }
+      ]
+    },
+    {
+      "modelKey": "happyhorse-1.1-t2v",
+      "source": "https://www.unicompapi.com/docs/models/happyhorse-1.1-t2v",
+      "retrievedAt": "2026-10-19T10:04:58.870Z",
+      "sha256": "1a6b76a2899e3ab0ba70d8ed857222cc78b795c27e8c4a27d8551eb2e77aee0f",
+      "maximumCostCnyPresent": false,
+      "parameterRequirements": [
+        {
+          "name": "resolution",
+          "required": false,
+          "sourceType": "string · 可选",
+          "constraints": "480P、720P、1080P；默认 720P"
+        },
+        {
+          "name": "aspect_ratio",
+          "required": false,
+          "sourceType": "string · 可选",
+          "constraints": "16:9、9:16、1:1、4:3、3:4、4:5、5:4、9:21、21:9；默认 16:9"
+        },
+        {
+          "name": "duration_seconds",
+          "required": false,
+          "sourceType": "integer · 可选",
+          "constraints": "3 – 15；默认 5"
+        },
+        {
+          "name": "watermark",
+          "required": false,
+          "sourceType": "boolean · 可选",
+          "constraints": "true / false；默认 false"
+        },
+        {
+          "name": "seed",
+          "required": false,
+          "sourceType": "integer · 可选",
+          "constraints": "0 – 2147483647"
+        }
+      ]
+    },
+    {
+      "modelKey": "happyhorse-1.1-i2v",
+      "source": "https://www.unicompapi.com/docs/models/happyhorse-1.1-i2v",
+      "retrievedAt": "2026-10-19T10:05:00.005Z",
+      "sha256": "293a5726935f7de689baf4cdd833ccae0b829058f684a324b794fef216967f4b",
+      "maximumCostCnyPresent": false,
+      "parameterRequirements": [
+        {
+          "name": "resolution",
+          "required": false,
+          "sourceType": "string · 可选",
+          "constraints": "480P、720P、1080P；默认 720P"
+        },
+        {
+          "name": "duration_seconds",
+          "required": false,
+          "sourceType": "integer · 可选",
+          "constraints": "3 – 15；默认 5"
+        },
+        {
+          "name": "watermark",
+          "required": false,
+          "sourceType": "boolean · 可选",
+          "constraints": "true / false；默认 false"
+        },
+        {
+          "name": "seed",
+          "required": false,
+          "sourceType": "integer · 可选",
+          "constraints": "0 – 2147483647"
+        }
+      ]
+    },
+    {
+      "modelKey": "happyhorse-1.1-r2v",
+      "source": "https://www.unicompapi.com/docs/models/happyhorse-1.1-r2v",
+      "retrievedAt": "2026-10-19T10:05:01.145Z",
+      "sha256": "92ab65b3579db9dbc3ea56433c1aad653bcbeb58b762d45750c25070ba149828",
+      "maximumCostCnyPresent": false,
+      "parameterRequirements": [
+        {
+          "name": "resolution",
+          "required": false,
+          "sourceType": "string · 可选",
+          "constraints": "480P、720P、1080P；默认 720P"
+        },
+        {
+          "name": "aspect_ratio",
+          "required": false,
+          "sourceType": "string · 可选",
+          "constraints": "16:9、9:16、1:1、4:3、3:4、4:5、5:4、9:21、21:9；默认 16:9"
+        },
+        {
+          "name": "duration_seconds",
+          "required": false,
+          "sourceType": "integer · 可选",
+          "constraints": "3 – 15；默认 5"
+        },
+        {
+          "name": "watermark",
+          "required": false,
+          "sourceType": "boolean · 可选",
+          "constraints": "true / false；默认 false"
+        },
+        {
+          "name": "seed",
+          "required": false,
+          "sourceType": "integer · 可选",
+          "constraints": "0 – 2147483647"
+        }
+      ]
+    },
+    {
+      "modelKey": "wan3.0-video",
+      "source": "https://www.unicompapi.com/docs/models/wan3.0-video",
+      "retrievedAt": "2026-10-19T10:05:02.298Z",
+      "sha256": "4d791b516384b5e5b839100950a8e99034fe29a4b3988056db5783e802710620",
+      "maximumCostCnyPresent": false,
+      "parameterRequirements": [
+        {
+          "name": "resolution",
+          "required": false,
+          "sourceType": "string · 可选",
+          "constraints": "480P、720P、1080P；默认 480P"
+        },
+        {
+          "name": "aspect_ratio",
+          "required": false,
+          "sourceType": "string · 可选",
+          "constraints": "adaptive、16:9、4:3、1:1、3:4、9:16；默认 16:9"
+        },
+        {
+          "name": "duration_seconds",
+          "required": false,
+          "sourceType": "integer · 可选",
+          "constraints": "-1、2、3、4、5、6、7、8、9、10、11、12、13、14、15、16、17、18、19、20、21、22、23、24、25、26、27、28、29、30；默认 5设为-1自动选择时长；参考视频输入与生成视频的合计时长不超过30秒。"
+        },
+        {
+          "name": "generate_audio",
+          "required": false,
+          "sourceType": "boolean · 可选",
+          "constraints": "true / false；默认 true"
+        },
+        {
+          "name": "generation_mode",
+          "required": false,
+          "sourceType": "string · 可选",
+          "constraints": "text_to_video、first_frame、last_frame、first_last_frame、reference_images、reference_media、file_link；默认 text_to_video"
+        },
+        {
+          "name": "watermark",
+          "required": false,
+          "sourceType": "boolean · 可选",
+          "constraints": "true / false"
+        },
+        {
+          "name": "seed",
+          "required": false,
+          "sourceType": "integer · 可选",
+          "constraints": "0 – 2147483647"
+        }
+      ]
+    },
+    {
+      "modelKey": "wan3.0-video-ali",
+      "source": "https://www.unicompapi.com/docs/models/wan3.0-video-ali",
+      "retrievedAt": "2026-10-19T10:05:03.456Z",
+      "sha256": "2d40730bd02c2d93e772e448ec56be1f26677ed4211ae9713a4f462f63442427",
+      "maximumCostCnyPresent": false,
+      "parameterRequirements": [
+        {
+          "name": "generation_mode",
+          "required": false,
+          "sourceType": "string · 可选",
+          "constraints": "text_to_video、first_frame、first_last_frame、reference_images、reference_video、reference_audio、reference_media、video_edit、video_extend；默认 text_to_video"
+        },
+        {
+          "name": "resolution",
+          "required": false,
+          "sourceType": "string · 可选",
+          "constraints": "480P、720P、1080P；默认 720P"
+        },
+        {
+          "name": "aspect_ratio",
+          "required": false,
+          "sourceType": "string · 可选",
+          "constraints": "adaptive、21:9、16:9、4:3、1:1、3:4、9:16；默认 adaptive"
+        },
+        {
+          "name": "duration_seconds",
+          "required": false,
+          "sourceType": "integer · 可选",
+          "constraints": "-1、2、3、4、5、6、7、8、9、10、11、12、13、14、15、16、17、18、19、20、21、22、23、24、25、26、27、28、29、30；默认 5"
+        },
+        {
+          "name": "generate_audio",
+          "required": false,
+          "sourceType": "boolean · 可选",
+          "constraints": "true / false；默认 true"
+        },
+        {
+          "name": "watermark",
+          "required": false,
+          "sourceType": "boolean · 可选",
+          "constraints": "true / false；默认 false"
+        },
+        {
+          "name": "prompt_extend",
+          "required": false,
+          "sourceType": "boolean · 可选",
+          "constraints": "true / false；默认 true"
+        },
+        {
+          "name": "seed",
+          "required": false,
+          "sourceType": "integer · 可选",
+          "constraints": "-1 – 2147483647"
+        }
+      ]
+    },
+    {
+      "modelKey": "wan3.0-video-prime-ali",
+      "source": "https://www.unicompapi.com/docs/models/wan3.0-video-prime-ali",
+      "retrievedAt": "2026-10-19T10:05:04.617Z",
+      "sha256": "7ff4aca7da3f2c29244360fe6efe0944ce74b1f00aa3872a5d28b99badf52fec",
+      "maximumCostCnyPresent": false,
+      "parameterRequirements": [
+        {
+          "name": "generation_mode",
+          "required": false,
+          "sourceType": "string · 可选",
+          "constraints": "text_to_video、first_frame、first_last_frame、reference_images、reference_video、reference_audio、reference_media、video_edit、video_extend；默认 text_to_video"
+        },
+        {
+          "name": "resolution",
+          "required": false,
+          "sourceType": "string · 可选",
+          "constraints": "480P、720P、1080P；默认 720P"
+        },
+        {
+          "name": "aspect_ratio",
+          "required": false,
+          "sourceType": "string · 可选",
+          "constraints": "adaptive、21:9、16:9、4:3、1:1、3:4、9:16；默认 adaptive"
+        },
+        {
+          "name": "duration_seconds",
+          "required": false,
+          "sourceType": "integer · 可选",
+          "constraints": "-1、2、3、4、5、6、7、8、9、10、11、12、13、14、15、16、17、18、19、20、21、22、23、24、25、26、27、28、29、30；默认 5"
+        },
+        {
+          "name": "generate_audio",
+          "required": false,
+          "sourceType": "boolean · 可选",
+          "constraints": "true / false；默认 true"
+        },
+        {
+          "name": "watermark",
+          "required": false,
+          "sourceType": "boolean · 可选",
+          "constraints": "true / false；默认 false"
+        },
+        {
+          "name": "prompt_extend",
+          "required": false,
+          "sourceType": "boolean · 可选",
+          "constraints": "true / false；默认 true"
+        },
+        {
+          "name": "seed",
+          "required": false,
+          "sourceType": "integer · 可选",
+          "constraints": "-1 – 2147483647"
+        }
+      ]
+    },
+    {
+      "modelKey": "happyhorse-1.0-video-edit",
+      "source": "https://www.unicompapi.com/docs/models/happyhorse-1.0-video-edit",
+      "retrievedAt": "2026-10-19T10:05:05.731Z",
+      "sha256": "6c86e83a223ea7bce39b777f79e20ba26a9c68ec245ea4d9bebef4cad90a0fe2",
+      "maximumCostCnyPresent": false,
+      "parameterRequirements": [
+        {
+          "name": "generation_mode",
+          "required": false,
+          "sourceType": "string · 可选",
+          "constraints": "reference_video；默认 reference_video"
+        },
+        {
+          "name": "resolution",
+          "required": false,
+          "sourceType": "string · 可选",
+          "constraints": "720P、1080P；默认 720P"
+        },
+        {
+          "name": "duration_seconds",
+          "required": false,
+          "sourceType": "integer · 可选",
+          "constraints": "3、4、5、6、7、8、9、10、11、12、13、14、15；默认 5"
+        }
+      ]
+    }
+  ]
+}

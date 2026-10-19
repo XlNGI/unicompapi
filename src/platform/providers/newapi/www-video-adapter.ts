@@ -18,6 +18,14 @@ export interface ControlledWwwVideoPort {
     readonly assetId: string; readonly mimeType: 'video/mp4'; readonly durationMs: number; readonly sizeBytes: number; readonly bytes: Uint8Array;
   }>;
 }
+/** Host-owned approval of the exact, validated quote, before a paid POST. */
+export interface WwwVideoQuoteApprovalPort {
+  confirm(input: {
+    readonly modelKey: string;
+    readonly quotedAmountCnyMicro: number;
+    readonly signal?: AbortSignal;
+  }): Promise<boolean>;
+}
 interface Context {
   readonly route: ProviderExecutionRouteSnapshotV1;
   readonly contract: WwwVideoContract;
@@ -42,7 +50,8 @@ export class WwwVideoAdapter implements ProviderAsyncOperationPort, VideoResultP
   constructor(private readonly runtime: NewApiSharedRuntime, private readonly connections: NewApiVideoConnectionResolverPort,
     private readonly credentials: NewApiVideoCredentialResolverPort, private readonly images: ControlledNewApiImagePort,
     private readonly usage: NewApiVideoUsageObservationSinkPort, private readonly ids: NewApiVideoAdapterIdFactory,
-    private readonly videos?: ControlledWwwVideoPort) {}
+    private readonly videos?: ControlledWwwVideoPort,
+    private readonly quoteApproval?: WwwVideoQuoteApprovalPort) {}
 
   async submit(input: { readonly routeSnapshot: unknown; readonly request: unknown; readonly beforeRequestStarted?: () => Promise<void>; readonly signal?: AbortSignal }): Promise<ProviderSubmitOutcome> {
     let started = false;
@@ -51,16 +60,15 @@ export class WwwVideoAdapter implements ProviderAsyncOperationPort, VideoResultP
     try {
       const route = this.validateRoute(input.routeSnapshot);
       const contract = wwwVideoContract(route.providerModelKey!)!;
+      if (!this.quoteApproval) throw invalid();
       const r = input.request;
       if (!record(r) || r.projectId !== route.projectId || typeof r.prompt !== 'string' || !r.prompt.trim() ||
         r.prompt.length > contract.maximumPromptLength || typeof r.invocationAttemptId !== 'string') throw invalid();
       const values = validateParameterValues(wwwVideoParameterSchema(contract, route.productFeature), 'full', r.parameterValues);
-      const cap = Math.floor(Number(values.maximum_cost_cny) * 1_000_000);
-      if (!Number.isSafeInteger(cap) || cap <= 0) throw invalid();
       const assets: string[] = r.assetIds === undefined ? r.assetId === undefined ? [] : [id(r.assetId)] :
         Array.isArray(r.assetIds) ? r.assetIds.map(id) : (() => { throw invalid(); })();
       if (new Set(assets).size !== assets.length || r.assetId !== undefined && (assets.length !== 1 || assets[0] !== r.assetId)) throw invalid();
-      const parameters = { ...values }; delete parameters.maximum_cost_cny;
+      const parameters = { ...values };
       const mode = route.productFeature === 'text_to_video' ? 'text_to_video' : route.productFeature === 'video_edit' ? 'reference_video' :
         typeof values.generation_mode === 'string' ? values.generation_mode : contract.modelKey.endsWith('-i2v') ? 'first_frame' : 'reference_images';
       const roles = this.roles(contract, route.productFeature, mode, assets.length);
@@ -109,10 +117,15 @@ export class WwwVideoAdapter implements ProviderAsyncOperationPort, VideoResultP
         ...(contract.protocol === 'h3-actions' ? { operation: 'quote' } : {}) }), signal: input.signal })).body);
       const quote = record(quoted.quote) ? quoted.quote : quoted;
       if (quote.currency !== 'CNY_MICRO' || !Number.isSafeInteger(quote.quoted_amount) || Number(quote.quoted_amount) <= 0 ||
-        Number(quote.quoted_amount) > cap || typeof quote.price_version !== 'string' || quote.price_version.length < 1 || quote.price_version.length > 256 ||
+        typeof quote.price_version !== 'string' || quote.price_version.length < 1 || quote.price_version.length > 256 ||
         contract.quoteBinding === 'input_digest_and_price' && (typeof quote.input_digest !== 'string' || !/^[a-f0-9]{64}$/i.test(quote.input_digest)) ||
         quote.closed_reasons !== undefined && (!Array.isArray(quote.closed_reasons) || quote.closed_reasons.length > 0) ||
         contract.protocol === 'h3-actions' && !Array.isArray(quote.closed_reasons)) throw invalid();
+      if (!(await this.quoteApproval.confirm({ modelKey: contract.modelKey,
+        quotedAmountCnyMicro: Number(quote.quoted_amount), signal: input.signal }))) {
+        return { kind: 'failed_before_submission', message: '已取消本次生成，尚未提交收费请求。', retryability: 'not_retryable' };
+      }
+      if (input.signal?.aborted) throw new NewApiRuntimeError('cancelled', 'not_retryable');
       // The quote pins uploaded bytes; also reject a changed local source before paid submission.
       for (let i = 0; i < assets.length; i++) {
         const current = route.productFeature === 'video_edit' ? await this.videos?.resolve({ projectId: route.projectId, assetId: assets[i] }) :
@@ -148,11 +161,16 @@ export class WwwVideoAdapter implements ProviderAsyncOperationPort, VideoResultP
   }
 
   async attachOperation(input: { readonly routeSnapshot: unknown; readonly providerOperationId: string; readonly invocationAttemptId: ProviderInvocationAttemptId; readonly usageAlreadyPersisted?: boolean }): Promise<void> {
-    const route = this.validateRoute(input.routeSnapshot);
+    const route = this.validateRoute(input.routeSnapshot, true);
     const remote = id(input.providerOperationId);
     const existing = this.operations.get(remote);
     if (existing && (existing.route.id !== route.id || existing.invocationAttemptId !== input.invocationAttemptId)) throw invalid();
-    const context: Context = { route, contract: wwwVideoContract(route.providerModelKey!)!, invocationAttemptId: input.invocationAttemptId,
+    if (existing) {
+      await this.connection(existing);
+      existing.usagePersisted ||= Boolean(input.usageAlreadyPersisted);
+      return;
+    }
+    const context: Context = { route, contract: wwwVideoContract(route.providerModelKey!, route.parameterContract!.contractRevision)!, invocationAttemptId: input.invocationAttemptId,
       usagePersisted: Boolean(input.usageAlreadyPersisted) };
     await this.connection(context); this.operations.set(remote, context);
   }
@@ -168,25 +186,36 @@ export class WwwVideoAdapter implements ProviderAsyncOperationPort, VideoResultP
     if (['running', 'processing', 'reviewing', 'submission_unknown', 'submitted'].includes(status)) return { state: 'processing' };
     if (['failed', 'cancelled', 'expired'].includes(status)) {
       await this.persistUsage(context, task);
+      if (status === 'cancelled' || status === 'expired') return { state: status };
       return { state: 'failed', message: '原视频任务未交付，请查看原任务费用状态。', retryability: 'not_retryable' };
     }
     if (!['succeeded', 'success', 'completed'].includes(status)) throw fail();
     if (record(task.billing) && task.billing.settlement_pending === true) return { state: 'processing' };
-    if (task.review_phase !== 'output_approved') throw fail();
-    const data = task.data;
+    if (task.review_phase === 'output_pending') return { state: 'processing' };
+    // H3 has its own result envelope: a video object and no media review_phase.
+    // An explicit review denial still blocks delivery for either protocol.
+    const h3 = context.contract.protocol === 'h3-actions';
+    if (h3 && task.output_type !== undefined && task.output_type !== 'video') throw fail();
+    if (task.review_phase !== 'output_approved' && !(h3 && task.review_phase === undefined && task.output_type === 'video')) throw fail();
+    const data = h3 && record(task.data) ? [task.data] : task.data;
     if (!Array.isArray(data) || data.length !== 1 || !record(data[0])) throw fail();
+    if (data[0].mime_type !== undefined && data[0].mime_type !== 'video/mp4') throw fail();
     const asset = id(data[0].asset_id);
     // A returned private URL is a declaration, never an arbitrary fetch target.
-    const expected = `/v1/${context.contract.protocol === 'h3-actions' ? 'h3/tasks' : 'videos'}/${remote}/content?asset_id=${encodeURIComponent(asset)}`;
+    // H3 polls /h3/tasks, but delivers through the shared /videos content route.
+    const expected = `/v1/videos/${remote}/content?asset_id=${encodeURIComponent(asset)}`;
     // Live WWW returns an absolute URL; public examples use a relative path.
     // Admit only the canonical same-origin spelling, and still build the download locally.
     if (data[0].url !== expected && data[0].url !== `https://www.unicompapi.com${expected}`) throw fail();
-    context.assetId = asset;
     await this.persistUsage(context, task);
+    context.assetId = asset;
     return { state: 'completed' };
   }
   async cancel() { return { state: 'processing' as const }; }
   async getCompletion(remote: string) {
+    // The validated private descriptor is immutable for this accepted task.
+    // Re-querying here used to lose a completed result on a later GET failure.
+    if (this.context(remote).assetId) return { state: 'completed' as const };
     const state = await this.query(remote);
     if (state.state === 'failed') throw new VideoResultPortError('not_retryable', state.message);
     return state.state === 'completed' ? { state: 'completed' as const } : undefined;
@@ -198,13 +227,25 @@ export class WwwVideoAdapter implements ProviderAsyncOperationPort, VideoResultP
   async openDownload(remote: string, asset: string) {
     const context = this.context(remote);
     if (!(await this.getCompletion(remote)) || asset !== context.assetId) throw fail();
-    const response = await this.call(context, 'content', { remoteId: remote, assetId: asset });
-    if (response.contentType !== 'video/mp4') throw fail();
-    return Readable.from([Buffer.from(response.body)]);
+    for (let attempt = 0; attempt < 3; attempt++) {
+      try {
+        const response = await this.call(context, 'content', { remoteId: remote, assetId: asset });
+        if (response.contentType !== 'video/mp4') throw fail();
+        return Readable.from([Buffer.from(response.body)]);
+      } catch (error) {
+        const transient = error instanceof NewApiRuntimeError &&
+          (error.retryability === 'retryable' || error.code === 'network_error');
+        if (!transient || attempt === 2) throw new VideoResultPortError(transient ? 'retryable' : 'not_retryable',
+          '原视频下载未完成，可稍后恢复原任务结果。');
+        // Retry only the canonical private GET, never the generation POST.
+        await new Promise(resolve => setTimeout(resolve, 500 * 2 ** attempt));
+      }
+    }
+    throw new VideoResultPortError('retryable', '原视频下载未完成。');
   }
-  private validateRoute(value: unknown) {
+  private validateRoute(value: unknown, allowRetainedContract = false) {
     const route = parseProviderExecutionRouteSnapshot(value);
-    const c = wwwVideoContract(route.providerModelKey ?? '');
+    const c = wwwVideoContract(route.providerModelKey ?? '', allowRetainedContract ? route.parameterContract?.contractRevision : undefined);
     if (!c || route.packageId !== UNICOMPAPI_WWW_PROVIDER_PACKAGE_ID || route.packageVersion !== '1.0.0' ||
       route.adapterKey !== NEWAPI_VIDEO_ADAPTER_ID || route.adapterVersion !== NEWAPI_ADAPTER_VERSION || route.protocolBindingRevision !== 1 ||
       route.endpointPolicyId !== UNICOMPAPI_WWW_ENDPOINT_POLICY_ID || route.endpointPolicyRevision !== 1 || route.featureMappingVersion !== 1 ||

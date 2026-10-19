@@ -1,0 +1,49 @@
+{
+  "capturedAt": "2026-10-19T09:32:25.815Z",
+  "code": "network_error",
+  "name": "NewApiRuntimeError",
+  "requests": [
+    {
+      "method": "GET",
+      "path": "/v1/h3/tasks/c67c5363-474b-405e-a7fa-f91675e0e88c",
+      "error": {
+        "name": "NewApiTransportFailure",
+        "kind": "network"
+      }
+    }
+  ],
+  "generationPosts": 0,
+  "settlementPosts": 0,
+  "protectedFiles": [
+    {
+      "name": "provider-registry.json",
+      "beforeSha256": "b011a27b09f8f4cab3316835c980174d4a261071270702792e59dd20f904ab38",
+      "afterSha256": "b011a27b09f8f4cab3316835c980174d4a261071270702792e59dd20f904ab38"
+    },
+    {
+      "name": "project.json",
+      "beforeSha256": "e20fd74deec5f4ff91055642557f06871a518fc5f7174f19428d87d0367c6e31",
+      "afterSha256": "e20fd74deec5f4ff91055642557f06871a518fc5f7174f19428d87d0367c6e31"
+    },
+    {
+      "name": "tasks.json",
+      "beforeSha256": "589a28369abaf48ba136ce90bf497cc343d8d0ffbd4ced0c193baef7cd6583c3",
+      "afterSha256": "589a28369abaf48ba136ce90bf497cc343d8d0ffbd4ced0c193baef7cd6583c3"
+    },
+    {
+      "name": "provider-operations.json",
+      "beforeSha256": "fa0362dbe27f55cb2e83a0138543408249f70fba972be09bca529cffda7bef4a",
+      "afterSha256": "fa0362dbe27f55cb2e83a0138543408249f70fba972be09bca529cffda7bef4a"
+    },
+    {
+      "name": "provider-execution-route-snapshots.json",
+      "beforeSha256": "46262b826566bd69e4f7659b4a81887d63bc25daa4dade1d3a3bdefed5560e31",
+      "afterSha256": "46262b826566bd69e4f7659b4a81887d63bc25daa4dade1d3a3bdefed5560e31"
+    },
+    {
+      "name": "video-workspace-drafts.json",
+      "beforeSha256": "0c9b475313de33f7041935e514f541fd4b57f52627d5799df44a0d225751642f",
+      "afterSha256": "0c9b475313de33f7041935e514f541fd4b57f52627d5799df44a0d225751642f"
+    }
+  ]
+}

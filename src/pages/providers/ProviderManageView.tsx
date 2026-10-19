@@ -335,7 +335,7 @@ export function ProviderManageView({
                     <div className="uc-provider-page__summary-actions">
                       {selectedModel && (
                         <StatusPill tone={toneForState(selectedModel.profileStatus ?? 'unknown')}>
-                          {selectedModel.profileStatus ? profileLabels[selectedModel.profileStatus] : '无功能配置'}
+                          {selectedModel.apiContract && selectedModel.profileStatus === 'declared' ? '已绑定' : selectedModel.profileStatus ? profileLabels[selectedModel.profileStatus] : '待适配'}
                         </StatusPill>
                       )}
                     </div>
@@ -352,10 +352,10 @@ export function ProviderManageView({
                     </div>
                   </div>
                   {selectedModel && providersApi?.bindModelApiContract && (
-                    <ModelContractBinding key={selectedModel.modelId} model={selectedModel} packageId={registry.connections.find(c => c.connectionId === selectedModel.connectionId)?.packageId} api={providersApi} busy={busy} runAction={runAction} />
+                    <ModelContractBinding key={'api-contract-' + selectedModel.modelId} model={selectedModel} packageId={registry.connections.find(c => c.connectionId === selectedModel.connectionId)?.packageId} api={providersApi} busy={busy} runAction={runAction} />
                   )}
                   {selectedModel && canConfigureNativeSearch && providersApi?.setNativeSearch && (
-                    <details className="uc-provider-page__native-search" key={selectedModel.modelId}>
+                    <details className="uc-provider-page__native-search" key={'native-search-' + selectedModel.modelId}>
                       <summary>当前模型的联网搜索设置</summary>
                       <form className="uc-provider-page__stack-form" onSubmit={event => {
                         event.preventDefault();
@@ -440,7 +440,7 @@ export function ProviderManageView({
                           <div className="uc-provider-page__model" data-selected={selectedModel?.modelId === model.modelId || undefined} key={model.modelId}>
                             <button aria-pressed={selectedModel?.modelId === model.modelId} className="uc-provider-page__model-select" onClick={() => onSelectModel(model.modelId)} type="button">
                               <span><strong>{model.displayName}</strong><small>{model.providerModelKey}</small></span>
-                              <span>{model.profileStatus ? profileLabels[model.profileStatus] : '无功能配置'}</span>
+                              <span>{model.apiContract && model.profileStatus === 'declared' ? '已绑定' : model.profileStatus ? profileLabels[model.profileStatus] : '待适配'}</span>
                             </button>
                             <StatusPill tone={model.enabled ? 'success' : 'neutral'}>{model.enabled ? '已启用' : '已停用'}</StatusPill>
                             <Toggle

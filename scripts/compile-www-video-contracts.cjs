@@ -1,6 +1,27 @@
 // Compile retained public gateway fields; this does not create vendor contracts.
 const fs = require('node:fs');
-const source = JSON.parse(fs.readFileSync('outputs/www-video-contracts/sources.json', 'utf8'));
+const crypto = require('node:crypto');
+const path = require('node:path');
+const sourceFile = process.argv[2] ?? 'outputs/www-video-contracts/sources.json';
+const source = JSON.parse(fs.readFileSync(sourceFile, 'utf8'));
+const retained = require('../src/platform/providers/newapi/www-video-catalog.previous.json');
+function actionExampleFields(record) {
+  const html = fs.readFileSync(path.join(path.dirname(sourceFile), `${record.modelKey}.html`), 'utf8');
+  if (crypto.createHash('sha256').update(html).digest('hex') !== record.sha256) throw new Error('Documentation digest mismatch');
+  const examples = [...html.matchAll(/<pre[^>]*>([\s\S]*?)<\/pre>/g)].map(match => {
+    const plain = match[1].replace(/<[^>]*>/g, '').replace(/&quot;/g, '"').replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&amp;/g, '&');
+    try { return JSON.parse(plain); } catch { return undefined; }
+  });
+  const example = examples.find(item => item?.model === record.modelKey && item.operation === 'quote' && item.action === 'generate');
+  if (!example?.parameters || !Object.keys(example.parameters).length) throw new Error('Documented generate example unavailable');
+  // Examples establish names and primitive types, not enums or limits. In
+  // particular, regenerate/understand restrictions do not constrain generate.
+  return Object.entries(example.parameters).map(([name, value]) => {
+    const type = typeof value;
+    if (!/^[a-z_]+$/.test(name) || !['string', 'number', 'boolean'].includes(type)) throw new Error('Unsupported example parameter');
+    return { name, required: null, schema: { type: type === 'number' && Number.isSafeInteger(value) ? 'integer' : type } };
+  });
+}
 const entries = source.records.map(record => {
   if (record.status !== 200) throw new Error('Documentation unavailable');
   const fields = record.tables.filter(row => row[0]?.startsWith('parameters.')).map(row => {
@@ -13,19 +34,18 @@ const entries = source.records.map(record => {
     else if (type !== 'boolean') schema.enum = range.split('、').map(x => type === 'integer' ? Number(x) : x);
     if (name === 'frames') schema.multipleOf = 4; // adjusted below to a 29 + 4k enum
     if (name === 'frames') { delete schema.multipleOf; schema.enum = Array.from({ length: 66 }, (_, i) => 29 + i * 4); }
-    return { name, schema };
+    if (!/·\s*(可选|必填)/.test(row[1])) throw new Error('Documented field requirement unavailable');
+    return { name, required: row[1].includes('必填'), schema };
   });
   const key = record.modelKey;
   const h3 = key === 'MiniMax-H3';
-  if (h3) fields.push(
-    { name: 'resolution', schema: { type: 'string', enum: ['2K'] } },
-    { name: 'ratio', schema: { type: 'string', enum: ['21:9', '16:9', '4:3', '1:1', '3:4', '9:16'] } },
-    { name: 'duration', schema: { type: 'integer', minimum: 4, maximum: 15 } },
-    { name: 'generate_audio', schema: { type: 'boolean', enum: [true] } },
-    { name: 'watermark', schema: { type: 'boolean' } });
+  if (h3) fields.splice(0, fields.length, ...actionExampleFields(record));
   const features = h3 ? ['text_to_video'] : key.endsWith('-t2v') ? ['text_to_video']
     : /-i2v$|-r2v$/.test(key) ? ['image_to_video'] : key.endsWith('-video-edit') ? ['video_edit'] : ['text_to_video', 'image_to_video'];
-  return { id: `relay.unicompapi-www.${key}.video`, revision: 1, authority: 'relay', modelKey: key,
+  const previous = retained.contracts.find(contract => contract.modelKey === key);
+  if (!previous) throw new Error('Retained contract unavailable');
+  return { id: `relay.unicompapi-www.${key}.video`, revision: previous.revision + 1, authority: 'relay', modelKey: key,
+    ...(h3 ? { action: 'generate', parameterEvidence: 'documented_example_types_quote_validated' } : {}),
     source: { url: record.url, retrievedAt: record.retrievedAt, sha256: record.sha256 },
     vendorContractId: h3 ? 'official.minimax.MiniMax-H3.video' : key === 'doubao-seedance-2-0-260128' ? 'official.volcengine.seedance-2.0.video' : undefined,
     protocol: h3 ? 'h3-actions' : 'unicomp.media.v1', features, fields,
@@ -41,6 +61,6 @@ const entries = source.records.map(record => {
     uploadProfile: key.startsWith('doubao') ? 'seedance-reference' : key.endsWith('-ali') ? 'aliyun-wan-reference' : key.endsWith('-video-edit') ? 'happyhorse-edit-reference' : undefined };
 });
 fs.writeFileSync('src/platform/providers/newapi/www-video-catalog.json', JSON.stringify({ schemaVersion: 1, contracts: entries }, null, 2) + '\n');
-fs.mkdirSync('docs/evidence', { recursive: true });
-fs.writeFileSync('docs/evidence/www-video-contract-sources-20261015.json', JSON.stringify({ retrievedAt: new Date().toISOString(), outboundScope: source.outboundScope, credentialReads: 0, generationRequests: 0,
+fs.mkdirSync('docs/evidence/www-official-parameters-20261019', { recursive: true });
+fs.writeFileSync('docs/evidence/www-official-parameters-20261019/compile.json', JSON.stringify({ compiledAt: new Date().toISOString(), sourceFile, outboundScope: 'compiler reads fetched public documentation locally; see public-sources.json for GET scope', credentialReads: 0, generationRequests: 0,
   records: entries.map(c => ({ modelKey: c.modelKey, authority: c.authority, source: c.source, vendorContractId: c.vendorContractId })) }, null, 2) + '\n');

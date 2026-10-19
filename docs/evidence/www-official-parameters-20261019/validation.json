@@ -1,0 +1,207 @@
+{
+  "status": "passed",
+  "completedAt": "2026-10-19T10:28:12.665Z",
+  "branch": "feature/www-model-binding-repair-20261019",
+  "scope": "Retire manual WWW video maximum cost input, current official documentation evidence, legacy draft/contract compatibility, optional boolean omission display",
+  "officialDocs": {
+    "models": 9,
+    "source": "public-sources.json",
+    "fieldEvidence": "official-findings.json",
+    "outboundScope": "GET to nine public WWW documentation URLs; no credentials, project content, model generation or settlement",
+    "generationRequests": 0,
+    "settlementRequests": 0,
+    "modelChargesCny": 0,
+    "limitations": "H3 generate page exposes examples only, not a complete required/enum/range schema"
+  },
+  "tests": {
+    "vitest": {
+      "files": 349,
+      "passed": 3531,
+      "failed": 0,
+      "skipped": 0,
+      "log": "vitest-full.log"
+    },
+    "node": {
+      "passed": 394,
+      "failed": 0,
+      "skipped": 0,
+      "log": "node-tests.log"
+    },
+    "total": 3925,
+    "finalTargeted": {
+      "passed": 68,
+      "log": "vitest-final-targeted.log"
+    },
+    "sourceTiming": "Runtime source frozen before full regression; WWW assertions strengthened during regression and rerun in final targeted suite."
+  },
+  "checks": {
+    "typecheck": "passed",
+    "lint": "passed",
+    "productionBuild": "passed",
+    "platformAudit": "passed",
+    "gitDiffCheck": "passed"
+  },
+  "integration": {
+    "electron": {
+      "cases": 13,
+      "externalRequests": 0,
+      "paidPost": 0,
+      "report": "electron-validation.json"
+    },
+    "reactH3": {
+      "checks": 4,
+      "report": "ui-h3-validation.json",
+      "screenshot": "h3-official-parameters.png"
+    },
+    "reactVideoEdit": {
+      "checks": 5,
+      "report": "ui-edit-validation.json",
+      "screenshot": "video-edit.png"
+    },
+    "boundaries": "Real production Electron/preload/IPC/Host/React with synthetic provider responses; no new real model generation validation"
+  },
+  "launch": {
+    "checkedAt": "2026-10-19T10:27:10.2701933Z",
+    "pid": 13592,
+    "title": "UniComp",
+    "responding": true,
+    "visible": true,
+    "httpStatus": 200
+  },
+  "protectedFilesUnchanged": true,
+  "sourceSnapshot": {
+    "count": 1123,
+    "file": "final-source-hashes.json",
+    "recheckedAt": "2026-10-19T10:29:24.298Z",
+    "mismatches": [],
+    "whitespaceOnlyAdjustment": "Removed one trailing space in www-video.test.ts after completed tests.",
+    "postValidationChanges": "Only evidence packaging and maintenance delivery records; tested source unchanged."
+  },
+  "intermediateFailures": [
+    "public-docs-fetch.log",
+    "second-fetch-attempts.json",
+    "typecheck-initial.log",
+    "vitest-targeted-initial.log",
+    "node-tests-initial.log",
+    "ui-h3-initial.log",
+    "electron-e2e-initial.log",
+    "electron-e2e-initial-failure.json"
+  ],
+  "notPerformed": [
+    "new paid generation",
+    "original-task settlement",
+    "macOS device testing",
+    "commit",
+    "merge",
+    "push",
+    "release"
+  ],
+  "processExits": "process-exits.json",
+  "archivedLogs": [
+    {
+      "original": "build.log",
+      "archive": "build.log.gz",
+      "sha256": "8affd0f14d504814086a672e0d887a428cdf1ab6ea8aa1e95b6279ec0dddc6f7"
+    },
+    {
+      "original": "dev-start.log",
+      "archive": "dev-start.log.gz",
+      "sha256": "c38cf61ab021845928ef5c6dfb4a02ac8e13ffd1384d53f0dc5c3950b9a492c7"
+    },
+    {
+      "original": "diff-check.log",
+      "archive": "diff-check.log.gz",
+      "sha256": "581698f0268835fb9472210dabd68da48ecbcb9e41fede95e4bea35105e45092"
+    },
+    {
+      "original": "electron-e2e-initial.log",
+      "archive": "electron-e2e-initial.log.gz",
+      "sha256": "aa55b2a4d87d85a033234e37672b57456cf7028df6fe3bf1b6c8bbd7bf6e7cc8"
+    },
+    {
+      "original": "electron-e2e.log",
+      "archive": "electron-e2e.log.gz",
+      "sha256": "3b2927db6b1ba6bdb6df77fca7a60f5e7ee3c166143af8a1d7798a1364ee31d9"
+    },
+    {
+      "original": "lint-final.log",
+      "archive": "lint-final.log.gz",
+      "sha256": "bc6f0cfdfe4a1f22b390a4004f999430ddb621bd189538fa2735286e04826c81"
+    },
+    {
+      "original": "lint.log",
+      "archive": "lint.log.gz",
+      "sha256": "c0ed1d9755e72b39c5e8ee91817cd8ed161889fc1abf9b8a3b2385aadb68f2c6"
+    },
+    {
+      "original": "node-tests-initial.log",
+      "archive": "node-tests-initial.log.gz",
+      "sha256": "3511dcebe8ee42c7551c4c116ff8e29a25eacb975a0644ef63a3d1adda67f332"
+    },
+    {
+      "original": "node-tests.log",
+      "archive": "node-tests.log.gz",
+      "sha256": "cefa255934a412a4c883050586f9f9952a0d4e86c7ff32907778ba45c4466fbe"
+    },
+    {
+      "original": "platform-audit.log",
+      "archive": "platform-audit.log.gz",
+      "sha256": "5e01f15c0338df4e879e213ad44f209f9bca149f834d90b3584cfe8c85518570"
+    },
+    {
+      "original": "public-docs-fetch-complete.log",
+      "archive": "public-docs-fetch-complete.log.gz",
+      "sha256": "3e9f99093c30246a456ef6db7efc0ab20fa0febd5a9ee5aabe58c988b54b27f2"
+    },
+    {
+      "original": "public-docs-fetch.log",
+      "archive": "public-docs-fetch.log.gz",
+      "sha256": "8c73bd6f133d365c99a42c6f71ee57f3d418fa9639d4aa35924cb3ea697051e8"
+    },
+    {
+      "original": "typecheck-initial.log",
+      "archive": "typecheck-initial.log.gz",
+      "sha256": "a7fbc518d3098443391dc56aa979a6a8c2d225cc1ac4f23d09032429db9a8102"
+    },
+    {
+      "original": "typecheck.log",
+      "archive": "typecheck.log.gz",
+      "sha256": "c16d8c8740519dc26658651bbeae17abbb7a6572d939292d997976b556d4b92d"
+    },
+    {
+      "original": "ui-edit.log",
+      "archive": "ui-edit.log.gz",
+      "sha256": "73f671140bddc2ec9ce29135c87eaddf2ba3043d73cfd9d4395b50b0c7102ae2"
+    },
+    {
+      "original": "ui-h3-initial.log",
+      "archive": "ui-h3-initial.log.gz",
+      "sha256": "c265509a695944a0610b6865103307e413df3d2335f44a453cbb5d93b1d84f5c"
+    },
+    {
+      "original": "ui-h3.log",
+      "archive": "ui-h3.log.gz",
+      "sha256": "f85be4f35dc754791d3c198dcb4c07e7561829338d4669360c4800c1316a46cd"
+    },
+    {
+      "original": "vitest-final-targeted.log",
+      "archive": "vitest-final-targeted.log.gz",
+      "sha256": "462f29e7013d05843191319ecc6519cfe7f006bb95338d3218069a84d8052c28"
+    },
+    {
+      "original": "vitest-full.log",
+      "archive": "vitest-full.log.gz",
+      "sha256": "105c21641932e1d17e80c9e1233581da726fd86a1a88832310a4022309cb3001"
+    },
+    {
+      "original": "vitest-targeted-initial.log",
+      "archive": "vitest-targeted-initial.log.gz",
+      "sha256": "04059da49f075eca7b9be39a18592f3b109814090bfa898b47f6f97a07b0357c"
+    },
+    {
+      "original": "vitest-targeted.log",
+      "archive": "vitest-targeted.log.gz",
+      "sha256": "81f409fe570dcb2ce694e9cee7338a7de15a8dd48f7ca9f3ca2cbdeae19f15b5"
+    }
+  ]
+}

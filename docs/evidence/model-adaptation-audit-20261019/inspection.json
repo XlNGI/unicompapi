@@ -1,0 +1,871 @@
+{
+  "schemaVersion": 1,
+  "capturedAt": "2026-10-19T03:37:25.777Z",
+  "baseline": "e29b7a8",
+  "scope": "Local WWW registry inventory and offline production-host replays; not a remote model inventory or live Provider acceptance",
+  "localConnection": {
+    "endpoint": "https://www.unicompapi.com/v1",
+    "state": "available",
+    "identityState": "verified",
+    "credentialState": "valid"
+  },
+  "counts": {
+    "catalogModels": 52,
+    "boundModels": 9,
+    "unboundModels": 43,
+    "enabledBoundModels": 1,
+    "unboundWithExactVendorSourceCandidate": 6,
+    "unboundWithoutExactSourceCandidate": 37
+  },
+  "publishedWwwAdapters": [
+    "newapi.chat",
+    "newapi.video"
+  ],
+  "models": [
+    {
+      "modelKey": "MiniMax-H3",
+      "enabled": true,
+      "catalogState": "present",
+      "profileStatus": "declared",
+      "features": [
+        "text_to_video"
+      ],
+      "contractId": "relay.unicompapi-www.MiniMax-H3.video",
+      "contractRevision": 1,
+      "contractFingerprintCurrent": true,
+      "connectionPinCurrent": true,
+      "exactVendorContractCandidates": [
+        "official.minimax.MiniMax-H3.video"
+      ],
+      "exactRelayContractCandidate": "relay.unicompapi-www.MiniMax-H3.video"
+    },
+    {
+      "modelKey": "happyhorse-1.1-i2v",
+      "enabled": false,
+      "catalogState": "present",
+      "profileStatus": "declared",
+      "features": [
+        "image_to_video"
+      ],
+      "contractId": "relay.unicompapi-www.happyhorse-1.1-i2v.video",
+      "contractRevision": 1,
+      "contractFingerprintCurrent": true,
+      "connectionPinCurrent": true,
+      "exactVendorContractCandidates": [],
+      "exactRelayContractCandidate": "relay.unicompapi-www.happyhorse-1.1-i2v.video"
+    },
+    {
+      "modelKey": "happyhorse-1.1-r2v",
+      "enabled": false,
+      "catalogState": "present",
+      "profileStatus": "declared",
+      "features": [
+        "image_to_video"
+      ],
+      "contractId": "relay.unicompapi-www.happyhorse-1.1-r2v.video",
+      "contractRevision": 1,
+      "contractFingerprintCurrent": true,
+      "connectionPinCurrent": true,
+      "exactVendorContractCandidates": [],
+      "exactRelayContractCandidate": "relay.unicompapi-www.happyhorse-1.1-r2v.video"
+    },
+    {
+      "modelKey": "happyhorse-1.1-t2v",
+      "enabled": false,
+      "catalogState": "present",
+      "profileStatus": "declared",
+      "features": [
+        "text_to_video"
+      ],
+      "contractId": "relay.unicompapi-www.happyhorse-1.1-t2v.video",
+      "contractRevision": 1,
+      "contractFingerprintCurrent": true,
+      "connectionPinCurrent": true,
+      "exactVendorContractCandidates": [],
+      "exactRelayContractCandidate": "relay.unicompapi-www.happyhorse-1.1-t2v.video"
+    },
+    {
+      "modelKey": "qwen-image-2.0",
+      "enabled": false,
+      "catalogState": "present",
+      "profileStatus": null,
+      "features": [],
+      "contractId": null,
+      "contractRevision": null,
+      "contractFingerprintCurrent": null,
+      "connectionPinCurrent": null,
+      "exactVendorContractCandidates": [],
+      "exactRelayContractCandidate": null
+    },
+    {
+      "modelKey": "qwen-image-2.0-pro",
+      "enabled": false,
+      "catalogState": "present",
+      "profileStatus": null,
+      "features": [],
+      "contractId": null,
+      "contractRevision": null,
+      "contractFingerprintCurrent": null,
+      "connectionPinCurrent": null,
+      "exactVendorContractCandidates": [],
+      "exactRelayContractCandidate": null
+    },
+    {
+      "modelKey": "qwen-image-3.0",
+      "enabled": false,
+      "catalogState": "present",
+      "profileStatus": null,
+      "features": [],
+      "contractId": null,
+      "contractRevision": null,
+      "contractFingerprintCurrent": null,
+      "connectionPinCurrent": null,
+      "exactVendorContractCandidates": [],
+      "exactRelayContractCandidate": null
+    },
+    {
+      "modelKey": "qwen-image-3.0-pro",
+      "enabled": false,
+      "catalogState": "present",
+      "profileStatus": null,
+      "features": [],
+      "contractId": null,
+      "contractRevision": null,
+      "contractFingerprintCurrent": null,
+      "connectionPinCurrent": null,
+      "exactVendorContractCandidates": [],
+      "exactRelayContractCandidate": null
+    },
+    {
+      "modelKey": "wan3.0-video-ali",
+      "enabled": false,
+      "catalogState": "present",
+      "profileStatus": "declared",
+      "features": [
+        "text_to_video",
+        "image_to_video"
+      ],
+      "contractId": "relay.unicompapi-www.wan3.0-video-ali.video",
+      "contractRevision": 1,
+      "contractFingerprintCurrent": true,
+      "connectionPinCurrent": true,
+      "exactVendorContractCandidates": [],
+      "exactRelayContractCandidate": "relay.unicompapi-www.wan3.0-video-ali.video"
+    },
+    {
+      "modelKey": "wan3.0-video-prime-ali",
+      "enabled": false,
+      "catalogState": "present",
+      "profileStatus": "declared",
+      "features": [
+        "text_to_video",
+        "image_to_video"
+      ],
+      "contractId": "relay.unicompapi-www.wan3.0-video-prime-ali.video",
+      "contractRevision": 1,
+      "contractFingerprintCurrent": true,
+      "connectionPinCurrent": true,
+      "exactVendorContractCandidates": [],
+      "exactRelayContractCandidate": "relay.unicompapi-www.wan3.0-video-prime-ali.video"
+    },
+    {
+      "modelKey": "bge-m3",
+      "enabled": false,
+      "catalogState": "present",
+      "profileStatus": null,
+      "features": [],
+      "contractId": null,
+      "contractRevision": null,
+      "contractFingerprintCurrent": null,
+      "connectionPinCurrent": null,
+      "exactVendorContractCandidates": [],
+      "exactRelayContractCandidate": null
+    },
+    {
+      "modelKey": "bge-reranker-v2-m3",
+      "enabled": false,
+      "catalogState": "present",
+      "profileStatus": null,
+      "features": [],
+      "contractId": null,
+      "contractRevision": null,
+      "contractFingerprintCurrent": null,
+      "connectionPinCurrent": null,
+      "exactVendorContractCandidates": [],
+      "exactRelayContractCandidate": null
+    },
+    {
+      "modelKey": "deepseek-ocr",
+      "enabled": false,
+      "catalogState": "present",
+      "profileStatus": null,
+      "features": [],
+      "contractId": null,
+      "contractRevision": null,
+      "contractFingerprintCurrent": null,
+      "connectionPinCurrent": null,
+      "exactVendorContractCandidates": [],
+      "exactRelayContractCandidate": null
+    },
+    {
+      "modelKey": "deepseek-r1-0528",
+      "enabled": false,
+      "catalogState": "present",
+      "profileStatus": null,
+      "features": [],
+      "contractId": null,
+      "contractRevision": null,
+      "contractFingerprintCurrent": null,
+      "connectionPinCurrent": null,
+      "exactVendorContractCandidates": [],
+      "exactRelayContractCandidate": null
+    },
+    {
+      "modelKey": "deepseek-v3.2",
+      "enabled": false,
+      "catalogState": "present",
+      "profileStatus": null,
+      "features": [],
+      "contractId": null,
+      "contractRevision": null,
+      "contractFingerprintCurrent": null,
+      "connectionPinCurrent": null,
+      "exactVendorContractCandidates": [],
+      "exactRelayContractCandidate": null
+    },
+    {
+      "modelKey": "deepseek-v3.2-exp",
+      "enabled": false,
+      "catalogState": "present",
+      "profileStatus": null,
+      "features": [],
+      "contractId": null,
+      "contractRevision": null,
+      "contractFingerprintCurrent": null,
+      "connectionPinCurrent": null,
+      "exactVendorContractCandidates": [],
+      "exactRelayContractCandidate": null
+    },
+    {
+      "modelKey": "deepseek-v4-flash",
+      "enabled": false,
+      "catalogState": "present",
+      "profileStatus": null,
+      "features": [],
+      "contractId": null,
+      "contractRevision": null,
+      "contractFingerprintCurrent": null,
+      "connectionPinCurrent": null,
+      "exactVendorContractCandidates": [
+        "official.deepseek.v4.chat"
+      ],
+      "exactRelayContractCandidate": null
+    },
+    {
+      "modelKey": "deepseek-v4-flash-0731",
+      "enabled": false,
+      "catalogState": "present",
+      "profileStatus": null,
+      "features": [],
+      "contractId": null,
+      "contractRevision": null,
+      "contractFingerprintCurrent": null,
+      "connectionPinCurrent": null,
+      "exactVendorContractCandidates": [],
+      "exactRelayContractCandidate": null
+    },
+    {
+      "modelKey": "deepseek-v4-pro-0813",
+      "enabled": false,
+      "catalogState": "present",
+      "profileStatus": null,
+      "features": [],
+      "contractId": null,
+      "contractRevision": null,
+      "contractFingerprintCurrent": null,
+      "connectionPinCurrent": null,
+      "exactVendorContractCandidates": [],
+      "exactRelayContractCandidate": null
+    },
+    {
+      "modelKey": "deepseek-v4.1-flash",
+      "enabled": false,
+      "catalogState": "present",
+      "profileStatus": null,
+      "features": [],
+      "contractId": null,
+      "contractRevision": null,
+      "contractFingerprintCurrent": null,
+      "connectionPinCurrent": null,
+      "exactVendorContractCandidates": [],
+      "exactRelayContractCandidate": null
+    },
+    {
+      "modelKey": "doubao-seedance-2-0-260128",
+      "enabled": false,
+      "catalogState": "present",
+      "profileStatus": "declared",
+      "features": [
+        "text_to_video",
+        "image_to_video"
+      ],
+      "contractId": "relay.unicompapi-www.doubao-seedance-2-0-260128.video",
+      "contractRevision": 1,
+      "contractFingerprintCurrent": true,
+      "connectionPinCurrent": true,
+      "exactVendorContractCandidates": [
+        "official.volcengine.seedance-2.0.video"
+      ],
+      "exactRelayContractCandidate": "relay.unicompapi-www.doubao-seedance-2-0-260128.video"
+    },
+    {
+      "modelKey": "doubao-seedream-5-0-pro-260628",
+      "enabled": false,
+      "catalogState": "present",
+      "profileStatus": null,
+      "features": [],
+      "contractId": null,
+      "contractRevision": null,
+      "contractFingerprintCurrent": null,
+      "connectionPinCurrent": null,
+      "exactVendorContractCandidates": [],
+      "exactRelayContractCandidate": null
+    },
+    {
+      "modelKey": "glm-4.6",
+      "enabled": false,
+      "catalogState": "present",
+      "profileStatus": null,
+      "features": [],
+      "contractId": null,
+      "contractRevision": null,
+      "contractFingerprintCurrent": null,
+      "connectionPinCurrent": null,
+      "exactVendorContractCandidates": [
+        "official.zhipu.glm-4.6.chat"
+      ],
+      "exactRelayContractCandidate": null
+    },
+    {
+      "modelKey": "glm-4.7",
+      "enabled": false,
+      "catalogState": "present",
+      "profileStatus": null,
+      "features": [],
+      "contractId": null,
+      "contractRevision": null,
+      "contractFingerprintCurrent": null,
+      "connectionPinCurrent": null,
+      "exactVendorContractCandidates": [
+        "official.zhipu.glm-4.7.chat"
+      ],
+      "exactRelayContractCandidate": null
+    },
+    {
+      "modelKey": "glm-5.2",
+      "enabled": false,
+      "catalogState": "present",
+      "profileStatus": null,
+      "features": [],
+      "contractId": null,
+      "contractRevision": null,
+      "contractFingerprintCurrent": null,
+      "connectionPinCurrent": null,
+      "exactVendorContractCandidates": [
+        "official.zhipu.glm-5.2.chat"
+      ],
+      "exactRelayContractCandidate": null
+    },
+    {
+      "modelKey": "glm-5.3",
+      "enabled": false,
+      "catalogState": "present",
+      "profileStatus": null,
+      "features": [],
+      "contractId": null,
+      "contractRevision": null,
+      "contractFingerprintCurrent": null,
+      "connectionPinCurrent": null,
+      "exactVendorContractCandidates": [],
+      "exactRelayContractCandidate": null
+    },
+    {
+      "modelKey": "glm-5.3-flash",
+      "enabled": false,
+      "catalogState": "present",
+      "profileStatus": null,
+      "features": [],
+      "contractId": null,
+      "contractRevision": null,
+      "contractFingerprintCurrent": null,
+      "connectionPinCurrent": null,
+      "exactVendorContractCandidates": [],
+      "exactRelayContractCandidate": null
+    },
+    {
+      "modelKey": "happyhorse-1.0-video-edit",
+      "enabled": false,
+      "catalogState": "present",
+      "profileStatus": "declared",
+      "features": [
+        "video_edit"
+      ],
+      "contractId": "relay.unicompapi-www.happyhorse-1.0-video-edit.video",
+      "contractRevision": 1,
+      "contractFingerprintCurrent": true,
+      "connectionPinCurrent": true,
+      "exactVendorContractCandidates": [],
+      "exactRelayContractCandidate": "relay.unicompapi-www.happyhorse-1.0-video-edit.video"
+    },
+    {
+      "modelKey": "kimi-k2-thinking",
+      "enabled": false,
+      "catalogState": "present",
+      "profileStatus": null,
+      "features": [],
+      "contractId": null,
+      "contractRevision": null,
+      "contractFingerprintCurrent": null,
+      "connectionPinCurrent": null,
+      "exactVendorContractCandidates": [],
+      "exactRelayContractCandidate": null
+    },
+    {
+      "modelKey": "kimi-k2.6",
+      "enabled": false,
+      "catalogState": "present",
+      "profileStatus": null,
+      "features": [],
+      "contractId": null,
+      "contractRevision": null,
+      "contractFingerprintCurrent": null,
+      "connectionPinCurrent": null,
+      "exactVendorContractCandidates": [
+        "official.moonshot.kimi-k2.6.chat"
+      ],
+      "exactRelayContractCandidate": null
+    },
+    {
+      "modelKey": "kimi-k2.7-code",
+      "enabled": false,
+      "catalogState": "present",
+      "profileStatus": null,
+      "features": [],
+      "contractId": null,
+      "contractRevision": null,
+      "contractFingerprintCurrent": null,
+      "connectionPinCurrent": null,
+      "exactVendorContractCandidates": [],
+      "exactRelayContractCandidate": null
+    },
+    {
+      "modelKey": "kimi-k3",
+      "enabled": false,
+      "catalogState": "present",
+      "profileStatus": null,
+      "features": [],
+      "contractId": null,
+      "contractRevision": null,
+      "contractFingerprintCurrent": null,
+      "connectionPinCurrent": null,
+      "exactVendorContractCandidates": [
+        "official.moonshot.kimi-k3.chat"
+      ],
+      "exactRelayContractCandidate": null
+    },
+    {
+      "modelKey": "minimax-m2.5",
+      "enabled": false,
+      "catalogState": "present",
+      "profileStatus": null,
+      "features": [],
+      "contractId": null,
+      "contractRevision": null,
+      "contractFingerprintCurrent": null,
+      "connectionPinCurrent": null,
+      "exactVendorContractCandidates": [],
+      "exactRelayContractCandidate": null
+    },
+    {
+      "modelKey": "qwen3-235b-a22b-instruct-2507",
+      "enabled": false,
+      "catalogState": "present",
+      "profileStatus": null,
+      "features": [],
+      "contractId": null,
+      "contractRevision": null,
+      "contractFingerprintCurrent": null,
+      "connectionPinCurrent": null,
+      "exactVendorContractCandidates": [],
+      "exactRelayContractCandidate": null
+    },
+    {
+      "modelKey": "qwen3-32b",
+      "enabled": false,
+      "catalogState": "present",
+      "profileStatus": null,
+      "features": [],
+      "contractId": null,
+      "contractRevision": null,
+      "contractFingerprintCurrent": null,
+      "connectionPinCurrent": null,
+      "exactVendorContractCandidates": [],
+      "exactRelayContractCandidate": null
+    },
+    {
+      "modelKey": "qwen3-8b",
+      "enabled": false,
+      "catalogState": "present",
+      "profileStatus": null,
+      "features": [],
+      "contractId": null,
+      "contractRevision": null,
+      "contractFingerprintCurrent": null,
+      "connectionPinCurrent": null,
+      "exactVendorContractCandidates": [],
+      "exactRelayContractCandidate": null
+    },
+    {
+      "modelKey": "qwen3-embedding-4b",
+      "enabled": false,
+      "catalogState": "present",
+      "profileStatus": null,
+      "features": [],
+      "contractId": null,
+      "contractRevision": null,
+      "contractFingerprintCurrent": null,
+      "connectionPinCurrent": null,
+      "exactVendorContractCandidates": [],
+      "exactRelayContractCandidate": null
+    },
+    {
+      "modelKey": "qwen3-embedding-8b",
+      "enabled": false,
+      "catalogState": "present",
+      "profileStatus": null,
+      "features": [],
+      "contractId": null,
+      "contractRevision": null,
+      "contractFingerprintCurrent": null,
+      "connectionPinCurrent": null,
+      "exactVendorContractCandidates": [],
+      "exactRelayContractCandidate": null
+    },
+    {
+      "modelKey": "qwen3-next-80b-a3b-instruct",
+      "enabled": false,
+      "catalogState": "present",
+      "profileStatus": null,
+      "features": [],
+      "contractId": null,
+      "contractRevision": null,
+      "contractFingerprintCurrent": null,
+      "connectionPinCurrent": null,
+      "exactVendorContractCandidates": [],
+      "exactRelayContractCandidate": null
+    },
+    {
+      "modelKey": "qwen3-reranker-8b",
+      "enabled": false,
+      "catalogState": "present",
+      "profileStatus": null,
+      "features": [],
+      "contractId": null,
+      "contractRevision": null,
+      "contractFingerprintCurrent": null,
+      "connectionPinCurrent": null,
+      "exactVendorContractCandidates": [],
+      "exactRelayContractCandidate": null
+    },
+    {
+      "modelKey": "qwen3-vl-235b-a22b-instruct",
+      "enabled": false,
+      "catalogState": "present",
+      "profileStatus": null,
+      "features": [],
+      "contractId": null,
+      "contractRevision": null,
+      "contractFingerprintCurrent": null,
+      "connectionPinCurrent": null,
+      "exactVendorContractCandidates": [],
+      "exactRelayContractCandidate": null
+    },
+    {
+      "modelKey": "qwen3-vl-30b-a3b-instruct",
+      "enabled": false,
+      "catalogState": "present",
+      "profileStatus": null,
+      "features": [],
+      "contractId": null,
+      "contractRevision": null,
+      "contractFingerprintCurrent": null,
+      "connectionPinCurrent": null,
+      "exactVendorContractCandidates": [],
+      "exactRelayContractCandidate": null
+    },
+    {
+      "modelKey": "qwen3.5-122b-a10b",
+      "enabled": false,
+      "catalogState": "present",
+      "profileStatus": null,
+      "features": [],
+      "contractId": null,
+      "contractRevision": null,
+      "contractFingerprintCurrent": null,
+      "connectionPinCurrent": null,
+      "exactVendorContractCandidates": [],
+      "exactRelayContractCandidate": null
+    },
+    {
+      "modelKey": "qwen3.5-27b",
+      "enabled": false,
+      "catalogState": "present",
+      "profileStatus": null,
+      "features": [],
+      "contractId": null,
+      "contractRevision": null,
+      "contractFingerprintCurrent": null,
+      "connectionPinCurrent": null,
+      "exactVendorContractCandidates": [],
+      "exactRelayContractCandidate": null
+    },
+    {
+      "modelKey": "qwen3.5-35b-a3b",
+      "enabled": false,
+      "catalogState": "present",
+      "profileStatus": null,
+      "features": [],
+      "contractId": null,
+      "contractRevision": null,
+      "contractFingerprintCurrent": null,
+      "connectionPinCurrent": null,
+      "exactVendorContractCandidates": [],
+      "exactRelayContractCandidate": null
+    },
+    {
+      "modelKey": "qwen3.5-397b-a17b",
+      "enabled": false,
+      "catalogState": "present",
+      "profileStatus": null,
+      "features": [],
+      "contractId": null,
+      "contractRevision": null,
+      "contractFingerprintCurrent": null,
+      "connectionPinCurrent": null,
+      "exactVendorContractCandidates": [],
+      "exactRelayContractCandidate": null
+    },
+    {
+      "modelKey": "qwen3.5-plus",
+      "enabled": false,
+      "catalogState": "present",
+      "profileStatus": null,
+      "features": [],
+      "contractId": null,
+      "contractRevision": null,
+      "contractFingerprintCurrent": null,
+      "connectionPinCurrent": null,
+      "exactVendorContractCandidates": [],
+      "exactRelayContractCandidate": null
+    },
+    {
+      "modelKey": "qwen3.6-flash",
+      "enabled": false,
+      "catalogState": "present",
+      "profileStatus": null,
+      "features": [],
+      "contractId": null,
+      "contractRevision": null,
+      "contractFingerprintCurrent": null,
+      "connectionPinCurrent": null,
+      "exactVendorContractCandidates": [],
+      "exactRelayContractCandidate": null
+    },
+    {
+      "modelKey": "qwen3.7-max",
+      "enabled": false,
+      "catalogState": "present",
+      "profileStatus": null,
+      "features": [],
+      "contractId": null,
+      "contractRevision": null,
+      "contractFingerprintCurrent": null,
+      "connectionPinCurrent": null,
+      "exactVendorContractCandidates": [],
+      "exactRelayContractCandidate": null
+    },
+    {
+      "modelKey": "qwen3.7-plus",
+      "enabled": false,
+      "catalogState": "present",
+      "profileStatus": null,
+      "features": [],
+      "contractId": null,
+      "contractRevision": null,
+      "contractFingerprintCurrent": null,
+      "connectionPinCurrent": null,
+      "exactVendorContractCandidates": [],
+      "exactRelayContractCandidate": null
+    },
+    {
+      "modelKey": "qwen3.8-max",
+      "enabled": false,
+      "catalogState": "present",
+      "profileStatus": null,
+      "features": [],
+      "contractId": null,
+      "contractRevision": null,
+      "contractFingerprintCurrent": null,
+      "connectionPinCurrent": null,
+      "exactVendorContractCandidates": [],
+      "exactRelayContractCandidate": null
+    },
+    {
+      "modelKey": "wan3.0-video",
+      "enabled": false,
+      "catalogState": "present",
+      "profileStatus": "declared",
+      "features": [
+        "text_to_video",
+        "image_to_video"
+      ],
+      "contractId": "relay.unicompapi-www.wan3.0-video.video",
+      "contractRevision": 1,
+      "contractFingerprintCurrent": true,
+      "connectionPinCurrent": true,
+      "exactVendorContractCandidates": [],
+      "exactRelayContractCandidate": "relay.unicompapi-www.wan3.0-video.video"
+    }
+  ],
+  "replays": [
+    {
+      "case": "enable_unbound_www_text_model",
+      "modelKey": "deepseek-v4-flash",
+      "result": "enabled",
+      "profileAfterInitialization": null,
+      "textCandidateCount": 0,
+      "findingReproduced": "Enable succeeds without an executable text profile"
+    },
+    {
+      "case": "bind_www_vendor_text_contract_on_copy",
+      "modelKey": "deepseek-v4-flash",
+      "contractId": "official.deepseek.v4.chat",
+      "result": "bound",
+      "profileStatus": "declared",
+      "textCandidateCount": 1,
+      "bindingAvailable": true,
+      "featureSupported": true,
+      "liveCompatibility": "not_tested"
+    },
+    {
+      "case": "bind_www_vendor_text_contract_on_copy",
+      "modelKey": "glm-4.6",
+      "contractId": "official.zhipu.glm-4.6.chat",
+      "result": "bound",
+      "profileStatus": "declared",
+      "textCandidateCount": 1,
+      "bindingAvailable": true,
+      "featureSupported": true,
+      "liveCompatibility": "not_tested"
+    },
+    {
+      "case": "bind_www_vendor_text_contract_on_copy",
+      "modelKey": "glm-4.7",
+      "contractId": "official.zhipu.glm-4.7.chat",
+      "result": "bound",
+      "profileStatus": "declared",
+      "textCandidateCount": 1,
+      "bindingAvailable": true,
+      "featureSupported": true,
+      "liveCompatibility": "not_tested"
+    },
+    {
+      "case": "bind_www_vendor_text_contract_on_copy",
+      "modelKey": "glm-5.2",
+      "contractId": "official.zhipu.glm-5.2.chat",
+      "result": "bound",
+      "profileStatus": "declared",
+      "textCandidateCount": 1,
+      "bindingAvailable": true,
+      "featureSupported": true,
+      "liveCompatibility": "not_tested"
+    },
+    {
+      "case": "bind_www_vendor_text_contract_on_copy",
+      "modelKey": "kimi-k2.6",
+      "contractId": "official.moonshot.kimi-k2.6.chat",
+      "result": "bound",
+      "profileStatus": "declared",
+      "textCandidateCount": 1,
+      "bindingAvailable": true,
+      "featureSupported": true,
+      "liveCompatibility": "not_tested"
+    },
+    {
+      "case": "bind_www_vendor_text_contract_on_copy",
+      "modelKey": "kimi-k3",
+      "contractId": "official.moonshot.kimi-k3.chat",
+      "result": "bound",
+      "profileStatus": "declared",
+      "textCandidateCount": 1,
+      "bindingAvailable": true,
+      "featureSupported": true,
+      "liveCompatibility": "not_tested"
+    },
+    {
+      "case": "enable_www_image_without_adapter",
+      "modelKey": "qwen-image-2.0",
+      "result": "enabled",
+      "imageCandidateCount": 0,
+      "profileAfterInitialization": null,
+      "imageAdapterPublished": false,
+      "liveCompatibility": "not_tested"
+    }
+  ],
+  "guards": {
+    "liveRegistrySha256Before": "c09ecacf4bb11e9287e0b29fe5d2cfb8f31fe8be8aa58bba036dff75b9786e52",
+    "liveRegistrySha256After": "c09ecacf4bb11e9287e0b29fe5d2cfb8f31fe8be8aa58bba036dff75b9786e52",
+    "liveRegistryUnchanged": true,
+    "credentialAccessAttempts": 0,
+    "externalRequestAttempts": 0,
+    "realUserProjectsRead": 0,
+    "sourceUnchanged": true,
+    "sourceHashes": {
+      "src/pages/providers/ModelContractBinding.tsx": "296fc0e498b405a1184b3781ce3ac003f7a1f6c4b9e9a93cea98f8312cfb58f9",
+      "src/pages/providers/ProviderManageView.tsx": "10996797a7d7acbcc81d54e8b650b93dab7ad976ac2af175254ca3284a97897c",
+      "src/platform/providers/provider-management-framework.ts": "2501b3206999dd997bb79845d377a696a75232191040689d22c9e8c79c266b6c",
+      "src/platform/providers/provider-registry.ts": "2f8261d274fc66e4dcba00b924162e67c6a8a22c9646f824f17db9ef10552816",
+      "src/platform/providers/provider-registry-feature-candidates.ts": "f395e086f12bf25b919066393b955a4e4f74dabc2041a786943624e513ce2ec4",
+      "src/platform/providers/provider-feature-candidates.ts": "cdb4cf879eb846d257c60b098e2059715e8de58867f22d7d0b27be7b0870f6d0",
+      "src/platform/providers/provider-feature-profile-initialization.ts": "3657d07412c9a9be9a31fba664e5383120cec7592628665ccf3695524702560c",
+      "src/platform/providers/provider-model-catalog.ts": "7a2cdf8c0bb48ef7c3b331d8c0a3acd59898ad2ef18a7e36a21e5f2163042d27",
+      "src/platform/providers/contracts/official-api-contracts.ts": "6c356e8910fb883c9ef14b88f53eb646a2bc4b7d72f126b50186ded6604ee32f",
+      "src/platform/providers/contracts/official-api-contracts.json": "5922ecb8e6b3222b9743d0eea89b6617130e8ba3b54dae7d3c248b04762e16d6",
+      "src/platform/providers/contracts/bound-text-contract.ts": "a91260934f7d44ac1bf25fb5907a2a31568270914a31cb4b806ea7b33cbf798e",
+      "src/domain/entities/parameter-compatibility.ts": "81f1193e332fab5e5e0893ea06ee62ac0f80a854705f7df5d2c92729b6057429",
+      "src/platform/providers/newapi/unicompapi-contracts.ts": "580628f763783949628312ca65d06d07125446f9dc6b4af0ca06ce11c7e5c227",
+      "src/platform/providers/newapi/unicompapi-model-capabilities.ts": "04b4c578f4c7a9e788d9e24aab3e2d011fb806b9a45df388843f9d74acc0c3e3",
+      "src/platform/providers/newapi/openai-compatible-image-routing.ts": "322989bd5fc3f0ca23976f3be38304ebe02c105ee987f751e2d8a78190ccf637",
+      "src/platform/providers/newapi/openai-compatible-video-routing.ts": "ed4d9ab977cacee4a28707d951030394136c0048cdd13140acf90cb1f2dfffd3",
+      "src/platform/providers/newapi/newapi-chat-adapter.ts": "577a29b7e3c3f71aa110c90d8211cafd6ccf45445268b3dba3ec661296f3734e",
+      "src/platform/providers/newapi/www-video-contracts.ts": "732dbce02aaf27d9607b76fa7e209d996b286d0e00ada2b94af0d79531dfb776",
+      "src/platform/providers/newapi/www-video-catalog.json": "76ee5e434c4af4e3deca8e82ae4000fab027786062f7ee95503ebfdd9be9be85",
+      "src/platform/providers/newapi/www-video-adapter.ts": "b1f64c76bdcb810fcf311992afa55ab318f6af029a2e9cb785c5cc0de82dc2e4",
+      "scripts/audit-model-contracts.cjs": "d2736d2b7c0bcd03e945ab23d8abbbc5285efe6545cc2e9b8cdf29438302b6cd",
+      "scripts/bind-www-video-contracts.cjs": "921f0b3121a1435465e4b700bbfd09ed721476f7d1f86a6ade5e89e26954b601"
+    }
+  },
+  "initialHarnessFailure": {
+    "attempts": 2,
+    "cause": "CommonJS source loader resolved an extensionless import to adjacent JSON before TypeScript",
+    "productFailure": false,
+    "correction": "Prefer workspace .ts source for extensionless imports, matching application compilation"
+  },
+  "limitations": [
+    "No public document requests or remote discovery",
+    "No paid model calls",
+    "No Electron UI replay",
+    "Contract source candidates do not prove WWW protocol compatibility",
+    "Existing full-suite results are not counted as this audit"
+  ]
+}

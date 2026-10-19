@@ -1,0 +1,19 @@
+{
+  "status": "passed",
+  "checks": [
+    "unbound text enable rejected through production UI/preload/IPC; stored state remains disabled",
+    "deepseek-v4-flash: exact contract selected, bound without auto-enable, then explicitly enabled",
+    "glm-4.6: exact contract selected, bound without auto-enable, then explicitly enabled",
+    "glm-4.7: exact contract selected, bound without auto-enable, then explicitly enabled",
+    "glm-5.2: exact contract selected, bound without auto-enable, then explicitly enabled",
+    "kimi-k2.6: exact contract selected, bound without auto-enable, then explicitly enabled",
+    "kimi-k3: exact contract selected, bound without auto-enable, then explicitly enabled",
+    "image model without a WWW image adapter stays pending and cannot be enabled",
+    "video model keeps its exact relay contract; vendor text choices are excluded",
+    "alias text choices require opt-in; no implicit contract binding"
+  ],
+  "errors": [],
+  "credentialReads": 0,
+  "externalRequests": 0,
+  "boundary": "Production ProvidersPage, compiled preload, production IPC and Host registry; synthetic isolated records only; no live Provider compatibility claim"
+}

@@ -1,0 +1,13 @@
+{
+  "status": "passed",
+  "checks": [
+    "original video decodes in production workbench; edit model selected; image addition hidden",
+    "quote cap rendered in separate cost authorization; model parameters contain only gateway inputs",
+    "production Generate action saves exact video_edit selection before local preflight",
+    "deleting video restores image mode and removes stale edit parameters",
+    "controlled Select video action restores video edit and preview"
+  ],
+  "errors": [],
+  "externalRequests": 0,
+  "boundaries": "production React UI; synthetic local IPC; native file/pipeline verified separately; no real provider call"
+}

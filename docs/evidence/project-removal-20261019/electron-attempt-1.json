@@ -1,0 +1,19 @@
+{
+  "passed": false,
+  "externalRequests": 0,
+  "rendererErrors": [],
+  "nativeTrashCalls": 0,
+  "observations": {
+    "escapePreservesRecord": true,
+    "libraryMissingRemoval": true,
+    "corruptProjectFilesRetained": true,
+    "sidebarMissingRemoval": true,
+    "failedTrashRetainsRecordAndFiles": true,
+    "failure": {
+      "name": "Error",
+      "message": "Timed out: removal completed",
+      "stack": "Error: Timed out: removal completed\n    at waitFor (E:\\UniComp\\unicompapi\\scripts\\verify-project-removal-electron.cjs:101:11)\n    at async waitDialogClosed (E:\\UniComp\\unicompapi\\scripts\\verify-project-removal-electron.cjs:110:5)\n    at async E:\\UniComp\\unicompapi\\scripts\\verify-project-removal-electron.cjs:170:5"
+    }
+  },
+  "boundary": "production main/preload/renderer; synthetic project/profile only; one synthetic folder moved with real shell.trashItem; no model calls"
+}

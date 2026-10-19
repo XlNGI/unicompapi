@@ -1,5 +1,6 @@
 import { app, net, safeStorage } from 'electron';
 import path from 'node:path';
+import { wwwVideoQuoteApproval } from './www-video-quote-confirmation';
 import { ProjectWwwVideoMaterialResolver } from '../../src/platform/providers/newapi/controlled-www-video';
 import {
   ImageOperationRouter,
@@ -181,6 +182,7 @@ export class ElectronViduComposition {
         providerRegistry: this.registry,
         materials,
         videoMaterials: new ProjectWwwVideoMaterialResolver(options.getSession),
+        wwwVideoQuoteApproval,
         usage: currentSessionUsageSink(options.getSession)
       });
     }
@@ -227,7 +229,7 @@ export class ElectronViduComposition {
       }
     };
     const videoAsync: ProviderAsyncOperationPort = {
-      query: (providerOperationId) => videoPort.query(providerOperationId),
+      query: (providerOperationId, signal) => videoPort.query(providerOperationId, signal),
       cancel: (providerOperationId) => videoPort.cancel(providerOperationId)
     };
     const videoReceiver = new LocalVideoResultReceiver({
@@ -400,8 +402,8 @@ function createCompositeVideoPort(
     return viduVideo;
   };
   return {
-    query: async (providerOperationId) =>
-      (await select(providerOperationId)).query(providerOperationId),
+    query: async (providerOperationId, signal) =>
+      (await select(providerOperationId)).query(providerOperationId, signal),
     cancel: async (providerOperationId) =>
       (await select(providerOperationId)).cancel(providerOperationId),
     getCompletion: async (remoteOperationId) =>
@@ -436,8 +438,8 @@ function createCompositeViduVideoPort(
     );
   };
   return {
-    query: async (providerOperationId) =>
-      (await select(providerOperationId)).query(providerOperationId),
+    query: async (providerOperationId, signal) =>
+      (await select(providerOperationId)).query(providerOperationId, signal),
     cancel: async (providerOperationId) =>
       (await select(providerOperationId)).cancel(providerOperationId),
     getCompletion: async (remoteOperationId) =>

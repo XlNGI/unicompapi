@@ -37,6 +37,26 @@ async function createFixture() {
 }
 
 describe('JsonVideoWorkspaceRepository', () => {
+  it('retires only the local WWW cost field from old drafts without writing during reads', async () => {
+    const fixture = await createFixture();
+    const base = createEmptyVideoWorkspaceDraft({ id: toDraftId('draft-www-old-cost'), projectId: fixture.projectId,
+      mode: 'text_to_video', createdAt: timestamp });
+    const draft = { ...base, featureSelection: { productFeature: 'text_to_video' as const, candidateId: 'candidate-old-www',
+      parameterSchemaId: 'parameters.unicompapi-www.MiniMax-H3.text_to_video', parameterSchemaRevision: 2,
+      parameterValues: { maximum_cost_cny: 999, duration: 4, unknown_field: 'must remain for validation' } } };
+    await fixture.storage.writeJsonAtomically(projectStoragePaths.entities.videoWorkspaceDrafts, { schemaVersion: 1, entities: [draft] });
+    const before = await fixture.storage.readJson(projectStoragePaths.entities.videoWorkspaceDrafts);
+    const migrated = await fixture.repository.get(draft.id);
+    expect(migrated?.featureSelection?.parameterValues).toEqual({ duration: 4, unknown_field: 'must remain for validation' });
+    expect(migrated?.updatedAt).toBe(draft.updatedAt);
+    expect(await fixture.repository.list(fixture.projectId)).toEqual([migrated]);
+    expect(await fixture.storage.readJson(projectStoragePaths.entities.videoWorkspaceDrafts)).toEqual(before);
+    await fixture.repository.save(migrated!);
+    expect(await fixture.repository.get(draft.id)).toEqual(migrated);
+    const other = { ...draft, featureSelection: { ...draft.featureSelection, parameterSchemaId: 'parameters.other.text_to_video' } };
+    await fixture.repository.save(other);
+    expect((await fixture.repository.get(draft.id))?.featureSelection?.parameterValues.maximum_cost_cny).toBe(999);
+  });
   it('round-trips versioned video drafts and enforces project scope', async () => {
     const fixture = await createFixture();
     const draft = createEmptyVideoWorkspaceDraft({

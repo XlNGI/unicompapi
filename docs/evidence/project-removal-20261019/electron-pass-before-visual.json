@@ -1,0 +1,133 @@
+{
+  "passed": true,
+  "externalRequests": 0,
+  "rendererErrors": [],
+  "nativeTrashCalls": 2,
+  "observations": {
+    "escapePreservesRecord": true,
+    "removals": [
+      {
+        "request": {
+          "projectId": "project-removal-missing",
+          "mode": "forget"
+        },
+        "reply": {
+          "ok": true,
+          "value": {
+            "projectId": "project-removal-missing",
+            "filesTrashed": false,
+            "sessionClosed": false
+          }
+        }
+      },
+      {
+        "request": {
+          "projectId": "project-removal-broken",
+          "mode": "forget"
+        },
+        "reply": {
+          "ok": true,
+          "value": {
+            "projectId": "project-removal-broken",
+            "filesTrashed": false,
+            "sessionClosed": false
+          }
+        }
+      },
+      {
+        "request": {
+          "projectId": "project-removal-missing2",
+          "mode": "forget"
+        },
+        "reply": {
+          "ok": true,
+          "value": {
+            "projectId": "project-removal-missing2",
+            "filesTrashed": false,
+            "sessionClosed": false
+          }
+        }
+      },
+      {
+        "request": {
+          "projectId": "project-removal-trash",
+          "mode": "trash"
+        },
+        "reply": {
+          "ok": false,
+          "error": {
+            "code": "project_remove_failed",
+            "message": "The project could not be removed; you can remove its record while keeping files"
+          }
+        }
+      },
+      {
+        "request": {
+          "projectId": "project-removal-trash",
+          "mode": "trash"
+        },
+        "reply": {
+          "ok": true,
+          "value": {
+            "projectId": "project-removal-trash",
+            "filesTrashed": true,
+            "sessionClosed": false
+          }
+        }
+      },
+      {
+        "request": {
+          "projectId": "project-removal-keep",
+          "mode": "forget"
+        },
+        "reply": {
+          "ok": true,
+          "value": {
+            "projectId": "project-removal-keep",
+            "filesTrashed": false,
+            "sessionClosed": true
+          }
+        }
+      },
+      {
+        "request": {
+          "projectId": "already-removed",
+          "mode": "forget"
+        },
+        "reply": {
+          "ok": true,
+          "value": {
+            "projectId": "already-removed",
+            "filesTrashed": false,
+            "sessionClosed": false
+          }
+        }
+      }
+    ],
+    "libraryMissingRemoval": true,
+    "corruptProjectFilesRetained": true,
+    "sidebarMissingRemoval": true,
+    "hostErrors": [
+      {
+        "name": "Error",
+        "message": "Synthetic native trash failure"
+      }
+    ],
+    "failedTrashRetainsRecordAndFiles": true,
+    "nativeTrashSucceeded": true,
+    "managementRemovalClosesCurrentAndRetainsFiles": true,
+    "storageSummary": {
+      "ok": true,
+      "value": {
+        "projectUsage": {
+          "totalBytes": 0,
+          "projectCount": 0,
+          "measuredProjectCount": 0,
+          "unavailableProjectCount": 0,
+          "truncated": false
+        }
+      }
+    }
+  },
+  "boundary": "production main/preload/renderer; synthetic project/profile only; one synthetic folder moved with real shell.trashItem; no model calls"
+}

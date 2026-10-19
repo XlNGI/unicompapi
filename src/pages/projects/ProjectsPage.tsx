@@ -6,6 +6,7 @@ import { Button } from '../../components/Button';
 import { Card } from '../../components/Card';
 import { EmptyState } from '../../components/EmptyState';
 import { StatusPill } from '../../components/StatusPill';
+import { ProjectRemovalDialog } from '../../components/ProjectRemovalDialog';
 import type {
   StorageIpcErrorCode,
   StorageProjectSessionDto,
@@ -50,6 +51,7 @@ export function ProjectsPage({ onNavigate }: ProjectsPageProps) {
   const [creating, setCreating] = useState(false);
   const [projectName, setProjectName] = useState('');
   const [message, setMessage] = useState('');
+  const [removingProject, setRemovingProject] = useState<StorageProjectSummaryDto>();
   const storage = window.unicomp?.storage;
 
   useEffect(() => {
@@ -306,24 +308,29 @@ export function ProjectsPage({ onNavigate }: ProjectsPageProps) {
             ) : (
               <div className="uc-project-center__project-grid">
                 {projects.map((project) => (
-                  <button
+                  <Card
                     aria-current={session?.projectId === project.projectId ? 'true' : undefined}
-                    aria-label={`打开项目 ${project.projectName}`}
-                    className="uc-card uc-project-center__project-card"
-                    disabled={busy || project.availability !== 'available'}
+                    className="uc-project-center__project-card"
                     key={project.projectId}
-                    onClick={() => void handleOpenRecentProject(project.projectId)}
-                    title={project.availability === 'available'
-                      ? `打开项目 ${project.projectName}`
-                      : '项目位置已失效或存储设备未连接'}
-                    type="button"
                   >
+                    <button
+                      aria-label={`打开项目 ${project.projectName}`}
+                      className="uc-project-center__project-open"
+                      disabled={busy || project.availability !== 'available'}
+                      onClick={() => void handleOpenRecentProject(project.projectId)}
+                      title={project.availability === 'available' ? `打开项目 ${project.projectName}` : '项目位置已失效或存储设备未连接'}
+                      type="button"
+                    >
                     <StatusPill tone={project.availability === 'available' ? 'success' : 'warning'}>
                       {project.availability === 'available' ? '可用' : '失效 / 断盘'}
                     </StatusPill>
                     <h3>{project.projectName}</h3>
                     <p>最近打开：{new Date(project.lastOpenedAt).toLocaleString('zh-CN')}</p>
-                  </button>
+                    </button>
+                    <Button aria-label={`删除项目 ${project.projectName}`} disabled={busy} onClick={() => setRemovingProject(project)} variant="ghost">
+                      {project.availability === 'available' ? '删除项目' : '移除失效项目'}
+                    </Button>
+                  </Card>
                 ))}
               </div>
             )}
@@ -381,6 +388,17 @@ export function ProjectsPage({ onNavigate }: ProjectsPageProps) {
       <p className="uc-project-center__message" aria-live="polite">
         {message}
       </p>
+      {removingProject && <ProjectRemovalDialog
+        allowTrash={removingProject.availability === 'available'}
+        onCancel={() => setRemovingProject(undefined)}
+        onRemoved={result => {
+          setRemovingProject(undefined);
+          if (result.sessionClosed) setSession(undefined);
+          setMessage(result.filesTrashed ? '项目已移到系统回收站' : '项目记录已移除，本地文件保留');
+          void refreshDashboard().catch(() => setMessage('项目已移除，刷新失败，请重新打开项目页'));
+        }}
+        project={removingProject}
+      />}
     </section>
   );
 }

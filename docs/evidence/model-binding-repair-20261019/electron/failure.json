@@ -1,0 +1,9 @@
+{
+  "error": "Timed out: Array.from(document.querySelectorAll(\"[role=option]\")).some(e => e.textContent.includes(\"glm-4.6\"))",
+  "lastScript": "Array.from(document.querySelectorAll(\"[role=option]\")).some(e => e.textContent.includes(\"glm-4.6\"))",
+  "checks": [
+    "unbound text enable rejected through production UI/preload/IPC; stored state remains disabled",
+    "deepseek-v4-flash: exact contract selected, bound without auto-enable, then explicitly enabled"
+  ],
+  "errors": []
+}

@@ -46,7 +46,7 @@ import {
   isOpenAiCompatiblePackageVersion
 } from './openai-compatible-identity';
 import { UNICOMPAPI_PROVIDER_PACKAGE_ID, UNICOMPAPI_WWW_PROVIDER_PACKAGE_ID } from './unicompapi-contracts';
-import { WwwVideoAdapter, type ControlledWwwVideoPort } from './www-video-adapter';
+import { WwwVideoAdapter, type ControlledWwwVideoPort, type WwwVideoQuoteApprovalPort } from './www-video-adapter';
 import { UNICOMPAPI_SEEDANCE_2_IMAGE_TO_VIDEO_PARAMETER_SCHEMA_ID } from './unicompapi-model-capabilities';
 import { NewApiRuntimeError, type NewApiSharedRuntime } from './newapi-runtime';
 import { ControlledImageMaterialError } from '../vidu/controlled-image-material';
@@ -178,8 +178,9 @@ export class NewApiVideoAdapter
     private readonly ids: NewApiVideoAdapterIdFactory,
     private readonly nowTimestamp: () => IsoTimestamp = () =>
       toIsoTimestamp(new Date().toISOString()),
-    videos?: ControlledWwwVideoPort
-  ) { this.www = new WwwVideoAdapter(runtime, connections, credentials, images, usage, ids, videos); }
+    videos?: ControlledWwwVideoPort,
+    quoteApproval?: WwwVideoQuoteApprovalPort
+  ) { this.www = new WwwVideoAdapter(runtime, connections, credentials, images, usage, ids, videos, quoteApproval); }
 
   async submit(input: {
     readonly routeSnapshot: unknown;

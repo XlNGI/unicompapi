@@ -1,0 +1,193 @@
+{
+  "schemaVersion": 1,
+  "capturedAt": "2026-10-19T08:46:59.166Z",
+  "status": "implemented_windows_isolated_acceptance_passed",
+  "branch": "feature/www-model-binding-repair-20261019",
+  "baseline": "e29b7a833ba3f473a8d9fc3dc473d9f6cc39959f",
+  "scope": "Project record removal for valid/unavailable projects; explicit safe native trash; active session and read model refresh.",
+  "gates": {
+    "vitest": {
+      "status": "passed",
+      "files": 4,
+      "passed": 53,
+      "failed": 0,
+      "skipped": 0,
+      "artifact": "vitest.json"
+    },
+    "nodeUi": {
+      "status": "passed",
+      "passed": 394,
+      "failed": 0,
+      "skipped": 0,
+      "artifact": "node-ui.log"
+    },
+    "uniqueAutomatedTestCount": 447,
+    "typecheck": {
+      "status": "passed",
+      "artifact": "typecheck.log"
+    },
+    "lint": {
+      "status": "passed",
+      "artifact": "lint.log"
+    },
+    "build": {
+      "status": "passed",
+      "artifact": "build.log"
+    },
+    "platformAudit": {
+      "status": "passed",
+      "artifact": "platform.log"
+    },
+    "diffCheck": {
+      "status": "passed"
+    },
+    "electron": {
+      "status": "passed",
+      "artifact": "electron.json",
+      "profile": "synthetic isolated userData",
+      "nativeTrashSuccessesInFinalRun": 1,
+      "intentionallyFailedTrashAttemptsInFinalRun": 1,
+      "externalRequests": 0,
+      "rendererErrors": 0
+    },
+    "visual": {
+      "status": "passed",
+      "screenshotCount": 5,
+      "artifacts": [
+        "library-before.png",
+        "projects-sidebar.png",
+        "trash-confirmation.png",
+        "current-project-confirmation.png",
+        "library-after.png"
+      ]
+    }
+  },
+  "boundaries": {
+    "userProjectsDeleted": false,
+    "actualCatalogMigration": false,
+    "actualModelConfigChanged": false,
+    "actualUserAppRestartedByAgent": false,
+    "modelGenerationRequests": 0,
+    "modelFees": 0,
+    "fullVitestRerun": false,
+    "macosPhysicalValidation": "not_run",
+    "commit": false,
+    "merge": false,
+    "push": false,
+    "release": false,
+    "nextStep": "Restart the existing application to load the new main/preload interfaces; select the intended records in the UI."
+  },
+  "preserved": {
+    "previousSourceCount": 19,
+    "previousSourcesVerifiedUnchanged": true,
+    "sourceHashes": {
+      "src/pages/providers/ModelContractBinding.tsx": "2a18d3b0c56df5f6d679b0040f8a65cfd6197112c08d6375b2d5ceed3f8f8e51",
+      "src/pages/providers/ProviderManageView.tsx": "2b5b62bf9a7374542cfbc64db635fb0080ee9b858801e8b96c5597ec7deae2b9",
+      "src/pages/providers/provider-page-shared.ts": "ec788fbd6b0c539674b82274c6680812101ec3cd5e7955871a6001b363bfba3c",
+      "src/platform/providers/provider-management-framework.ts": "b4d319be14e524af561ca6b23ddd3304d96b919a2dc000bef5708a939e5d4aa0",
+      "src/shared/provider-ipc.ts": "5689b019dba7b1973a885b43e2eeb158311e7cc309c8cbc6fa59031b3326e226",
+      "scripts/verify-provider-model-binding.cjs": "74222189655abadd9f0c01632b93d1d55c9f9d9ac5fec39c418168dc418ed3d4",
+      "tests/harness/provider-model-binding-harness.tsx": "bbac68907aaad7601cb0084bfb80ac03108ffdca5f72445046b9c08d5486c54f",
+      "tests/application/model-contract-binding-behavior.test.tsx": "417026d2e90823f44b8aa4ae727a77d34903bdaa121674a688711f7bdcfba0e2",
+      "tests/platform/www-model-binding-management.test.ts": "414b6991e6c92058064e8c329da666944e42d5c27612ce0bded3b737752c532c",
+      "tests/platform/provider-management-framework.test.ts": "e1642dfda3aba2a13be6b86e298beb7ee89f8331dc3a7a5f3cdbad7f158e5a01",
+      "tests/ui/providers-page-contract.test.mjs": "0e620d0d5749e753cdeebb88e448b5621fe8a369ab0d357fd931dc2f0a808048",
+      "src/platform/providers/newapi/newapi-runtime.ts": "981da2c277a38466fdb862bb69633cd091cb133b604bbc308194dc1884a2e51e",
+      "src/platform/providers/newapi/www-video-adapter.ts": "615ecf398b2b4dea97d6b227c9aab3e0b34a2e4e6632cb007cc94258d0197916",
+      "tests/fixtures/www-video.ts": "b7bcfc041a2b205c3e7c399b86f728d84572b629816835ed4624350c905d46e0",
+      "tests/platform/www-video.test.ts": "808f7c5f3790507aa86c1678f9776a4ad63c6fb6fa6e18d3d63809726d55881c",
+      "scripts/verify-www-video-electron.cjs": "fbb556864e46a1830757364256b2d371feda15cb8f5e1ccc9ca18d73d7c61873",
+      "scripts/inspect-www-video-task.cjs": "6fb6af668128035741ab24fddbcd94710834a05e53f6d1793c6de9d004b64330",
+      "scripts/recover-www-video-task.cjs": "4e0387c96b75ca45bd795c7e400c4c5a154d6fdbcfc66c75e607dba6876e5bcc",
+      "vite.config.ts": "37e1b93c76b0e4a04766d80cf83254b560d568b7183a7c81dfaf5389e1c46291"
+    }
+  },
+  "sourceHashes": {
+    "electron/ipc/storage-ipc.ts": "b3b6278c278cef39506c11898f7d52bf8219e8e922b03bf8b73e3a9da1979ad6",
+    "electron/preload.ts": "fac81b9e174aa35600808626812bb933a728bb36636a5a067b88ec5698d0f3f6",
+    "src/components/ProjectRemovalDialog.tsx": "e097e16e4e2dbfab9f9307ceb4741b95aa71b34535d34d35897cd3e57ad93411",
+    "src/pages/chat/ChatPage.tsx": "e668a1b6c4fae940c6a376c1d1395087fd6cd7843cb2454375d45496e7d1c465",
+    "src/pages/library/LibraryPage.tsx": "c7a69274b160c29dbe2540844755815c620c20d8a64ed2b04dbccaf1ed19cde9",
+    "src/pages/projects/ProjectsPage.tsx": "dbe6656b4446d4a9af643154d00c888cdce3a92612436b399a56692153fb0d5e",
+    "src/platform/ipc/project-catalog.ts": "15289ffbc52c3515adb2763f436be0cd759e2c021900df5ee91cf0859bb2a5c3",
+    "src/platform/ipc/project-session-controller.ts": "d6c32ce3b00967ed27400f080dc35afd2312d34ddc84ae1752fe7b6d5512b3d1",
+    "src/platform/ipc/project-removal.ts": "a97cedb3c1313a6cd6d8bc1ea9a37e685f5dd14f980f2775bd8955ebfd011741",
+    "src/shared/storage-ipc.ts": "511298047c521ae6c6f9ec121f88e50cb169ec3ceb020878858ce19877202abf",
+    "src/styles/pages.css": "d8c6669fc52f2586cf86aab990884753ef267fbf066532bf071ffd51e33f0579",
+    "src/ui/layout/GlobalStatusMonitor.tsx": "d63ef07a02cd6fe6d9c2d797d13a1e7342f6ffc1c651cd13e7eb0bf82105202c",
+    "src/ui/layout/TitleBar.tsx": "74322c8feb838816aa09200705e93dc739a2bdfeff2921c42b78b89c1c780805",
+    "src/ui/project-session-events.ts": "6ab0f5691108a4712c4fe883b42519eea110707b6064598929b424a3cdc2e30a",
+    "tests/platform/project-removal.test.ts": "c5cb10bf9d3bba2cc58c787d00f07934b73b69e96a0d6677cf716ceeddcd313b",
+    "tests/ui/projects-session-contract.test.mjs": "ebe3861c2827053c14177bdb031bbcd3cb9c05311d00ed0563a2100daee81e17",
+    "scripts/verify-project-removal-electron.cjs": "0e44f7f9e15516c4b06bf9ef7b50f4c55c52cf5b69f300fd95266b40e3d4aeed"
+  },
+  "documentationHashes": {
+    "PLANS.md": "79ebd2d50104801de6709d488213e4b7ac19dc478007ad3a7a5419614b0aff08",
+    "docs/current/project-removal-20261019.md": "8b910d762651c693d3f135be6044030f224ba338dc4067bc8ae1731518e04024"
+  },
+  "intermediateObservations": [
+    {
+      "gate": "vitest",
+      "result": "38 passed / 40",
+      "source": "Tool output retained in conversation",
+      "reason": "Invalid fixture assumed empty entity history validates manifest; unsupported matcher. Fixed fixture and matcher; final 53 passed."
+    },
+    {
+      "gate": "node-ui",
+      "result": "393 passed / 394",
+      "source": "Tool output retained in conversation",
+      "reason": "Platform audit disallowed direct process.platform and win32 literal in new production module. Replaced with path.relative semantics; final 394 passed."
+    },
+    {
+      "gate": "electron",
+      "attempts": [
+        1,
+        2,
+        3
+      ],
+      "source": "electron-attempt-1/2/3.json and .log",
+      "reason": "Harness selected a hidden RSuite menu item for a different synthetic project. Exact-directory assertion prevented trash. Visible-only selectors and dialog identity checks fixed."
+    },
+    {
+      "gate": "visual",
+      "source": "electron-pass-before-visual.json",
+      "reason": "Hidden window compositor returned older frames. Final screenshot helper primes capture, then captures current frame; five final screenshots visually reviewed."
+    }
+  ],
+  "artifactHashes": {
+    "build.log": "26596a089d1e78ce57fd976417def45b0e3b172baf9fd3ad70098fdd40cb4187",
+    "build.log.gz": "a26cbbba3ca430f8488c4617b729e44f152766498b468402742343d196739501",
+    "current-project-confirmation.png": "0184866b0d3f3d2cf67201e1f3b7e17ef4b33515c2f0a845a25e1f315a7ef2b1",
+    "electron-attempt-1.json": "7517ebd7f1be48b15de7b5197e96e10ae2beeb0d3d287cccaa088d66646245bd",
+    "electron-attempt-1.log": "adb3857865ef661abd727c33f6ead15be3dc8140d13a8863860e5cf4a207fcfc",
+    "electron-attempt-1.log.gz": "e5175fa69b3f436a3f14c32c09861df64bca0bb3e4f8fed0afd38d902efbc0e1",
+    "electron-attempt-2.json": "c2e26583fda3d612e6d87106d9f24284b815efc7e306b6d8945e9a8f64a2cb3e",
+    "electron-attempt-2.log": "9cc8bc473a3163cae4beadceabaaadb8c6e6c232ec1820e4eda4ad29259f20af",
+    "electron-attempt-2.log.gz": "832ca120016e29e88032408d30295ccb0a27cab8caba7d3d404c16267b424c40",
+    "electron-attempt-3.json": "faeb917b0144b0893a39256dea9db1820c0073711782a55e612931ae572e541e",
+    "electron-attempt-3.log": "4a58781ab1865ba25695bf711f88b5d772afdabcc987ab72a8aa20f7b4075da9",
+    "electron-attempt-3.log.gz": "7a1e390013db655edc296da1d16ed92dc98a6ede253f2c8ce7791a0872df7ede",
+    "electron-pass-before-visual.json": "a9e8f808f4b32e1024e26f3f275d847655fac1bdbe8af6c0dcb9cc8508af13af",
+    "electron.json": "4c3cd9361e89b08724e370d1af1db27e2a8f67e5a39603ffd6f78db7b880ba1c",
+    "electron.log": "7eb70257593da06f682a3ddda54a9d260d4fc514f645237f5ca74b08f8da61a6",
+    "electron.log.gz": "5dced99fc13ed0cfee71c5846eb1d5907585e5c2cdfb06c80977948f8e66531d",
+    "intermediate-observations.json": "ce3a14775b7b73ef68720f590034b95c978c2d9ed125a6fab8bea3cc214ad174",
+    "library-after.png": "9e012f72186c6fa0ad767978d113df7a14483e70cb61bdaa871315078f23246a",
+    "library-before.png": "896e2019bebdfa9e28c3c2e4e86a0c22e0fd3ceb94cf0ae2b19bd133e5cafcdd",
+    "lint.log": "80a609ca9e4753060cbfb2a59ccbfffc566c39ff2a3ede42ae3fd24e3f02af27",
+    "lint.log.gz": "f775e65ea4a00fb9a8fb62bdc46ba3da7f9fce41df0ca7187cb1b274c7f94e92",
+    "node-ui.log": "548988919abea62c7989485436750c73089d0c2fa386c871bdd2e4e48ce9a5df",
+    "node-ui.log.gz": "bb361937493b8c098eede00a4f0822e7666ce66cce992d17bfe67e2714978941",
+    "platform.log": "6a6eaf24e9e330f9ab1955223a1ffa5868a475639c73ac3b0122c103e3cc0861",
+    "platform.log.gz": "91a3045318fe0e3ed24eac9293469949a7f877fb97fd23d436599ee6195a22c8",
+    "projects-sidebar.png": "ef2b77e51928793c468568041f9d237e3643b237be335854c0a44467878cc4e5",
+    "trash-confirmation.png": "20c6b880231385aec8d42e73d3be013fc276c318951995743d313009b3eb5d76",
+    "typecheck.log": "b45e275eca27014c956174b52d272a6ff74ac67b341f609aeeac33a17f32f7ce",
+    "typecheck.log.gz": "b7f2c3929260b6c8fbbc23c0502284fe9ab56009fce3f39744166deb912ef86a",
+    "vitest-final.log": "9c1a83a12211113742d34495fc5eee2f9a24c43b18b03b8361ca9cdfca64c660",
+    "vitest-final.log.gz": "cd8d09be373b9ba5f4c974ef92abfcf8537d5795eea7287cff46793ac4a7357e",
+    "vitest.json": "7763d6912cdcd1d3bf62519948343af56d7e0e5c5e6312c21f02449fe65a8182",
+    "vitest.log": "92d8900d1810eda378c43f632ec56e612c3963e7aa5cff4f118bbbda4f93d335",
+    "vitest.log.gz": "65dcffce7a487f4838f3b11bf4ace8474ed4b1adb8a84c73a5fc0a9cdbbe6f7f"
+  }
+}

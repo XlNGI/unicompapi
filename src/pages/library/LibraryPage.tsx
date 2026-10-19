@@ -6,6 +6,7 @@ import { Button } from '../../components/Button';
 import { Card } from '../../components/Card';
 import { EmptyState } from '../../components/EmptyState';
 import { StatusPill } from '../../components/StatusPill';
+import { ProjectRemovalDialog } from '../../components/ProjectRemovalDialog';
 import type { StatusTone } from '../../components/StatusPill';
 import type {
   StorageApi,
@@ -63,6 +64,7 @@ export function LibraryPage({ onNavigate }: LibraryPageProps) {
   const [detailsLoading, setDetailsLoading] = useState(false);
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState('');
+  const [removingProject, setRemovingProject] = useState<StorageReadModelIssueDto>();
   const storage = window.unicomp?.storage;
 
   async function loadWorks() {
@@ -253,11 +255,14 @@ export function LibraryPage({ onNavigate }: LibraryPageProps) {
       {issues.length > 0 && (
         <Card className="uc-work-library__issues" role="status">
           <h2>部分项目无法读取</h2>
+          <div className="uc-work-library__issue-list uc-scrollbar">
           {issues.map((issue) => (
-            <p key={issue.projectId}>
-              {issue.projectName}：{issue.reason === 'unavailable' ? '项目失效或存储断开' : '作品数据损坏'}
-            </p>
+            <div className="uc-work-library__issue-row" key={issue.projectId}>
+              <p>{issue.projectName}：{issue.reason === 'unavailable' ? '项目失效或存储断开' : '作品数据损坏'}</p>
+              <Button aria-label={`移除项目记录 ${issue.projectName}`} disabled={busy} onClick={() => setRemovingProject(issue)} variant="ghost">移除记录</Button>
+            </div>
           ))}
+          </div>
         </Card>
       )}
 
@@ -331,6 +336,16 @@ export function LibraryPage({ onNavigate }: LibraryPageProps) {
       )}
 
       <p className="uc-work-library__message" aria-live="polite">{message}</p>
+      {removingProject && <ProjectRemovalDialog
+        allowTrash={false}
+        onCancel={() => setRemovingProject(undefined)}
+        onRemoved={() => {
+          setRemovingProject(undefined);
+          setMessage('项目记录已移除，本地文件保留');
+          void loadWorks().catch(() => setMessage('项目已移除，刷新失败，请重新打开作品库'));
+        }}
+        project={removingProject}
+      />}
     </section>
   );
 }

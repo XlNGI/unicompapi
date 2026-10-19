@@ -6,14 +6,22 @@ import { NEWAPI_ADAPTER_VERSION, NEWAPI_PROTOCOL_VERSION, NEWAPI_VIDEO_ADAPTER_I
   NEWAPI_VIDEO_RESULT_SCHEMA_ID } from './newapi-contracts';
 import { UNICOMPAPI_WWW_PROVIDER_PACKAGE_ID, UNICOMPAPI_WWW_BASE_URL, UNICOMPAPI_WWW_ENDPOINT_POLICY_ID } from './unicompapi-contracts';
 import catalog from './www-video-catalog.json';
+import retainedH3 from './www-h3-contract.v1.json';
+import previousCatalog from './www-video-catalog.previous.json';
 
 export const WWW_VIDEO_CONTRACT_PREFIX = 'relay.unicompapi-www.';
 export const wwwVideoUsageSchema = createUsageSchema({ id: toUsageSchemaId('usage.unicompapi-www.video'), revision: 1,
   completenessRule: 'provider_status_only', conflictPolicy: 'mark_invalid_response', metrics: [{ metricId: 'charged_amount',
     allowedUnits: ['CNY_MICRO'], numericKind: 'integer', aggregation: 'final_authoritative', requiredForComplete: false, allowedStages: ['poll'] }] });
 export type WwwVideoContract = (typeof catalog.contracts)[number];
-export function wwwVideoContract(key: string): WwwVideoContract | undefined {
-  return catalog.contracts.find(c => c.modelKey === key);
+export function wwwVideoContract(key: string, revision?: number): WwwVideoContract | undefined {
+  const current = catalog.contracts.find(c => c.modelKey === key);
+  if (revision === undefined || current?.revision === revision) return current;
+  // Retained contracts are exclusively for querying/downloading accepted tasks.
+  if (key === retainedH3.modelKey && revision === retainedH3.revision) return retainedH3 as WwwVideoContract;
+  const retained = previousCatalog.contracts.find(c => c.modelKey === key && c.revision === revision);
+  if (retained) return retained as unknown as WwwVideoContract;
+  return undefined;
 }
 export function wwwVideoContractFingerprint(contract: WwwVideoContract): string {
   return createHash('sha256').update(JSON.stringify(contract)).digest('hex');
@@ -23,7 +31,7 @@ export function wwwVideoConstraint(feature: ProductFeature): string { return `co
 
 export function wwwVideoParameterSchema(contract: WwwVideoContract, feature: ProductFeature): ParameterSchemaV2 {
   if (!(contract.features as readonly string[]).includes(feature)) throw new Error('www_video_feature_mismatch');
-  const fields: ParameterFieldSchemaV2[] = contract.fields.flatMap<ParameterFieldSchemaV2>(({ name, schema: raw }) => {
+  const fields: ParameterFieldSchemaV2[] = contract.fields.flatMap<ParameterFieldSchemaV2>(({ name, schema: raw, required: documentedRequired }) => {
     // This surface registers one video. Auxiliary images and mixed-media inputs
     // have no controlled receiver here, so their switches must not be offered.
     if (name === 'return_last_frame' || name === 'omni_reference_task_type') return [];
@@ -37,13 +45,11 @@ export function wwwVideoParameterSchema(contract: WwwVideoContract, feature: Pro
     const options = schema.enum as readonly (string | number | boolean)[] | undefined;
     const valueType = options ? 'enum' as const : schema.type as 'integer' | 'boolean' | 'string';
     return [{ fieldId: name, labelId: `provider.parameter.${name}`, order: 20 + contract.fields.findIndex(f => f.name === name) * 10,
-      valueType, required: false, exposure: 'user_optional' as const, defaultPolicy: 'omit_use_provider_default' as const,
+      valueType, required: documentedRequired === true, exposure: documentedRequired === true ? 'user_required' as const : 'user_optional' as const,
+      defaultPolicy: documentedRequired === true ? 'require_user_value' as const : 'omit_use_provider_default' as const,
       validationSchema: schema, ...(options ? { options } : {}), ...(typeof schema.minimum === 'number' ? { minimum: schema.minimum } : {}),
       ...(typeof schema.maximum === 'number' ? { maximum: schema.maximum } : {}) }];
   });
-  fields.push({ fieldId: 'maximum_cost_cny', labelId: 'provider.parameter.maximum_cost_cny', order: 1000,
-    valueType: 'number', exposure: 'user_required', required: true, defaultPolicy: 'require_user_value', minimum: 0.000001,
-    validationSchema: { type: 'number', exclusiveMinimum: 0, maximum: 1000000 } });
   return { schemaVersion: 2, schemaId: `parameters.unicompapi-www.${contract.modelKey}.${feature}`, revision: contract.revision,
     productFeature: feature, fields };
 }

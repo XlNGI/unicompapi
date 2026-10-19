@@ -1,0 +1,203 @@
+{
+  "schemaVersion": 1,
+  "capturedAt": "2026-10-19T06:43:31.154Z",
+  "status": "implemented_offline_acceptance_passed",
+  "branch": "feature/www-model-binding-repair-20261019",
+  "baseline": "e29b7a833ba3f473a8d9fc3dc473d9f6cc39959f",
+  "scope": "WWW exact text contract selection, explicit text alias selection, profile-gated enablement and model-switch React key repair; no actual user model binding migration",
+  "changes": {
+    "productionFiles": [
+      "src/pages/providers/ModelContractBinding.tsx",
+      "src/pages/providers/ProviderManageView.tsx",
+      "src/pages/providers/provider-page-shared.ts",
+      "src/platform/providers/provider-management-framework.ts",
+      "src/shared/provider-ipc.ts"
+    ],
+    "sourceHashes": {
+      "src/pages/providers/ModelContractBinding.tsx": "2a18d3b0c56df5f6d679b0040f8a65cfd6197112c08d6375b2d5ceed3f8f8e51",
+      "src/pages/providers/ProviderManageView.tsx": "2b5b62bf9a7374542cfbc64db635fb0080ee9b858801e8b96c5597ec7deae2b9",
+      "src/pages/providers/provider-page-shared.ts": "ec788fbd6b0c539674b82274c6680812101ec3cd5e7955871a6001b363bfba3c",
+      "src/platform/providers/provider-management-framework.ts": "b4d319be14e524af561ca6b23ddd3304d96b919a2dc000bef5708a939e5d4aa0",
+      "src/shared/provider-ipc.ts": "5689b019dba7b1973a885b43e2eeb158311e7cc309c8cbc6fa59031b3326e226",
+      "scripts/verify-provider-model-binding.cjs": "74222189655abadd9f0c01632b93d1d55c9f9d9ac5fec39c418168dc418ed3d4",
+      "tests/harness/provider-model-binding-harness.tsx": "bbac68907aaad7601cb0084bfb80ac03108ffdca5f72445046b9c08d5486c54f",
+      "tests/application/model-contract-binding-behavior.test.tsx": "417026d2e90823f44b8aa4ae727a77d34903bdaa121674a688711f7bdcfba0e2",
+      "tests/platform/www-model-binding-management.test.ts": "414b6991e6c92058064e8c329da666944e42d5c27612ce0bded3b737752c532c",
+      "tests/platform/provider-management-framework.test.ts": "e1642dfda3aba2a13be6b86e298beb7ee89f8331dc3a7a5f3cdbad7f158e5a01",
+      "tests/ui/providers-page-contract.test.mjs": "0e620d0d5749e753cdeebb88e448b5621fe8a369ab0d357fd931dc2f0a808048"
+    },
+    "preservedStartupViteSha256": "37e1b93c76b0e4a04766d80cf83254b560d568b7183a7c81dfaf5389e1c46291",
+    "documentationHashes": {
+      "docs/current/www-model-binding-repair-20261019.md": "3c6d516494617ca8020cd9154a54ad97dec4ea59531323055b1deda94a4ea541",
+      "PLANS.md": "20468191669021c7b7ed54874db6ed6f22fb1617bdfab824dddc9b6ed19fad36"
+    }
+  },
+  "gates": {
+    "vitestFull": {
+      "status": "passed",
+      "files": 348,
+      "total": 3466,
+      "passed": 3466,
+      "failed": 0,
+      "skipped": 0,
+      "startTime": "2026-10-19T06:25:38.365Z",
+      "endTime": "2026-10-19T06:34:55.765Z",
+      "artifact": "vitest-full.json"
+    },
+    "vitestFinalTargeted": {
+      "status": "passed",
+      "files": 9,
+      "total": 125,
+      "passed": 125,
+      "failed": 0,
+      "skipped": 0,
+      "startTime": "2026-10-19T06:37:03.103Z",
+      "endTime": "2026-10-19T06:37:17.382Z",
+      "artifact": "targeted-final.json",
+      "tests": [
+        "tests/application/model-contract-binding-behavior.test.tsx",
+        "tests/domain/parameter-compatibility.test.ts",
+        "tests/platform/official-api-contracts.test.ts",
+        "tests/platform/openai-compatible-image-routing.test.ts",
+        "tests/platform/openai-compatible-video-routing.test.ts",
+        "tests/platform/provider-management-framework.test.ts",
+        "tests/platform/provider-registry-feature-candidates.test.ts",
+        "tests/platform/www-model-binding-management.test.ts",
+        "tests/platform/www-video.test.ts"
+      ],
+      "overlapsFull": true
+    },
+    "nodeUiFinal": {
+      "status": "passed",
+      "passed": 393,
+      "failed": 0,
+      "skipped": 0,
+      "artifact": "node-ui-final-fixed.log"
+    },
+    "uniqueFullRegressionTestCount": 3859,
+    "typecheck": {
+      "status": "passed",
+      "artifact": "typecheck.log",
+      "finalBuildAlsoTypecheckedProduction": true
+    },
+    "lintFinal": {
+      "status": "passed",
+      "artifact": "lint-final.log"
+    },
+    "buildFinal": {
+      "status": "passed",
+      "artifact": "build-final.log",
+      "existingWarnings": [
+        "Vite CJS API deprecation",
+        "large chunk warning"
+      ]
+    },
+    "platformAudit": {
+      "status": "passed",
+      "artifact": "platform-audit.log",
+      "violations": []
+    },
+    "electron": {
+      "status": "passed",
+      "checks": 10,
+      "credentialReads": 0,
+      "externalRequests": 0,
+      "rendererErrors": [],
+      "artifact": "electron/validation.json",
+      "screenshot": "electron/video-bound.png"
+    },
+    "diffCheck": {
+      "status": "passed"
+    },
+    "documentationLinkTargetsChecked": 11
+  },
+  "verificationOrder": "Full Vitest ran while Toggle labeling was corrected; React key repair followed full completion. Final related 125 tests, Node/UI, lint, production build and real Electron verify final implementation. No assertion of final frozen-source full regression; targeted tests are not double counted.",
+  "liveConfiguration": {
+    "changed": false,
+    "registrySha256": "c09ecacf4bb11e9287e0b29fe5d2cfb8f31fe8be8aa58bba036dff75b9786e52",
+    "matchesPriorAudit": true,
+    "catalogModels": 52,
+    "boundModels": 9,
+    "unboundModels": 43,
+    "automaticallyBoundModels": 0,
+    "enabledStateChanged": false
+  },
+  "boundaries": {
+    "liveCredentialReads": 0,
+    "userProjectsAccessed": false,
+    "networkResearch": false,
+    "realModelCalls": 0,
+    "paidCalls": 0,
+    "liveApplicationRestarted": false,
+    "liveProviderAcceptance": false,
+    "macosDeviceAcceptance": false,
+    "committed": false,
+    "pushed": false,
+    "merged": false
+  },
+  "limitations": [
+    "Six text model contracts are available for manual confirmed binding; real gateway compatibility remains unverified.",
+    "37 local catalog models have no exact source contract candidate.",
+    "WWW image adapter and submit/result/billing protocol remain unimplemented.",
+    "Normal application restart is required to load the updated main-process enablement gate.",
+    "Existing media budget and unknown original operation boundaries remain in force."
+  ],
+  "intermediateFailures": {
+    "artifacts": [
+      "red.json",
+      "red-host.json",
+      "red-host-valid-fixture.json",
+      "first-fix.json",
+      "electron.log",
+      "electron-second.log",
+      "electron-third.log",
+      "electron/failure.json",
+      "electron/failure.html",
+      "electron/failure.png",
+      "node-ui-final.log"
+    ],
+    "resolved": [
+      "Invalid accessCategory fixture corrected to online.",
+      "Enablement regressions reproduced and fixed; expectations for old no-profile enable behavior updated.",
+      "RSuite selector corrected to actual row switch.",
+      "Chromium userData cleanup moved to Node parent after child exit.",
+      "Duplicate sibling React keys caused stale contract form and were fixed.",
+      "Static UI assertion updated to verify distinct component keys."
+    ]
+  },
+  "tempCleanup": {
+    "status": "rejected_by_automatic_approval",
+    "reason": "blocked by policy",
+    "directoryBasename": "uc-model-binding-electron-17248",
+    "retained": true,
+    "bypassAttempted": false,
+    "blocksAcceptance": false
+  },
+  "artifactHashes": {
+    "build-final.log": "6cfb1e04108d17c7b3b92797586ae0d38d0bc2aef1726854da2b6af2f50ea762",
+    "electron-final.log": "6ae86114b2544b0ed558b7f5d08026b613519ed25ee96d173393e2aca919f830",
+    "electron-second.log": "9f655647cccf939cc850bf35924bc9d34a84eaeedc051a346a876f5454e4acc7",
+    "electron-third.log": "86b36afe6b25b7e9bc600b7bbae85da575764c43694f1e42fe95168e65dddf80",
+    "electron.log": "f96d3e664488f930aff5af47c4637968cbe952dbec6f093f9da252863935d4bb",
+    "electron/failure.html": "1712bd8581b4ba112e2371e101e117d62533d0b5bd7018cced3b6c2b98d8c314",
+    "electron/failure.json": "09fb5f7cebd7fe991deed363e25d31cf4bba5a50cb9a0aa5df8e33be743cce0e",
+    "electron/failure.png": "1b082d6c06bc5a12944af5c0686b8ec665a475d9120782320410a37c928b6f25",
+    "electron/validation.json": "6e4851b904bc3cdc0acf0e6b1047eb0288cbf3ace03499fc7dfa0e4f14ba2489",
+    "electron/video-bound.png": "f81029406f7c0c5f91bdb0931b541c53b83866b105c28a9d75fb5f8ecea6b592",
+    "first-fix.json": "b806aaee20a512ae5c3ee2399847f2e6ca33644cff79eb07318eb46eef77d015",
+    "lint-final.log": "83b81528515c3895752e350a868f8bdbb1b86918a6522ced1cbbdafe4e1e2550",
+    "node-ui-final-fixed.log": "b4c41458055fc5b7f7d4b2b7f1f95680f874f6ce712f2eee0b0824fc7a8b0933",
+    "node-ui-final.log": "2cc1aa003c3a0fb6894349e18d522e7e7d82e18029ec89aeb4e44f3b178e8fb2",
+    "node-ui.log": "94a80e2d12313a53de12fe4b99e5ae91c666f5f04ac3e3a56a9cc6b964fd1f89",
+    "platform-audit.log": "efdc1d821040c85693cbd41c0a13a4ffbf40c1ad55e546c9a678314a7f3332aa",
+    "red-host-valid-fixture.json": "80e0ededdbda78ad3d30f00e3df53594e39a6819c8e4673cfd4b94bbef18a421",
+    "red-host.json": "2e9175eb67c97b7f3304f32ca0c73731949f62e9b51b20ff9990f7f97895a684",
+    "red.json": "fc68b9bc27e5f6bc5822a14f5f900e398b403fcaa251af329ac84a0af3cbcced",
+    "targeted-final.json": "40aa342cfec82ec0e3c8e4040847cc95ba0fe6f819c52b7d273c8570cf3672ef",
+    "targeted-final.log": "a9b7a86cb23ac71a7d1f09f443b0a573f118e75489f3de364a2e205a8dea0048",
+    "targeted.json": "516874e6538ec72fd9d9e57cb73da3795f53ca295a0247595f5c17bcb8c13c39",
+    "typecheck.log": "7a8da2bb31399c75314a7ed561dba22238ed5254ad4ed0c18197e60f73215be9",
+    "vitest-full.json": "fc37fb869806d60b2500ec698e46b0338a15fe325f2a92ec82ed6a1e537b9c63",
+    "vitest-full.log": "9c2e3e8d1e7c14b7c03eed629b4142b7fdc8019871372dbd3dbbfab2c2fa66e6"
+  }
+}

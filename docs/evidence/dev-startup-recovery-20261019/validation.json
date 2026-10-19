@@ -1,0 +1,168 @@
+{
+  "schemaVersion": 1,
+  "date": "2026-10-19",
+  "scope": "Local development startup maintenance",
+  "branch": "feature/dev-startup-recovery-20261019",
+  "baseline": {
+    "before": "21162da",
+    "after": "e29b7a833ba3f473a8d9fc3dc473d9f6cc39959f",
+    "localDevelopBehindCachedOriginDevelopCommits": 9,
+    "action": "git merge --ff-only origin/develop, then create maintenance branch",
+    "networkFetch": false,
+    "cleanBeforeFastForward": true,
+    "businessSourceEditsAfterFastForward": false,
+    "dependencyVersionChanges": false,
+    "configurationEditsAfterFastForward": [
+      "vite.config.ts"
+    ]
+  },
+  "diagnosis": {
+    "viteHttpStatusBeforeRepair": 200,
+    "electronHadMainWindow": false,
+    "lastStartupFailureAt": "2026-10-19T03:11:09.994Z",
+    "errorName": "ProductFeatureContractError",
+    "errorCode": "invalid_feature",
+    "errorMessage": "Product feature is not supported",
+    "failurePath": [
+      "app.whenReady",
+      "JsonProviderRegistryStore.load",
+      "parseModelDefinition",
+      "parseProfileTemplate",
+      "parseProfileFeature",
+      "parseProductFeature"
+    ],
+    "unsupportedStoredFeature": "video_edit",
+    "storedOccurrences": 2,
+    "explanation": "The old checkout could not parse capabilities already saved by newer code. Startup rejected before createMainWindow and the global handler recorded only the error name. The existing origin/develop baseline already supports this capability.",
+    "whyCheckoutWasOld": "not established",
+    "configurationDeletionOrManualRewrite": false
+  },
+  "validation": {
+    "regression": {
+      "command": "pnpm exec vitest run tests/domain/product-feature.test.ts tests/platform/provider-registry.test.ts tests/platform/www-video.test.ts --maxWorkers 2 --minWorkers 1",
+      "exitCode": 0,
+      "passedFiles": 3,
+      "passedTests": 54,
+      "failedTests": 0,
+      "log": "regression.log.gz",
+      "uncompressedSha256": "04194e0edc3e75c61465e4ef5c51334c8c67c4367b1508baae3ce56cb58ab37a"
+    },
+    "actualDevStartup": {
+      "command": "pnpm dev",
+      "verifiedAt": "2026-10-19T11:20:58.6266856+08:00",
+      "status": "startup_passed_process_running",
+      "httpStatus": 200,
+      "windowCount": 1,
+      "windowTitle": "UniComp",
+      "windowHandle": 7145030,
+      "electronPid": 14824,
+      "vitePid": 10636,
+      "responding": true,
+      "visible": true,
+      "visibleCheck": "user32.IsWindowVisible",
+      "newStartupRejectionLogged": false,
+      "normalUserProfile": true,
+      "isolatedOrMocked": false,
+      "leftOpenForUser": true,
+      "port5173Released": false,
+      "completeCommandExitCode": null,
+      "logSnapshot": "dev-final.log.gz",
+      "logSnapshotUncompressedSha256": "c617c6623a565bb33149bd1da4f62a7977601781b212a0acea1eee2e2727e534"
+    },
+    "oldProcessCleanup": {
+      "terminatedWindowlessMainPid": 17528,
+      "terminationGuard": "Exact workspace Electron executable, expected parent PID 16468, and MainWindowHandle 0",
+      "previousProcessIds": [
+        17528,
+        3664,
+        16260,
+        15276,
+        10352,
+        12472,
+        18240,
+        5936,
+        16468
+      ],
+      "remainingPreviousProcesses": 0
+    },
+    "initialDevStartup": {
+      "command": "pnpm dev",
+      "verifiedAt": "2026-10-19T11:17:19.5272221+08:00",
+      "status": "initial_startup_passed_then_vite_watcher_failed",
+      "httpStatus": 200,
+      "windowCount": 1,
+      "windowTitle": "UniComp",
+      "windowHandle": 1902076,
+      "electronPid": 3676,
+      "vitePid": 5156,
+      "responding": true,
+      "visible": true,
+      "visibleCheck": "user32.IsWindowVisible",
+      "newStartupRejectionLogged": false,
+      "normalUserProfile": true,
+      "isolatedOrMocked": false,
+      "leftOpenForUser": false,
+      "port5173Released": true,
+      "completeCommandExitCode": 1,
+      "terminationReason": "Vite EBUSY while an engineering evidence log was exclusively opened during this maintenance run"
+    },
+    "lockedEvidenceRegression": {
+      "file": "docs/evidence/dev-startup-recovery-20261019/locked-receipt-probe.log.gz",
+      "fileShare": "None",
+      "heldMilliseconds": 2500,
+      "httpStatusDuringLock": 200,
+      "visibleDuringLock": true,
+      "httpStatusAfterRelease": 200,
+      "probeFileRemoved": true,
+      "status": "passed"
+    },
+    "finalBuild": {
+      "command": "pnpm build",
+      "exitCode": 0,
+      "status": "passed",
+      "log": "build-final.log.gz",
+      "uncompressedSha256": "6fafbcc24b08c33575265d3ba4c4583e8ee8873eec5a72b0dafe0a5e087042f0"
+    },
+    "lint": {
+      "command": "pnpm lint",
+      "exitCode": 0,
+      "status": "passed",
+      "log": "lint.log.gz",
+      "uncompressedSha256": "78d03cfe059f3016a28110020d82a9303a7ab799c47308e1195df9c7635cba7a"
+    },
+    "platformAudit": {
+      "command": "pnpm audit:platform",
+      "exitCode": 0,
+      "status": "passed",
+      "log": "platform-audit.log.gz",
+      "uncompressedSha256": "cb6c09c8cde00454583543ffb1fcfed06fcb90350a5535778e4a1fec32c30508"
+    },
+    "initialBuild": {
+      "command": "pnpm build",
+      "exitCode": 0,
+      "status": "passed",
+      "warnings": [
+        "Existing Vite CJS API deprecation",
+        "Existing large bundle warning"
+      ],
+      "log": "build.log.gz",
+      "uncompressedSha256": "388f2c9378566fddf6e024da1983181bb2d1824bd6f52759758278a87641d79b"
+    }
+  },
+  "limitations": [
+    "Startup smoke test and targeted regression only; no new full product regression, macOS or paid Provider acceptance.",
+    "No rendering internals or full conversation/document flow asserted from a visible window alone.",
+    "The normal application is left running for the user; port 5173 belongs to that instance.",
+    "No commit, push or merge of this maintenance record."
+  ],
+  "nextStep": "Use the open UniComp window. Stop this development instance before starting another pnpm dev.",
+  "additionalRepair": {
+    "trigger": "This maintenance run wrote an exclusively locked compressed evidence log after the first startup",
+    "failureCode": "EBUSY",
+    "failureOperation": "watch",
+    "relativePath": "docs/evidence/dev-startup-recovery-20261019/build.log.gz",
+    "effect": "Vite exited 1 and concurrently terminated Electron",
+    "fix": "Exclude **/docs/evidence/** from Vite development watching",
+    "scope": "Engineering evidence only"
+  }
+}

@@ -167,7 +167,7 @@ export function createVideoFeatureControllerRuntime(
       options.providerPackages,
       contracts,
       options.runtimeAuthorization,
-      initializeProviderFeatureProfiles(options.providerRegistry, options.providerPackages)
+      () => initializeProviderFeatureProfiles(options.providerRegistry, options.providerPackages)
     ),
     new RouteSelectionTokenVault()
   );
@@ -435,9 +435,14 @@ export function createVideoFeatureControllerRuntime(
             options.asyncOperationPort,
             () => now()
           );
-          const poller = new ViduBoundedPoller(options.asyncOperationPort);
+          const operationRecordId = execution.providerOperationRecordId;
+          const remoteOperationId = execution.remoteOperationId;
+          const poller = new ViduBoundedPoller(options.asyncOperationPort, {
+            onStatus: async (status) => {
+              execution = await coordinator.applyObservedStatus(operationRecordId, remoteOperationId, status);
+            }
+          });
           const pollStatus = await poller.poll(execution.remoteOperationId);
-          execution = await coordinator.refresh(execution.providerOperationRecordId);
 
           if (pollStatus.state === 'polling_exhausted') {
             localResultError =

@@ -26,7 +26,7 @@ app.setPath('userData', userData);
 app.disableHardwareAcceleration();
 app.commandLine.appendSwitch('disable-background-networking');
 app.on('window-all-closed', () => {});
-const output = path.resolve('outputs/www-video-contracts', live ? caseOutput : 'electron-e2e');
+const output = path.resolve('outputs/www-video-contracts', live ? caseOutput : 'electron-parameters-e2e');
 const now = () => d.toIsoTimestamp(new Date().toISOString());
 const budgetFile = path.resolve('outputs/www-video-contracts/live/budget.json');
 let window, lifecycle, runtime, lock;
@@ -40,6 +40,12 @@ const unwrap = r => { assert.ok(r?.ok, JSON.stringify(r)); return r.value; };
 const digest = v => createHash('sha256').update(v).digest('hex');
 const delay = ms => new Promise(resolve => setTimeout(resolve, ms));
 async function main() {
+  if (!live) dialog.showMessageBox = async (_parent, options) => {
+    assert.equal(options.title, '确认本次视频费用');
+    assert.ok(options.message.includes('¥1'));
+    assert.ok(!options.detail.includes('上限'));
+    return { response: 1, checkboxChecked: false };
+  };
   await fs.mkdir(output, { recursive: true });
   await app.whenReady();
   session.defaultSession.webRequest.onBeforeRequest((details, callback) => {
@@ -150,12 +156,22 @@ async function main() {
     } else if (request.method === 'POST') {
       const original = { ...body }; for (const key of ['operation', 'expected_input_digest', 'expected_quote_amount', 'expected_price_version']) delete original[key];
       assert.deepEqual(original, quotedInputs.get(body.expected_input_digest ?? digest(JSON.stringify(original))));
-      const id = `task-www-${resultTasks.size}`; resultTasks.set(id, { model: body.model, h3: body.model === 'MiniMax-H3' }); data = { id, model: body.model, status: 'queued' };
-    } else if (url.pathname.endsWith('/content')) return { status: 200, headers: { 'content-type': 'video/mp4' }, body: mp4 };
+      const id = `task-www-${resultTasks.size}`; resultTasks.set(id, { model: body.model, h3: body.model === 'MiniMax-H3', polls: 0 }); data = { id, model: body.model, status: 'queued' };
+    } else if (url.pathname.endsWith('/content')) {
+      const task = resultTasks.get(url.pathname.split('/').at(-2)); assert.ok(task);
+      task.downloads = (task.downloads ?? 0) + 1;
+      if (task.h3 && task.downloads === 1) throw new Error('synthetic transient private-content GET failure');
+      return { status: 200, headers: { 'content-type': 'video/mp4' }, body: mp4 };
+    }
     else {
       const id = url.pathname.split('/').at(-1); const task = resultTasks.get(id); assert.ok(task);
-      data = { id, model: task.model, status: 'succeeded', review_phase: 'output_approved', billing: { currency: 'CNY_MICRO', charged_amount: 1_000_000, settlement_pending: false },
-        data: [{ asset_id: `asset-${id}`, url: `${url.pathname}/content?asset_id=asset-${id}` }] };
+      task.polls++;
+      if (task.h3 && task.polls === 1) throw new Error('synthetic transient original-task GET failure');
+      if (task.h3 && task.polls === 2) return { status: 200, headers, body: encode({ id, model: task.model, status: 'processing' }) };
+      data = { id, model: task.model, status: 'succeeded', billing: { currency: 'CNY_MICRO', charged_amount: 1_000_000, settlement_pending: false },
+        ...(task.h3 ? { output_type: 'video', review_phase: undefined,
+          data: { asset_id: `asset-${id}`, url: `/v1/videos/${id}/content?asset_id=asset-${id}`, mime_type: 'video/mp4' } } :
+          { review_phase: 'output_approved', data: [{ asset_id: `asset-${id}`, url: `${url.pathname}/content?asset_id=asset-${id}` }] }) };
       if (task.h3) assert.equal(url.searchParams.get('refresh'), 'true');
     }
     return { status: 200, headers, body: encode(data) };
@@ -197,14 +213,16 @@ async function main() {
       draft = unwrap(await js(`window.unicomp.videoWorkspaces.get(${JSON.stringify(draft.draftId)})`));
       draft.prompt = { originalInput: 'Synthetic orange cup.', finalPrompt: 'Synthetic orange cup.', systemSupplements: [] };
     }
-    draft.state = 'saved'; draft.featureSelection = { productFeature: feature, parameterValues: { maximum_cost_cny: live ? availableCnyMicro / 1_000_000 : 5,
+    draft.state = 'saved'; draft.featureSelection = { productFeature: feature, parameterValues: {
       ...(feature === 'image_to_video' && c.fields.some(f => f.name === 'generation_mode') ? { generation_mode: 'first_frame' } : {}),
       ...(live ? { resolution: '480P', duration_seconds: c.modelKey.startsWith('happyhorse') ? 3 : 2, ...(c.modelKey.startsWith('wan') ? { generate_audio: false } : {}) } : {}) } };
     draft = unwrap(await js(`window.unicomp.videoWorkspaces.update(${JSON.stringify(draft)})`));
     const candidates = unwrap(await js(`window.unicomp.videoFeatures.listCandidates(${JSON.stringify(draft.draftId)}, ${JSON.stringify(draft.updatedAt)})`));
     const candidate = candidates.find(x => x.modelName === c.modelKey && x.available); assert.ok(candidate, JSON.stringify(candidates));
     draft.featureSelection = { ...draft.featureSelection, candidateId: candidate.candidateId, parameterSchemaId: candidate.parameterSchema.schemaId, parameterSchemaRevision: candidate.parameterSchema.revision };
+    if (!live && c.modelKey === 'MiniMax-H3') draft.featureSelection.parameterValues.maximum_cost_cny = 999;
     draft = unwrap(await js(`window.unicomp.videoWorkspaces.update(${JSON.stringify(draft)})`));
+    assert.equal(draft.featureSelection.parameterValues.maximum_cost_cny, undefined);
     const prepare = unwrap(await js(`window.unicomp.videoFeatures.prepareSubmission(${JSON.stringify(draft.draftId)}, ${JSON.stringify(draft.updatedAt)}, ${JSON.stringify(candidate.candidateId)})`));
     const receipt = unwrap(await js(`window.unicomp.videoFeatures.submitDraft(${JSON.stringify(draft.draftId)}, ${JSON.stringify(draft.updatedAt)}, ${JSON.stringify(prepare.routeSelectionToken)}, ${JSON.stringify(prepare.confirmation.confirmationId)}, true)`));
     assert.ok(receipt.taskId, JSON.stringify(receipt));
@@ -217,6 +235,13 @@ async function main() {
     const local = await p.resolveFileReferencePathSafely(rootDirectory, file);
     assert.equal(digest(await fs.readFile(local)), file.checksumSha256);
     assert.ok((await new p.NodeVideoInspector().inspect(local)).durationMs > 0);
+    if (!live) {
+      const execution = await new p.JsonExecutionRepository(storage, projectId).get(receipt.executionId);
+      const originalTask = resultTasks.get(execution.remoteOperationId);
+      // Consume completion directly and reuse its validated descriptor for landing.
+      assert.equal(originalTask.polls, c.modelKey === 'MiniMax-H3' ? 3 : 1);
+      assert.equal(originalTask.downloads, c.modelKey === 'MiniMax-H3' ? 2 : 1);
+    }
     // Completed tasks have no download debt. A recovery attempt must not create a second Work or generation.
     const recovery = await js(`window.unicomp.videoFeatures.recoverResult(${JSON.stringify(receipt.taskId)})`);
     assert.ok(recovery.ok || recovery.error.code === 'storage_error');

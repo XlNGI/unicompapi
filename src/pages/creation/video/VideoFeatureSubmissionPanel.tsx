@@ -826,7 +826,7 @@ export function VideoFeatureSubmissionPanel({
               <strong>已锁定参数合同</strong>
               参数配置版本 {selectedCandidate.parameterSchema.revision}
             </span>
-            <span><strong>费用</strong>{costLabel(selectedCandidate.cost)}</span>
+            <span><strong>费用</strong>{selectedCandidate.parameterSchema.schemaId.startsWith('parameters.unicompapi-www.') ? '生成前获取实时报价，确认后提交' : costLabel(selectedCandidate.cost)}</span>
             <StatusPill tone={selectedCandidate.available ? 'success' : 'warning'}>
               {selectedCandidate.available ? '可准备' : '当前不可用'}
             </StatusPill>

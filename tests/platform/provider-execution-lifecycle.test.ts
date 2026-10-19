@@ -266,6 +266,11 @@ describe('provider execution lifecycle', () => {
       },
       () => t2
     );
+    await expect(coordinator.applyObservedStatus(toProviderOperationRecordId('record-provider-async'), 'foreign-task', { state: 'completed' }))
+      .rejects.toThrow('provider operation ID mismatch');
+    await expect(coordinator.applyObservedStatus(toProviderOperationRecordId('record-provider-async'), 'synthetic-task-id', { state: 'queued' }))
+      .resolves.toMatchObject({ state: 'queued', updatedAt: t2 });
+    expect(queries).toEqual([]);
     await expect(
       coordinator.refresh(toProviderOperationRecordId('record-provider-async'))
     ).resolves.toMatchObject({ state: 'remote_completed' });

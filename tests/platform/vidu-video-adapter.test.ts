@@ -36,6 +36,7 @@ import {
   type ViduVideoOperationContext
 } from '../../src/platform';
 import { createUserViduRegistryRecords } from '../fixtures/vidu-user-registry';
+import { NewApiRuntimeError } from '../../src/platform/providers/newapi/newapi-runtime';
 
 const roots: string[] = [];
 const timestamp = toIsoTimestamp('2026-07-29T00:00:00.000Z');
@@ -267,7 +268,37 @@ describe('Vidu Q3 reference video adapter', () => {
     await expect(poller.poll('task-q3-remote')).resolves.toEqual({
       state: 'completed'
     });
-    expect(delays).toEqual([100, 200, 250]);
+    expect(delays).toEqual([250, 200, 250]);
+  });
+
+  it.each([new NewApiRuntimeError('timeout', 'retryable'), new NewApiRuntimeError('network_error', 'unknown')])(
+    'retries transient read-only NewAPI query failures and persists each observed state', async error => {
+      let queries = 0;
+      const states: string[] = [];
+      const controller = new AbortController();
+      const poller = new ViduBoundedPoller({ query: async (_id, signal) => {
+        expect(signal).toBe(controller.signal);
+        queries++;
+        if (queries === 1) throw error;
+        return { state: queries === 2 ? 'processing' : 'completed' };
+      }, cancel: async () => ({ state: 'processing' }) }, {
+        maximumAttempts: 3, wait: async () => undefined, onStatus: async status => { states.push(status.state); }
+      });
+      expect(await poller.poll('original-task', controller.signal)).toEqual({ state: 'completed' });
+      expect(queries).toBe(3); expect(states).toEqual(['processing', 'completed']);
+    }
+  );
+  it('bounds network query failures and never retries authentication or malformed responses', async () => {
+    for (const error of [new NewApiRuntimeError('invalid_response', 'not_retryable'), new NewApiRuntimeError('credential_unavailable', 'not_retryable')]) {
+      let calls = 0;
+      const poller = new ViduBoundedPoller({ query: async () => { calls++; throw error; }, cancel: async () => ({ state: 'processing' }) },
+        { maximumAttempts: 3, wait: async () => undefined });
+      await expect(poller.poll('original')).rejects.toBe(error); expect(calls).toBe(1);
+    }
+    let calls = 0;
+    const poller = new ViduBoundedPoller({ query: async () => { calls++; throw new NewApiRuntimeError('network_error', 'unknown'); },
+      cancel: async () => ({ state: 'processing' }) }, { maximumAttempts: 3, wait: async () => undefined });
+    expect(await poller.poll('original')).toEqual({ state: 'polling_exhausted' }); expect(calls).toBe(3);
   });
 
   it('rediscovers results after restart and downloads only controlled HTTPS video bytes', async () => {

@@ -1,0 +1,11 @@
+{
+  "status": "passed",
+  "checks": [
+    "H3 generate types allow audio off and free resolution; no inherited action limits",
+    "five gateway parameters and separate cost authorization",
+    "same-turn buffered model and cost edits saved together before preflight"
+  ],
+  "errors": [],
+  "externalRequests": 0,
+  "boundaries": "production React workbench; isolated local IPC; no provider call; quote approval verified in native Host suite"
+}

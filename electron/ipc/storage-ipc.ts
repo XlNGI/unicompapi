@@ -475,6 +475,8 @@ export function registerStorageIpcHandlers(options: {
     prepareProjectStorage: prepareProviderResultHistory,
     onError: () => console.error('Project result history maintenance failed; original records remain readable'),
     chooseProjectDirectory: () => choosePath(['openDirectory']),
+    trashProjectDirectory: directory => shell.trashItem(directory),
+    protectedDirectories: [app.getPath('userData'), app.getAppPath()],
     beforeSessionChange: async () => {
       await Promise.all([
         controller.waitForMutations(),
@@ -529,6 +531,13 @@ export function registerStorageIpcHandlers(options: {
   ipcMain.handle(storageIpcChannels.listProjects, () =>
     projectController.listProjects()
   );
+  ipcMain.handle(storageIpcChannels.removeProject, async (_event, request: unknown) => {
+    const result = await projectController.removeProject(request);
+    // Invalidate even on failure: files may have reached trash before a catalog write failed.
+    await projectStorageMonitor.sync();
+    projectStorageMonitor.publishNow();
+    return result;
+  });
   ipcMain.handle(storageIpcChannels.listProjectConversationSummaries, (_event, request: unknown) =>
     projectController.listProjectConversationSummaries(request)
   );

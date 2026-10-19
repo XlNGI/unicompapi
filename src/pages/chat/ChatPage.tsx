@@ -40,6 +40,7 @@ import { projectTaskProgress } from '../../shared/conversation-task-progress';
 import { ModelSelect } from '../../components/ModelSelect';
 import { StatusPill } from '../../components/StatusPill';
 import { ProjectsPage } from '../projects/ProjectsPage';
+import { ProjectRemovalDialog } from '../../components/ProjectRemovalDialog';
 import type {
   ChatContextIpcErrorCode,
   ConversationDto,
@@ -70,6 +71,7 @@ import { composeWorkflowRequirements, composeResearchInput } from './workflowInp
 import {
   notifyProjectSessionChanged,
   PROJECT_SESSION_CHANGED_EVENT,
+  PROJECT_CATALOG_CHANGED_EVENT,
   registerProjectSwitchGuard
 } from '../../ui/project-session-events';
 import { failedResponseNotice, responseFailureFactsFromTrace } from '../../ui/chat-response-failure-notice';
@@ -791,6 +793,7 @@ export function ChatPage({
   const [searchQuery, setSearchQuery] = useState('');
   const [projectCreateOpen, setProjectCreateOpen] = useState(false);
   const [projectManagementOpen, setProjectManagementOpen] = useState(false);
+  const [removingProject, setRemovingProject] = useState<StorageProjectSummaryDto>();
   const [projectCreateName, setProjectCreateName] = useState('');
   const [conversations, setConversations] = useState<readonly ConversationDto[]>([]);
   const [threadSummaryStore, setThreadSummaryStore] = useState<ThreadSummaryStore>(() => createThreadSummaryStore());
@@ -1227,11 +1230,13 @@ export function ChatPage({
     const refresh = () => { void load({ quiet: true }); };
     window.addEventListener('focus', refresh);
     window.addEventListener(PROJECT_SESSION_CHANGED_EVENT, refresh);
+    window.addEventListener(PROJECT_CATALOG_CHANGED_EVENT, refresh);
     return () => {
       active = false;
       unregisterProjectSwitchGuard();
       window.removeEventListener('focus', refresh);
       window.removeEventListener(PROJECT_SESSION_CHANGED_EVENT, refresh);
+      window.removeEventListener(PROJECT_CATALOG_CHANGED_EVENT, refresh);
     };
   }, [chat, documentGeneration, storage, threadReadsEnabled]);
 
@@ -3468,6 +3473,7 @@ export function ChatPage({
                   : chatsByProject[project.projectId] ?? [];
                 return (
                   <div className="uc-chat-page__project-group" key={project.projectId}>
+                    <div className="uc-chat-page__project-row">
                     <button
                       aria-current={isCurrent ? 'true' : undefined}
                       aria-expanded={expanded}
@@ -3481,6 +3487,14 @@ export function ChatPage({
                       <span>{project.projectName}</span>
                       {expanded ? <LuChevronDown aria-hidden="true" /> : <LuChevronRight aria-hidden="true" />}
                     </button>
+                    <ActionMenu
+                      ariaLabel={`管理项目：${project.projectName}`}
+                      items={[{ key: 'remove', label: project.availability === 'available' ? '删除项目' : '移除失效项目', danger: true,
+                        disabled: busy || (isCurrent && projectSwitchBlockedRef.current) }]}
+                      onSelect={key => { if (key === 'remove') setRemovingProject(project); }}
+                      toggleClassName="uc-chat-page__icon-button"
+                    />
+                    </div>
                     {expanded ? (
                       <div className="uc-chat-page__workspace-conversations uc-scrollbar">
                         {projectChats.length === 0 ? (
@@ -4391,6 +4405,17 @@ export function ChatPage({
           <ProjectsPage onNavigate={onNavigateToCreation} />
         </Modal.Body>
       </Modal>
+
+      {removingProject && <ProjectRemovalDialog
+        allowTrash={removingProject.availability === 'available'}
+        onCancel={() => setRemovingProject(undefined)}
+        onRemoved={result => {
+          setRemovingProject(undefined);
+          setProjects(current => current.filter(project => project.projectId !== result.projectId));
+          setNotice(result.filesTrashed ? '项目已移到系统回收站。' : '项目记录已移除，本地文件保留。');
+        }}
+        project={removingProject}
+      />}
 
       <Modal
         className="uc-chat-page__rename-dialog"

@@ -29,11 +29,11 @@ export function wwwRoute(key: string, feature?: ProductFeature) {
     modelId: toModelId(`model-www-${key}`), providerModelKey: key, modelRevision: 1, profileId: `profile-www-${key}`, profileRevision: 1,
     protocolBindingId: toProtocolBindingId('binding-www-fixture'), protocolBindingRevision: 1, productFeature: f,
     internalPurpose: f === 'text_to_video' ? 'video_generation' : 'reference_to_video', featureMappingVersion: 1,
-    parameterSchemaId: wwwVideoParameterSchema(contract, f).schemaId, parameterSchemaRevision: 1,
+    parameterSchemaId: wwwVideoParameterSchema(contract, f).schemaId, parameterSchemaRevision: contract.revision,
     resultSchemaId: NEWAPI_VIDEO_RESULT_SCHEMA_ID, resultSchemaRevision: 1, usageSchemaId: wwwVideoUsageSchema.id, usageSchemaRevision: 1,
     constraintSetId: wwwVideoConstraint(f), constraintSetRevision: 1, runtimePolicyId: 'runtime-www-fixture', runtimePolicyRevision: 1,
     runtimeAuthorizationClaimId: 'claim-www-fixture', createdAt: wwwTime,
-    parameterContract: { schemaVersion: 1, contractId: contract.id, contractRevision: 1, contractFingerprint: wwwVideoContractFingerprint(contract), rules: [] } });
+    parameterContract: { schemaVersion: 1, contractId: contract.id, contractRevision: contract.revision, contractFingerprint: wwwVideoContractFingerprint(contract), rules: [] } });
 }
 export function wwwAdapterFixture(key = 'happyhorse-1.1-t2v', feature?: ProductFeature) {
   const route = wwwRoute(key, feature);
@@ -44,6 +44,9 @@ export function wwwAdapterFixture(key = 'happyhorse-1.1-t2v', feature?: ProductF
   let task: Record<string, unknown> = { id: 'remote-www-fixture', model: key, status: 'queued' };
   let submitError = false;
   let lookup: Record<string, unknown> = {};
+  let approval = true;
+  let downloadFailures = 0;
+  const approvals: { quotedAmountCnyMicro: number; modelKey: string }[] = [];
   const runtime = new NewApiSharedRuntime({ transport: { async send(request): Promise<NewApiHttpTransportResponse> {
     calls.push(request);
     const url = new URL(request.url);
@@ -53,7 +56,10 @@ export function wwwAdapterFixture(key = 'happyhorse-1.1-t2v', feature?: ProductF
     else if (url.pathname === '/v1/requests') data = lookup;
     else if (url.pathname.endsWith('/quote') || body.operation === 'quote') data = quoted;
     else if (request.method === 'POST') { if (submitError) throw new Error('synthetic disconnect'); data = { id: task.id, model: key, status: 'queued' }; }
-    else if (url.pathname.endsWith('/content')) return { status: 200, headers: { 'content-type': 'video/mp4' }, body: new Uint8Array([1, 2, 3]) };
+    else if (url.pathname.endsWith('/content')) {
+      if (downloadFailures-- > 0) throw new Error('synthetic content GET disconnect');
+      return { status: 200, headers: { 'content-type': 'video/mp4' }, body: new Uint8Array([1, 2, 3]) };
+    }
     else data = task;
     return { status: 200, headers: { 'content-type': 'application/json', 'x-unicomp-request-id': 'request-www-fixture' }, body: new TextEncoder().encode(JSON.stringify(data)) };
   } } });
@@ -63,13 +69,17 @@ export function wwwAdapterFixture(key = 'happyhorse-1.1-t2v', feature?: ProductF
     { get: async () => wwwVideoParameterSchema(wwwVideoContract(key)!, route.productFeature) },
     { resolve: async ({ assetId }) => ({ assetId, mimeType: 'image/png', width: 1280, height: 720, sizeBytes: 3, bytes: imageBytes }) },
     { append: async o => { usage.push(o); } }, { nextProviderUsageObservationId: () => toProviderUsageObservationId('usage-www-fixture') },
-    undefined, { resolve: async ({ assetId }) => ({ assetId, mimeType: 'video/mp4', durationMs: 4000, sizeBytes: 3, bytes: imageBytes }) });
+    undefined, { resolve: async ({ assetId }) => ({ assetId, mimeType: 'video/mp4', durationMs: 4000, sizeBytes: 3, bytes: imageBytes }) },
+    { confirm: async input => { approvals.push(input); return approval; } });
   const request = { projectId: route.projectId, prompt: 'A synthetic orange cup on a white table.', invocationAttemptId: toProviderInvocationAttemptId('attempt-www-fixture'),
-    parameterValues: { maximum_cost_cny: 5 }, ...(route.productFeature === 'image_to_video' || route.productFeature === 'video_edit' ? { assetId: 'asset-www-fixture' } : {}) };
-  return { route, request, adapter, calls, usage, setConnection: (v: ProviderConnection) => { connection = v; },
+    parameterValues: {  }, ...(route.productFeature === 'image_to_video' || route.productFeature === 'video_edit' ? { assetId: 'asset-www-fixture' } : {}) };
+  return { route, request, adapter, calls, usage, approvals, setApproval: (value: boolean) => { approval = value; }, setConnection: (v: ProviderConnection) => { connection = v; },
+    setDownloadFailures: (count: number) => { downloadFailures = count; },
     setQuote: (v: Record<string, unknown>) => { quoted = { ...quoted, ...v }; }, setTask: (v: Record<string, unknown>) => { task = { ...task, ...v }; },
     disconnect: (value: Record<string, unknown> = {}) => { submitError = true; lookup = value; },
-    complete: (asset = 'result-www-fixture') => { task = { ...task, status: 'succeeded', review_phase: 'output_approved',
+    complete: (asset = 'result-www-fixture') => { task = { ...task, status: 'succeeded',
       billing: { currency: 'CNY_MICRO', charged_amount: 1_000_000, settlement_pending: false },
-      data: [{ asset_id: asset, url: `/v1/${key === 'MiniMax-H3' ? 'h3/tasks' : 'videos'}/${task.id}/content?asset_id=${asset}` }] }; } };
+      ...(key === 'MiniMax-H3' ? { output_type: 'video', review_phase: undefined,
+        data: { asset_id: asset, url: `/v1/videos/${task.id}/content?asset_id=${asset}`, mime_type: 'video/mp4' } } :
+        { review_phase: 'output_approved', data: [{ asset_id: asset, url: `/v1/videos/${task.id}/content?asset_id=${asset}` }] }) }; } };
 }

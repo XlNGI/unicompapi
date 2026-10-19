@@ -37,6 +37,7 @@ export type VideoFeatureIpcResult<T> =
     };
 
 export interface VideoFeatureParameterFieldDto {
+  readonly validationSchema?: Readonly<Record<string, unknown>>;
   readonly fieldId: string;
   readonly labelId: string;
   readonly groupId?: string;

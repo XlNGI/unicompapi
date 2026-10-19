@@ -1,0 +1,976 @@
+{
+  "schemaVersion": 1,
+  "contracts": [
+    {
+      "id": "relay.unicompapi-www.MiniMax-H3.video",
+      "revision": 2,
+      "authority": "relay",
+      "modelKey": "MiniMax-H3",
+      "action": "generate",
+      "parameterEvidence": "documented_example_types_quote_validated",
+      "source": {
+        "url": "https://www.unicompapi.com/docs/models/MiniMax-H3",
+        "retrievedAt": "2026-10-15T07:38:33.562Z",
+        "sha256": "7b39d5be0950d0c5f08eab00a49133d5f972075c1d4a44f64f97d56ddedc23a7"
+      },
+      "vendorContractId": "official.minimax.MiniMax-H3.video",
+      "protocol": "h3-actions",
+      "features": [
+        "text_to_video"
+      ],
+      "fields": [
+        {
+          "name": "resolution",
+          "schema": {
+            "type": "string"
+          }
+        },
+        {
+          "name": "ratio",
+          "schema": {
+            "type": "string"
+          }
+        },
+        {
+          "name": "duration",
+          "schema": {
+            "type": "integer"
+          }
+        },
+        {
+          "name": "generate_audio",
+          "schema": {
+            "type": "boolean"
+          }
+        },
+        {
+          "name": "watermark",
+          "schema": {
+            "type": "boolean"
+          }
+        }
+      ],
+      "quoteBinding": "input_digest_and_price",
+      "referenceBinding": "explicit_roles",
+      "maximumPromptLength": 2500,
+      "imageLimits": {
+        "maximum": 9,
+        "minimumSide": 300,
+        "maximumSide": 6000,
+        "maximumPixels": 36000000,
+        "maximumBytes": 20971520
+      }
+    },
+    {
+      "id": "relay.unicompapi-www.doubao-seedance-2-0-260128.video",
+      "revision": 1,
+      "authority": "relay",
+      "modelKey": "doubao-seedance-2-0-260128",
+      "source": {
+        "url": "https://www.unicompapi.com/docs/models/doubao-seedance-2-0-260128",
+        "retrievedAt": "2026-10-15T07:38:34.718Z",
+        "sha256": "d9389370bcec312cae97e424fa68727589e90233cfcb781e82600567b48e8dfe"
+      },
+      "vendorContractId": "official.volcengine.seedance-2.0.video",
+      "protocol": "unicomp.media.v1",
+      "features": [
+        "text_to_video",
+        "image_to_video"
+      ],
+      "fields": [
+        {
+          "name": "generation_mode",
+          "schema": {
+            "type": "string",
+            "enum": [
+              "text_to_video",
+              "first_frame",
+              "first_last_frame",
+              "reference_images",
+              "reference_media"
+            ]
+          }
+        },
+        {
+          "name": "omni_reference_task_type",
+          "schema": {
+            "type": "string",
+            "enum": [
+              "auto",
+              "reference"
+            ]
+          }
+        },
+        {
+          "name": "resolution",
+          "schema": {
+            "type": "string",
+            "enum": [
+              "480P",
+              "720P",
+              "1080P",
+              "4K"
+            ]
+          }
+        },
+        {
+          "name": "aspect_ratio",
+          "schema": {
+            "type": "string",
+            "enum": [
+              "16:9",
+              "9:16",
+              "4:3",
+              "3:4",
+              "1:1",
+              "21:9",
+              "adaptive"
+            ]
+          }
+        },
+        {
+          "name": "duration_seconds",
+          "schema": {
+            "type": "integer",
+            "enum": [
+              -1,
+              4,
+              5,
+              6,
+              7,
+              8,
+              9,
+              10,
+              11,
+              12,
+              13,
+              14,
+              15
+            ]
+          }
+        },
+        {
+          "name": "frames",
+          "schema": {
+            "type": "integer",
+            "minimum": 29,
+            "maximum": 289,
+            "enum": [
+              29,
+              33,
+              37,
+              41,
+              45,
+              49,
+              53,
+              57,
+              61,
+              65,
+              69,
+              73,
+              77,
+              81,
+              85,
+              89,
+              93,
+              97,
+              101,
+              105,
+              109,
+              113,
+              117,
+              121,
+              125,
+              129,
+              133,
+              137,
+              141,
+              145,
+              149,
+              153,
+              157,
+              161,
+              165,
+              169,
+              173,
+              177,
+              181,
+              185,
+              189,
+              193,
+              197,
+              201,
+              205,
+              209,
+              213,
+              217,
+              221,
+              225,
+              229,
+              233,
+              237,
+              241,
+              245,
+              249,
+              253,
+              257,
+              261,
+              265,
+              269,
+              273,
+              277,
+              281,
+              285,
+              289
+            ]
+          }
+        },
+        {
+          "name": "generate_audio",
+          "schema": {
+            "type": "boolean"
+          }
+        },
+        {
+          "name": "watermark",
+          "schema": {
+            "type": "boolean"
+          }
+        },
+        {
+          "name": "return_last_frame",
+          "schema": {
+            "type": "boolean"
+          }
+        },
+        {
+          "name": "seed",
+          "schema": {
+            "type": "integer",
+            "minimum": -1,
+            "maximum": 2147483647
+          }
+        },
+        {
+          "name": "output_format",
+          "schema": {
+            "type": "string",
+            "enum": [
+              "mp4"
+            ]
+          }
+        },
+        {
+          "name": "camera_fixed",
+          "schema": {
+            "type": "boolean"
+          }
+        },
+        {
+          "name": "priority",
+          "schema": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 9
+          }
+        }
+      ],
+      "quoteBinding": "input_digest_and_price",
+      "referenceBinding": "explicit_roles",
+      "maximumPromptLength": 2500,
+      "imageLimits": {
+        "maximum": 9,
+        "minimumSide": 300,
+        "maximumSide": 6000,
+        "maximumPixels": 36000000,
+        "maximumBytes": 29999999
+      },
+      "uploadProfile": "seedance-reference"
+    },
+    {
+      "id": "relay.unicompapi-www.happyhorse-1.1-t2v.video",
+      "revision": 1,
+      "authority": "relay",
+      "modelKey": "happyhorse-1.1-t2v",
+      "source": {
+        "url": "https://www.unicompapi.com/docs/models/happyhorse-1.1-t2v",
+        "retrievedAt": "2026-10-15T07:38:35.854Z",
+        "sha256": "659889b87e19ed68754a4b33ba23e97437b1621ccff4c34837c711f1dd8da533"
+      },
+      "protocol": "unicomp.media.v1",
+      "features": [
+        "text_to_video"
+      ],
+      "fields": [
+        {
+          "name": "resolution",
+          "schema": {
+            "type": "string",
+            "enum": [
+              "480P",
+              "720P",
+              "1080P"
+            ]
+          }
+        },
+        {
+          "name": "aspect_ratio",
+          "schema": {
+            "type": "string",
+            "enum": [
+              "16:9",
+              "9:16",
+              "1:1",
+              "4:3",
+              "3:4",
+              "4:5",
+              "5:4",
+              "9:21",
+              "21:9"
+            ]
+          }
+        },
+        {
+          "name": "duration_seconds",
+          "schema": {
+            "type": "integer",
+            "minimum": 3,
+            "maximum": 15
+          }
+        },
+        {
+          "name": "watermark",
+          "schema": {
+            "type": "boolean"
+          }
+        },
+        {
+          "name": "seed",
+          "schema": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 2147483647
+          }
+        }
+      ],
+      "quoteBinding": "price_version_and_amount",
+      "referenceBinding": "asset_ids",
+      "maximumPromptLength": 2500,
+      "imageLimits": {
+        "maximum": 9,
+        "minimumSide": 300,
+        "maximumSide": 8192,
+        "maximumPixels": 16000000,
+        "maximumBytes": 20971520,
+        "maximumTotalBytes": 20971520
+      }
+    },
+    {
+      "id": "relay.unicompapi-www.happyhorse-1.1-i2v.video",
+      "revision": 1,
+      "authority": "relay",
+      "modelKey": "happyhorse-1.1-i2v",
+      "source": {
+        "url": "https://www.unicompapi.com/docs/models/happyhorse-1.1-i2v",
+        "retrievedAt": "2026-10-15T07:38:36.983Z",
+        "sha256": "dd851b38b4198f7a1fcd1c169d910615da5989b42d54443a33b48927ee805728"
+      },
+      "protocol": "unicomp.media.v1",
+      "features": [
+        "image_to_video"
+      ],
+      "fields": [
+        {
+          "name": "resolution",
+          "schema": {
+            "type": "string",
+            "enum": [
+              "480P",
+              "720P",
+              "1080P"
+            ]
+          }
+        },
+        {
+          "name": "duration_seconds",
+          "schema": {
+            "type": "integer",
+            "minimum": 3,
+            "maximum": 15
+          }
+        },
+        {
+          "name": "watermark",
+          "schema": {
+            "type": "boolean"
+          }
+        },
+        {
+          "name": "seed",
+          "schema": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 2147483647
+          }
+        }
+      ],
+      "quoteBinding": "price_version_and_amount",
+      "referenceBinding": "asset_ids",
+      "maximumPromptLength": 2500,
+      "imageLimits": {
+        "maximum": 1,
+        "minimumSide": 300,
+        "maximumSide": 8192,
+        "maximumPixels": 16000000,
+        "maximumBytes": 20971520,
+        "maximumTotalBytes": 20971520
+      }
+    },
+    {
+      "id": "relay.unicompapi-www.happyhorse-1.1-r2v.video",
+      "revision": 1,
+      "authority": "relay",
+      "modelKey": "happyhorse-1.1-r2v",
+      "source": {
+        "url": "https://www.unicompapi.com/docs/models/happyhorse-1.1-r2v",
+        "retrievedAt": "2026-10-15T07:38:38.119Z",
+        "sha256": "26f03fc536192a01552c374ee4a09b7c7a8af2d9a68fe0ba417f5b97fc14c795"
+      },
+      "protocol": "unicomp.media.v1",
+      "features": [
+        "image_to_video"
+      ],
+      "fields": [
+        {
+          "name": "resolution",
+          "schema": {
+            "type": "string",
+            "enum": [
+              "480P",
+              "720P",
+              "1080P"
+            ]
+          }
+        },
+        {
+          "name": "aspect_ratio",
+          "schema": {
+            "type": "string",
+            "enum": [
+              "16:9",
+              "9:16",
+              "1:1",
+              "4:3",
+              "3:4",
+              "4:5",
+              "5:4",
+              "9:21",
+              "21:9"
+            ]
+          }
+        },
+        {
+          "name": "duration_seconds",
+          "schema": {
+            "type": "integer",
+            "minimum": 3,
+            "maximum": 15
+          }
+        },
+        {
+          "name": "watermark",
+          "schema": {
+            "type": "boolean"
+          }
+        },
+        {
+          "name": "seed",
+          "schema": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 2147483647
+          }
+        }
+      ],
+      "quoteBinding": "price_version_and_amount",
+      "referenceBinding": "asset_ids",
+      "maximumPromptLength": 2500,
+      "imageLimits": {
+        "maximum": 9,
+        "minimumSide": 400,
+        "maximumSide": 8192,
+        "maximumPixels": 16000000,
+        "maximumBytes": 20971520,
+        "maximumTotalBytes": 20971520
+      }
+    },
+    {
+      "id": "relay.unicompapi-www.wan3.0-video.video",
+      "revision": 1,
+      "authority": "relay",
+      "modelKey": "wan3.0-video",
+      "source": {
+        "url": "https://www.unicompapi.com/docs/models/wan3.0-video",
+        "retrievedAt": "2026-10-15T07:38:39.237Z",
+        "sha256": "ef3b75f8be5f357e8e9ecb6b50c266fa1f6bf70968341347f947507d16aa3625"
+      },
+      "protocol": "unicomp.media.v1",
+      "features": [
+        "text_to_video",
+        "image_to_video"
+      ],
+      "fields": [
+        {
+          "name": "resolution",
+          "schema": {
+            "type": "string",
+            "enum": [
+              "480P",
+              "720P",
+              "1080P"
+            ]
+          }
+        },
+        {
+          "name": "aspect_ratio",
+          "schema": {
+            "type": "string",
+            "enum": [
+              "adaptive",
+              "16:9",
+              "4:3",
+              "1:1",
+              "3:4",
+              "9:16"
+            ]
+          }
+        },
+        {
+          "name": "duration_seconds",
+          "schema": {
+            "type": "integer",
+            "enum": [
+              -1,
+              2,
+              3,
+              4,
+              5,
+              6,
+              7,
+              8,
+              9,
+              10,
+              11,
+              12,
+              13,
+              14,
+              15,
+              16,
+              17,
+              18,
+              19,
+              20,
+              21,
+              22,
+              23,
+              24,
+              25,
+              26,
+              27,
+              28,
+              29,
+              30
+            ]
+          }
+        },
+        {
+          "name": "generate_audio",
+          "schema": {
+            "type": "boolean"
+          }
+        },
+        {
+          "name": "generation_mode",
+          "schema": {
+            "type": "string",
+            "enum": [
+              "text_to_video",
+              "first_frame",
+              "last_frame",
+              "first_last_frame",
+              "reference_images",
+              "reference_media",
+              "file_link"
+            ]
+          }
+        },
+        {
+          "name": "watermark",
+          "schema": {
+            "type": "boolean"
+          }
+        },
+        {
+          "name": "seed",
+          "schema": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 2147483647
+          }
+        }
+      ],
+      "quoteBinding": "input_digest_and_price",
+      "referenceBinding": "explicit_roles",
+      "maximumPromptLength": 20000,
+      "imageLimits": {
+        "maximum": 10,
+        "minimumSide": 240,
+        "maximumSide": 8000,
+        "maximumPixels": 64000000,
+        "maximumBytes": 20971520,
+        "maximumTotalBytes": 20971520
+      }
+    },
+    {
+      "id": "relay.unicompapi-www.wan3.0-video-ali.video",
+      "revision": 1,
+      "authority": "relay",
+      "modelKey": "wan3.0-video-ali",
+      "source": {
+        "url": "https://www.unicompapi.com/docs/models/wan3.0-video-ali",
+        "retrievedAt": "2026-10-15T07:38:40.381Z",
+        "sha256": "bb18bb1311672cf2ee9105680957d36520f346eecafe83d5c03fb23fffa43ecb"
+      },
+      "protocol": "unicomp.media.v1",
+      "features": [
+        "text_to_video",
+        "image_to_video"
+      ],
+      "fields": [
+        {
+          "name": "generation_mode",
+          "schema": {
+            "type": "string",
+            "enum": [
+              "text_to_video",
+              "first_frame",
+              "first_last_frame",
+              "reference_images",
+              "reference_video",
+              "reference_audio",
+              "reference_media",
+              "video_edit",
+              "video_extend"
+            ]
+          }
+        },
+        {
+          "name": "resolution",
+          "schema": {
+            "type": "string",
+            "enum": [
+              "480P",
+              "720P",
+              "1080P"
+            ]
+          }
+        },
+        {
+          "name": "aspect_ratio",
+          "schema": {
+            "type": "string",
+            "enum": [
+              "adaptive",
+              "21:9",
+              "16:9",
+              "4:3",
+              "1:1",
+              "3:4",
+              "9:16"
+            ]
+          }
+        },
+        {
+          "name": "duration_seconds",
+          "schema": {
+            "type": "integer",
+            "enum": [
+              -1,
+              2,
+              3,
+              4,
+              5,
+              6,
+              7,
+              8,
+              9,
+              10,
+              11,
+              12,
+              13,
+              14,
+              15,
+              16,
+              17,
+              18,
+              19,
+              20,
+              21,
+              22,
+              23,
+              24,
+              25,
+              26,
+              27,
+              28,
+              29,
+              30
+            ]
+          }
+        },
+        {
+          "name": "generate_audio",
+          "schema": {
+            "type": "boolean"
+          }
+        },
+        {
+          "name": "watermark",
+          "schema": {
+            "type": "boolean"
+          }
+        },
+        {
+          "name": "prompt_extend",
+          "schema": {
+            "type": "boolean"
+          }
+        },
+        {
+          "name": "seed",
+          "schema": {
+            "type": "integer",
+            "minimum": -1,
+            "maximum": 2147483647
+          }
+        }
+      ],
+      "quoteBinding": "input_digest_and_price",
+      "referenceBinding": "explicit_roles",
+      "maximumPromptLength": 20000,
+      "imageLimits": {
+        "maximum": 10,
+        "minimumSide": 240,
+        "maximumSide": 8000,
+        "maximumPixels": 64000000,
+        "maximumBytes": 20000000
+      },
+      "uploadProfile": "aliyun-wan-reference"
+    },
+    {
+      "id": "relay.unicompapi-www.wan3.0-video-prime-ali.video",
+      "revision": 1,
+      "authority": "relay",
+      "modelKey": "wan3.0-video-prime-ali",
+      "source": {
+        "url": "https://www.unicompapi.com/docs/models/wan3.0-video-prime-ali",
+        "retrievedAt": "2026-10-15T07:38:42.314Z",
+        "sha256": "a2b288dc54fc2b2a765ef87e1e8d001d38511b3f88cbfcd0324f191f8a46726c"
+      },
+      "protocol": "unicomp.media.v1",
+      "features": [
+        "text_to_video",
+        "image_to_video"
+      ],
+      "fields": [
+        {
+          "name": "generation_mode",
+          "schema": {
+            "type": "string",
+            "enum": [
+              "text_to_video",
+              "first_frame",
+              "first_last_frame",
+              "reference_images",
+              "reference_video",
+              "reference_audio",
+              "reference_media",
+              "video_edit",
+              "video_extend"
+            ]
+          }
+        },
+        {
+          "name": "resolution",
+          "schema": {
+            "type": "string",
+            "enum": [
+              "480P",
+              "720P",
+              "1080P"
+            ]
+          }
+        },
+        {
+          "name": "aspect_ratio",
+          "schema": {
+            "type": "string",
+            "enum": [
+              "adaptive",
+              "21:9",
+              "16:9",
+              "4:3",
+              "1:1",
+              "3:4",
+              "9:16"
+            ]
+          }
+        },
+        {
+          "name": "duration_seconds",
+          "schema": {
+            "type": "integer",
+            "enum": [
+              -1,
+              2,
+              3,
+              4,
+              5,
+              6,
+              7,
+              8,
+              9,
+              10,
+              11,
+              12,
+              13,
+              14,
+              15,
+              16,
+              17,
+              18,
+              19,
+              20,
+              21,
+              22,
+              23,
+              24,
+              25,
+              26,
+              27,
+              28,
+              29,
+              30
+            ]
+          }
+        },
+        {
+          "name": "generate_audio",
+          "schema": {
+            "type": "boolean"
+          }
+        },
+        {
+          "name": "watermark",
+          "schema": {
+            "type": "boolean"
+          }
+        },
+        {
+          "name": "prompt_extend",
+          "schema": {
+            "type": "boolean"
+          }
+        },
+        {
+          "name": "seed",
+          "schema": {
+            "type": "integer",
+            "minimum": -1,
+            "maximum": 2147483647
+          }
+        }
+      ],
+      "quoteBinding": "input_digest_and_price",
+      "referenceBinding": "explicit_roles",
+      "maximumPromptLength": 20000,
+      "imageLimits": {
+        "maximum": 10,
+        "minimumSide": 240,
+        "maximumSide": 8000,
+        "maximumPixels": 64000000,
+        "maximumBytes": 20000000
+      },
+      "uploadProfile": "aliyun-wan-reference"
+    },
+    {
+      "id": "relay.unicompapi-www.happyhorse-1.0-video-edit.video",
+      "revision": 1,
+      "authority": "relay",
+      "modelKey": "happyhorse-1.0-video-edit",
+      "source": {
+        "url": "https://www.unicompapi.com/docs/models/happyhorse-1.0-video-edit",
+        "retrievedAt": "2026-10-15T07:38:43.482Z",
+        "sha256": "59bd74950e85b156e136f91105cea8e086b9df80768856079e6d86d15cb913c6"
+      },
+      "protocol": "unicomp.media.v1",
+      "features": [
+        "video_edit"
+      ],
+      "fields": [
+        {
+          "name": "generation_mode",
+          "schema": {
+            "type": "string",
+            "enum": [
+              "reference_video"
+            ]
+          }
+        },
+        {
+          "name": "resolution",
+          "schema": {
+            "type": "string",
+            "enum": [
+              "720P",
+              "1080P"
+            ]
+          }
+        },
+        {
+          "name": "duration_seconds",
+          "schema": {
+            "type": "integer",
+            "enum": [
+              3,
+              4,
+              5,
+              6,
+              7,
+              8,
+              9,
+              10,
+              11,
+              12,
+              13,
+              14,
+              15
+            ]
+          }
+        }
+      ],
+      "quoteBinding": "input_digest_and_price",
+      "referenceBinding": "explicit_roles",
+      "maximumPromptLength": 2500,
+      "imageLimits": {
+        "maximum": 9,
+        "minimumSide": 300,
+        "maximumSide": 8192,
+        "maximumPixels": 16000000,
+        "maximumBytes": 20971520,
+        "maximumTotalBytes": 20971520
+      },
+      "uploadProfile": "happyhorse-edit-reference"
+    }
+  ]
+}
