@@ -489,6 +489,7 @@ export function toDynamicParameterFields(
     readonly kind?: string;
     readonly exposure?: string;
     readonly required: boolean;
+    readonly requirement?: 'required' | 'optional' | 'unknown';
     readonly options?: readonly (string | number | boolean)[];
     readonly minimum?: number;
     readonly maximum?: number;
@@ -503,6 +504,7 @@ export function toDynamicParameterFields(
       labelId: field.labelId ?? field.label ?? fieldId,
       valueType: field.valueType ?? field.kind ?? 'string',
       required: field.required === true || field.exposure === 'user_required',
+      ...(field.requirement ? { requirement: field.requirement } : {}),
       ...(field.options ? { options: field.options } : {}),
       ...(field.minimum === undefined ? {} : { minimum: field.minimum }),
       ...(field.maximum === undefined ? {} : { maximum: field.maximum }),
@@ -524,7 +526,9 @@ function parameterLabel(field: DynamicParameterField): {
 
 function ParameterLabel({ field }: { readonly field: DynamicParameterField }) {
   const { text, required } = parameterLabel(field);
-  const description = displayParameterDescription(field.fieldId || field.labelId);
+  const description = field.requirement === 'unknown'
+    ? '官方尚未说明完整必填条件、可用范围与默认值；以报价校验为准。可选用页面提供的官方示例组合。'
+    : displayParameterDescription(field.fieldId || field.labelId);
   const constraint = parameterConstraint(field);
   const descriptionId = useId();
   return (
@@ -671,16 +675,16 @@ function ParameterField({
           disabled={disabled}
           aria-label={displayParameterKey(field.fieldId || field.labelId)}
           onChange={(next) => onDiscreteChange(next)}
-          unCheckedChildren={value === undefined && !field.required ? '默认' : '关闭'}
+          unCheckedChildren={value === undefined && !field.required ? field.requirement === 'unknown' ? '未填' : '默认' : '关闭'}
         />
         {!field.required && value !== undefined ? (
           <button
             type="button"
             className="uc-dynamic-parameters__reset"
-            aria-label={`${displayParameterKey(field.fieldId || field.labelId)}使用服务商默认`}
+            aria-label={`${displayParameterKey(field.fieldId || field.labelId)}${field.requirement === 'unknown' ? '清除填写' : '使用服务商默认'}`}
             disabled={disabled}
             onClick={() => onDiscreteChange(undefined)}
-          >使用服务商默认</button>
+          >{field.requirement === 'unknown' ? '清除填写' : '使用服务商默认'}</button>
         ) : null}
       </ParameterShell>
     );

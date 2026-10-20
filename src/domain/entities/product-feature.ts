@@ -1,5 +1,6 @@
 import type { ProviderOperationPurpose } from './provider';
 import { matchesJsonValueSchema, validateJsonValueSchema, type JsonValueSchema } from './json-value-schema';
+import { parameterRequestError, validateParameterRequestRules, type ParameterRequestRules } from './parameter-request';
 
 export const productFeatures = [
   'text_chat',
@@ -42,6 +43,7 @@ export type ParameterSchemaExposure = (typeof parameterSchemaExposures)[number];
 export const parameterSchemaDefaultPolicies = [
   'require_user_value',
   'omit_use_provider_default',
+  'omit_without_default_guarantee',
   'use_explicit_provider_default',
   'use_product_fixed',
   'derive_in_adapter'
@@ -79,6 +81,7 @@ export interface ProductFeatureDefinition {
 }
 
 export interface ParameterFieldSchemaV2 {
+  readonly requirement?: 'required' | 'optional' | 'unknown';
   readonly validationSchema?: JsonValueSchema;
   readonly fieldId: string;
   readonly labelId: string;
@@ -97,6 +100,9 @@ export interface ParameterFieldSchemaV2 {
 }
 
 export interface ParameterSchemaV2 {
+  readonly requestRules?: ParameterRequestRules;
+  /** Explicit user-selected example, never an implicit default. */
+  readonly exampleValues?: Readonly<Record<string, ParameterScalar>>;
   readonly schemaVersion: 2;
   readonly schemaId: string;
   readonly revision: number;
@@ -192,6 +198,13 @@ export function validateParameterSchemaV2(
   parseProductFeature(schema.productFeature);
   requireStableId(schema.schemaId, 'schema ID');
   const fields = schema.fields.map(validateParameterField);
+  if (schema.requestRules) validateParameterRequestRules(schema.requestRules);
+  if (schema.exampleValues !== undefined) {
+    if (!isPlainRecord(schema.exampleValues) || Object.keys(schema.exampleValues).length > 128 ||
+        Object.entries(schema.exampleValues).some(([key, value]) => !fields.some(f => f.fieldId === key) ||
+          !['string', 'number', 'boolean'].includes(typeof value))) throw new TypeError('Invalid parameter example');
+    for (const [key, value] of Object.entries(schema.exampleValues)) validateParameterValue(fields.find(f => f.fieldId === key)!, value);
+  }
   assertUnique(fields.map((field) => field.fieldId), 'parameter field ID');
   assertUnique(fields.map((field) => String(field.order)), 'parameter field order');
   return { ...schema, fields };
@@ -210,10 +223,12 @@ export function projectParameterSchema(
   }
   const visible = validated.fields.filter((field) =>
     mode === 'required_only'
-      ? field.exposure === 'user_required'
+      ? field.exposure === 'user_required' || validated.requestRules?.requireParameters === true && field.exposure === 'user_optional'
       : field.exposure === 'user_required' || field.exposure === 'user_optional'
   );
-  return { ...validated, fields: visible };
+  const visibleIds = new Set(visible.map(field => field.fieldId));
+  return { ...validated, fields: visible,
+    ...(validated.exampleValues ? { exampleValues: Object.fromEntries(Object.entries(validated.exampleValues).filter(([key]) => visibleIds.has(key))) } : {}) };
 }
 
 
@@ -254,6 +269,8 @@ export function validateParameterValues(
     validateParameterValue(field, value);
     result[field.fieldId] = value as ParameterValue;
   }
+  const requestError = parameterRequestError(schema.requestRules, { parameters: result });
+  if (requestError) throw new ProductFeatureContractError('invalid_parameter', requestError);
   return result;
 }
 
@@ -327,6 +344,9 @@ function validateParameterField(field: ParameterFieldSchemaV2): ParameterFieldSc
   }
   if (!parameterSchemaDefaultPolicies.includes(field.defaultPolicy)) {
     throw new ProductFeatureContractError('invalid_schema', 'Parameter field default policy is invalid');
+  }
+  if (field.requirement !== undefined && !['required', 'optional', 'unknown'].includes(field.requirement)) {
+    throw new ProductFeatureContractError('invalid_schema', 'Parameter requirement evidence is invalid');
   }
   if (field.exposure === 'user_required' && (!field.required || field.defaultPolicy !== 'require_user_value')) {
     throw new ProductFeatureContractError('invalid_schema', 'Required user fields must require an explicit value');

@@ -46,6 +46,31 @@ function createConfirmation(): VideoSubmissionConfirmationSnapshot {
 }
 
 describe('video submission task contracts', () => {
+  it('deep-clones the actual feature parameters and rejects changed schema pins or values', () => {
+    const values = { duration: 4, generate_audio: false };
+    const draft = {
+      ...createEmptyVideoWorkspaceDraft({ id: toDraftId('draft-feature-snapshot'),
+        projectId: toProjectId('project-video-task'), mode: 'quick_video', createdAt }),
+      featureSelection: { productFeature: 'text_to_video' as const,
+        parameterSchemaId: 'parameters.fixture', parameterSchemaRevision: 4, parameterValues: values }
+    };
+    const confirmation = { ...createConfirmation(), featureParameters: {
+      schemaId: 'parameters.fixture', revision: 4, values
+    } };
+    const create = (snapshot: VideoSubmissionConfirmationSnapshot) => createVideoTask({
+      id: toTaskId('task-feature-snapshot'), draft, confirmation: snapshot, confirmedAt
+    });
+    for (const featureParameters of [
+      { ...confirmation.featureParameters, schemaId: 'parameters.other' },
+      { ...confirmation.featureParameters, revision: 3 },
+      { ...confirmation.featureParameters, values: { duration: 5 } }
+    ]) expect(() => create({ ...confirmation, featureParameters })).toThrow(/feature parameters/);
+    const task = create(confirmation);
+    values.duration = 8;
+    expect(task.submission.video?.featureParameters).toEqual({
+      schemaId: 'parameters.fixture', revision: 4, values: { duration: 4, generate_audio: false }
+    });
+  });
   it('freezes a video confirmation snapshot without creating executions', () => {
     const draft = createEmptyVideoWorkspaceDraft({
       id: toDraftId('draft-video-task'),

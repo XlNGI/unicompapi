@@ -26,11 +26,11 @@ app.setPath('userData', userData);
 app.disableHardwareAcceleration();
 app.commandLine.appendSwitch('disable-background-networking');
 app.on('window-all-closed', () => {});
-const output = path.resolve('outputs/www-video-contracts', live ? caseOutput : 'electron-parameters-e2e');
+const output = live ? path.resolve('outputs/www-video-contracts', caseOutput) : path.resolve('outputs/video-parameter-repair-20261020/electron');
 const now = () => d.toIsoTimestamp(new Date().toISOString());
 const budgetFile = path.resolve('outputs/www-video-contracts/live/budget.json');
 let window, lifecycle, runtime, lock;
-let paidPost = 0, externalRequests = 0;
+let paidPost = 0, externalRequests = 0, rejectSyntheticQuote = false;
 const requests = [], checks = [];
 const resultTasks = new Map();
 const quotedInputs = new Map();
@@ -110,8 +110,15 @@ async function main() {
     unwrap(await framework.bindModelApiContract({ modelId: m.id, expectedRevision: m.revision, binding: { schemaVersion: 1, contractId: c.id, contractRevision: c.revision, rules: [] }, confirmed: true }));
     unwrap(await framework.setModelEnabled({ modelId: m.id, enabled: true }));
   }
-  const image = path.join(rootDirectory, 'reference.png'), video = path.join(rootDirectory, 'reference.mp4');
+  const image = path.join(rootDirectory, live ? 'reference.png' : 'reference.jpg'), video = path.join(rootDirectory, 'reference.mp4');
   await fs.copyFile(path.resolve('outputs/www-video-contracts/reference.png'), image);
+  if (!live) {
+    const { nativeImage } = require('electron');
+    // Flatten the synthetic reference to an opaque JPEG for alpha-forbidden models.
+    const opaque = path.join(rootDirectory, 'opaque-reference.jpg');
+    await fs.writeFile(opaque, nativeImage.createFromPath(image).toJPEG(95));
+    await fs.copyFile(opaque, image);
+  }
   await fs.copyFile(path.resolve('outputs/www-video-contracts/reference.mp4'), video);
   const mp4 = await fs.readFile(video);
   const transport = { async send(request) {
@@ -151,6 +158,8 @@ async function main() {
     const body = request.body && request.headers['content-type'] === 'application/json' ? JSON.parse(Buffer.from(request.body).toString()) : {};
     if (url.pathname === '/v1/assets') data = { data: { id: `uploaded-${requests.length}` } };
     else if (url.pathname.endsWith('/quote') || body.operation === 'quote') {
+      if (rejectSyntheticQuote) return { status: 400, headers: { ...headers, 'x-request-id': 'synthetic-quote-error' },
+        body: encode({ error: { code: 'invalid_h3_parameters', message: 'Invalid H3 parameters; synthetic-e2e-key https://example.invalid/private' } }) };
       const input = { ...body }; delete input.operation; const hash = digest(JSON.stringify(input)); quotedInputs.set(hash, input);
       data = { currency: 'CNY_MICRO', quoted_amount: 1_000_000, input_digest: hash, price_version: 'synthetic-price', closed_reasons: [] };
     } else if (request.method === 'POST') {
@@ -214,6 +223,7 @@ async function main() {
       draft.prompt = { originalInput: 'Synthetic orange cup.', finalPrompt: 'Synthetic orange cup.', systemSupplements: [] };
     }
     draft.state = 'saved'; draft.featureSelection = { productFeature: feature, parameterValues: {
+      ...(!live && c.modelKey === 'MiniMax-H3' ? c.parameterExample : {}),
       ...(feature === 'image_to_video' && c.fields.some(f => f.name === 'generation_mode') ? { generation_mode: 'first_frame' } : {}),
       ...(live ? { resolution: '480P', duration_seconds: c.modelKey.startsWith('happyhorse') ? 3 : 2, ...(c.modelKey.startsWith('wan') ? { generate_audio: false } : {}) } : {}) } };
     draft = unwrap(await js(`window.unicomp.videoWorkspaces.update(${JSON.stringify(draft)})`));
@@ -223,24 +233,54 @@ async function main() {
     if (!live && c.modelKey === 'MiniMax-H3') draft.featureSelection.parameterValues.maximum_cost_cny = 999;
     draft = unwrap(await js(`window.unicomp.videoWorkspaces.update(${JSON.stringify(draft)})`));
     assert.equal(draft.featureSelection.parameterValues.maximum_cost_cny, undefined);
+    if (!live && c.modelKey === 'MiniMax-H3') {
+      assert.equal(candidate.parameterSchema.requestRules.requireParameters, true);
+      assert.deepEqual(candidate.parameterSchema.exampleValues, c.parameterExample);
+      assert.ok(candidate.parameterSchema.fields.every(f => f.requirement === 'unknown'));
+      const before = requests.length;
+      const empty = { ...draft, featureSelection: { ...draft.featureSelection, parameterValues: {} } };
+      const savedEmpty = unwrap(await js(`window.unicomp.videoWorkspaces.update(${JSON.stringify(empty)})`));
+      const invalid = await js(`window.unicomp.videoFeatures.prepareSubmission(${JSON.stringify(savedEmpty.draftId)}, ${JSON.stringify(savedEmpty.updatedAt)}, ${JSON.stringify(candidate.candidateId)})`);
+      assert.equal(invalid.ok, false);
+      assert.equal(requests.length, before);
+      draft = unwrap(await js(`window.unicomp.videoWorkspaces.update(${JSON.stringify({ ...draft, updatedAt: savedEmpty.updatedAt })})`));
+      checks.push({ model: c.modelKey, check: 'native prepare rejects empty parameters with zero requests', state: 'passed' });
+    }
     const prepare = unwrap(await js(`window.unicomp.videoFeatures.prepareSubmission(${JSON.stringify(draft.draftId)}, ${JSON.stringify(draft.updatedAt)}, ${JSON.stringify(candidate.candidateId)})`));
     const receipt = unwrap(await js(`window.unicomp.videoFeatures.submitDraft(${JSON.stringify(draft.draftId)}, ${JSON.stringify(draft.updatedAt)}, ${JSON.stringify(prepare.routeSelectionToken)}, ${JSON.stringify(prepare.confirmation.confirmationId)}, true)`));
     assert.ok(receipt.taskId, JSON.stringify(receipt));
     if (live) await fs.writeFile(path.join(output, 'local-receipt.json'), JSON.stringify({ isolatedRoot: temporary, projectId, draftId: draft.draftId, receipt }, null, 2));
     let works = [];
     for (let i = 0; i < (live ? 600 : 200); i++) { works = (await workRepo.list(projectId)).filter(w => w.sourceTaskId === receipt.taskId); if (works.length) break; await delay(live ? 1000 : 50); }
-    assert.equal(works.length, 1, `${c.modelKey}/${feature} no unique local work`);
+    assert.equal(works.length, 1, `${c.modelKey}/${feature} no unique local work: ${JSON.stringify(receipt)}`);
     const file = await new p.JsonFileReferenceRepository(storage, projectId).get(works[0].fileId);
     assert.equal(file.state, 'available');
     const local = await p.resolveFileReferencePathSafely(rootDirectory, file);
     assert.equal(digest(await fs.readFile(local)), file.checksumSha256);
     assert.ok((await new p.NodeVideoInspector().inspect(local)).durationMs > 0);
     if (!live) {
+      const task = await new p.JsonTaskRepository(storage, projectId).get(receipt.taskId);
+      assert.deepEqual(task.submission.video.featureParameters, { schemaId: candidate.parameterSchema.schemaId,
+        revision: candidate.parameterSchema.revision, values: draft.featureSelection.parameterValues });
       const execution = await new p.JsonExecutionRepository(storage, projectId).get(receipt.executionId);
       const originalTask = resultTasks.get(execution.remoteOperationId);
       // Consume completion directly and reuse its validated descriptor for landing.
       assert.equal(originalTask.polls, c.modelKey === 'MiniMax-H3' ? 3 : 1);
       assert.equal(originalTask.downloads, c.modelKey === 'MiniMax-H3' ? 2 : 1);
+      if (c.modelKey === 'MiniMax-H3') {
+        rejectSyntheticQuote = true;
+        const failedPrepare = unwrap(await js(`window.unicomp.videoFeatures.prepareSubmission(${JSON.stringify(draft.draftId)}, ${JSON.stringify(draft.updatedAt)}, ${JSON.stringify(candidate.candidateId)})`));
+        const failed = unwrap(await js(`window.unicomp.videoFeatures.submitDraft(${JSON.stringify(draft.draftId)}, ${JSON.stringify(draft.updatedAt)}, ${JSON.stringify(failedPrepare.routeSelectionToken)}, ${JSON.stringify(failedPrepare.confirmation.confirmationId)}, true)`));
+        rejectSyntheticQuote = false;
+        assert.equal(failed.status, 'failed');
+        assert.ok(failed.feedback.includes('Invalid H3 parameters'), JSON.stringify(failed));
+        assert.ok(!failed.feedback.includes('synthetic-e2e-key') && !failed.feedback.includes('example.invalid'));
+        assert.ok(!failed.feedback.includes('报价上限'));
+        const failedExecution = await new p.JsonExecutionRepository(storage, projectId).get(failed.executionId);
+        assert.ok(failedExecution.failure.message.includes('Invalid H3 parameters'));
+        assert.equal(resultTasks.size, 1, 'quote error must never create a second remote generation');
+        checks.push({ model: c.modelKey, check: 'HTTP 400 safe diagnostic persists through native runtime and execution history', state: 'passed' });
+      }
     }
     // Completed tasks have no download debt. A recovery attempt must not create a second Work or generation.
     const recovery = await js(`window.unicomp.videoFeatures.recoverResult(${JSON.stringify(receipt.taskId)})`);

@@ -429,7 +429,7 @@ function featureForDraft(draft: VideoWorkspaceDraft) {
     : 'text_to_video' as const;
 }
 
-function routeParameterValues(
+export function routeParameterValues(
   values: Readonly<Record<string, VideoDynamicParameterValue>>
 ): Readonly<Record<string, ParameterValue>> {
   if (!isRouteParameterValue(values)) {

@@ -35,6 +35,7 @@ export function VideoTextWorkspace({
   onMessage
 }: VideoTextWorkspaceProps) {
   const [historyRefreshKey, setHistoryRefreshKey] = useState(0);
+  const [promptLimit, setPromptLimit] = useState<number>();
   const [expectedWorkId, setExpectedWorkId] = useState<string>();
   const [expectedTaskId, setExpectedTaskId] = useState<string>();
   const [submissionProgress, setSubmissionProgress] = useState<{
@@ -150,12 +151,11 @@ export function VideoTextWorkspace({
             <span>原始需求 <span className="uc-dynamic-parameters__required">必填</span></span>
             <Input
               as="textarea"
-              maxLength={4000}
               onChange={(value) => changePrompt('originalInput', value)}
               rows={7}
               value={draft.prompt.originalInput}
             />
-            <small>{draft.prompt.originalInput.length} / 4000</small>
+            <small>{Array.from(draft.prompt.originalInput).length}{promptLimit ? ` / ${promptLimit}` : ''} 字符</small>
           </label>
           <CreationAdvancedSection
             defaultOpen={unsupportedContexts.length > 0 || Boolean(draft.textToVideo.materials)}
@@ -223,12 +223,11 @@ export function VideoTextWorkspace({
             <span>最终提示词 <span className="uc-dynamic-parameters__required">必填</span></span>
             <Input
               as="textarea"
-              maxLength={6000}
               onChange={(value) => changePrompt('finalPrompt', value)}
               rows={8}
               value={draft.prompt.finalPrompt}
             />
-            <small>{draft.prompt.finalPrompt.length} / 6000</small>
+            <small>{Array.from(draft.prompt.finalPrompt).length}{promptLimit ? ` / ${promptLimit}` : ''} 字符</small>
           </label>
           </CreationAdvancedSection>
         </Card>
@@ -243,6 +242,7 @@ export function VideoTextWorkspace({
             </div>
           </header>
           <VideoFeatureSubmissionPanel
+            onPromptLimitChange={setPromptLimit}
             blockedReason={blockedReason}
             className="uc-image-feature-panel--compact"
             collapseParameters

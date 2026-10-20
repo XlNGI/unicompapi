@@ -2,6 +2,7 @@ import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { LuSend } from 'react-icons/lu';
 import { Button } from '../../../components/Button';
+import { parameterRequestError } from '../../../domain/entities/parameter-request';
 import {
   DynamicParameterForm,
   toDynamicParameterFields,
@@ -142,6 +143,7 @@ interface VideoFeatureSubmissionPanelProps {
   readonly onDraftPersisted?: (draft: VideoWorkspaceDraftDto) => void;
   readonly onFlushDraft?: () => Promise<boolean>;
   readonly onMessage: (message: string) => void;
+  readonly onPromptLimitChange?: (maximum: number | undefined) => void;
   readonly onSubmissionComplete?: (submission: VideoFeatureSubmissionDto) => void;
 }
 
@@ -216,7 +218,8 @@ export function VideoFeatureSubmissionPanel({
   onDraftPersisted,
   onFlushDraft,
   onMessage,
-  onSubmissionComplete
+  onSubmissionComplete,
+  onPromptLimitChange
 }: VideoFeatureSubmissionPanelProps) {
   const api = window.unicomp?.videoFeatures;
   const videoWorkspaces = window.unicomp?.videoWorkspaces;
@@ -241,6 +244,8 @@ export function VideoFeatureSubmissionPanel({
   const selectedCandidate = candidates.find(
     (candidate) => candidate.candidateId === featureSelection.candidateId
   );
+  const promptLimit = selectedCandidate?.parameterSchema.requestRules?.maximumPromptCharacters;
+  useEffect(() => { onPromptLimitChange?.(promptLimit); }, [onPromptLimitChange, promptLimit]);
   const busyRef = useRef(false);
   const mountedRef = useRef(true);
   const progressFailureRef = useRef<string | undefined>(undefined);
@@ -306,13 +311,15 @@ export function VideoFeatureSubmissionPanel({
     />
   );
   const imageReferenceCount = draft.mode === 'image_to_video'
-    ? draft.imageToVideo.referenceImages?.length ?? (draft.imageToVideo.source ? 1 : 0)
+    ? draft.imageToVideo.referenceImages?.filter(r => r.mediaKind === 'image').length ?? (draft.imageToVideo.source?.mediaKind === 'image' ? 1 : 0)
     : 0;
   const requiredInputError = draft.prompt.finalPrompt.trim().length === 0
     ? '提示词为必填项。'
-    : draft.mode === 'image_to_video' && imageReferenceCount === 0
+    : featureSelection.productFeature === 'image_to_video' && imageReferenceCount === 0
       ? '至少一张参考图片。'
-      : undefined;
+      : parameterRequestError(selectedCandidate?.parameterSchema.requestRules, {
+          parameters: featureSelection.parameterValues, prompt: draft.prompt.finalPrompt, imageCount: imageReferenceCount
+        });
 
   function setProgressFailure(message?: string) {
     progressFailureRef.current = message;
@@ -576,6 +583,20 @@ export function VideoFeatureSubmissionPanel({
     onDraftChange(next);
   }
 
+  function applyOfficialExample() {
+    const example = selectedCandidate?.parameterSchema.exampleValues;
+    if (!example || busy) return;
+    const snapshot = draftRef.current;
+    const selection = snapshot.featureSelection ?? featureSelectionRef.current;
+    const next: VideoWorkspaceDraftDto = {
+      ...snapshot, state: 'editing', generation: resetGeneration(),
+      featureSelection: { ...selection, parameterValues: { ...selection.parameterValues, ...example } }
+    };
+    setParameterInputErrors({});
+    draftRef.current = next;
+    onDraftChange(next);
+  }
+
   /**
    * Commits whatever the user has typed but not yet blurred. Called before
    * every save/submit so a focused control can never be left behind, and so an
@@ -650,13 +671,16 @@ export function VideoFeatureSubmissionPanel({
         return;
       }
       const savedImageReferenceCount = saved.mode === 'image_to_video'
-        ? saved.imageToVideo.referenceImages?.length ?? (saved.imageToVideo.source ? 1 : 0)
+        ? saved.imageToVideo.referenceImages?.filter(r => r.mediaKind === 'image').length ?? (saved.imageToVideo.source?.mediaKind === 'image' ? 1 : 0)
         : 0;
       const savedInputError = saved.prompt.finalPrompt.trim().length === 0
         ? '提示词为必填项。'
-        : saved.mode === 'image_to_video' && savedImageReferenceCount === 0
+        : saved.featureSelection?.productFeature === 'image_to_video' && savedImageReferenceCount === 0
           ? '至少一张参考图片。'
-          : undefined;
+          : parameterRequestError(selectedCandidate.parameterSchema.requestRules, {
+              parameters: saved.featureSelection?.parameterValues ?? {},
+              prompt: saved.prompt.finalPrompt, imageCount: savedImageReferenceCount
+            });
       if (savedInputError) {
         showSubmissionError(savedInputError);
         if (trackProgress) {
@@ -839,6 +863,12 @@ export function VideoFeatureSubmissionPanel({
               ))}
             </div>
           ) : null}
+          {selectedCandidate.parameterSchema.exampleValues && Object.keys(selectedCandidate.parameterSchema.exampleValues).length > 0 ? (
+            <div className="uc-image-quick__preflight">
+              <span>官方尚未公开完整必填条件、范围与默认值。可填写参数或采用官方示例，提交前仍需报价校验。</span>
+              <Button disabled={busy} onClick={applyOfficialExample}>填入官方示例</Button>
+            </div>
+          ) : null}
           {oneShot && dynamicParameterFields.length === 0 ? (
             <p className="uc-model-select__hint" role="status">
               快速视频使用服务默认参数，无需填写动态参数。
@@ -883,6 +913,7 @@ export function VideoFeatureSubmissionPanel({
           className="uc-image-feature-panel__primary"
           disabled={
             Boolean(blockedReason) ||
+            Boolean(requiredInputError) ||
             busy ||
             !parameterValidation.valid ||
             !selectedCandidate?.available
@@ -897,6 +928,7 @@ export function VideoFeatureSubmissionPanel({
         className="uc-image-feature-panel__primary"
         disabled={
           Boolean(blockedReason) ||
+          Boolean(requiredInputError) ||
           busy ||
           !parameterValidation.valid ||
           !selectedCandidate?.available

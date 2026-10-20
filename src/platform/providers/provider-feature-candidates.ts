@@ -13,6 +13,7 @@ import {
   toProjectId,
   validateParameterSchemaV2,
   validateParameterValues,
+  parameterRequestError,
   validateProductFeatureRequest,
   type FeatureCandidateAvailabilityReason,
   type FeatureCandidateCostFactV1,
@@ -370,6 +371,10 @@ export class ProviderFeatureCandidateService {
       resolvedSubject.parameterValues
     );
     validateParameterValues(candidate.parameterSchema, projectionMode, parameterValues);
+    const requestError = parameterRequestError(candidate.parameterSchema.requestRules, {
+      parameters: parameterValues, prompt: resolvedSubject.outboundTextSnapshot, imageCount: resolvedSubject.imageCount
+    });
+    if (requestError) throw new FeatureSubmissionError('subject_invalid', requestError);
     return {
       subject: { ...resolvedSubject, parameterValues },
       candidate
@@ -488,7 +493,7 @@ function parameterProjectionMode(surface: ProductFeatureSurface): ParameterProje
 }
 
 /** Drop stale draft keys removed from the current schema (e.g. legacy `size`). */
-function pruneParameterValuesToSchema(
+export function pruneParameterValuesToSchema(
   schema: ParameterSchemaV2,
   mode: ParameterProjectionMode,
   values: Readonly<Record<string, ParameterValue>>

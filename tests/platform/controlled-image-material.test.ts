@@ -3,6 +3,7 @@ import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
+import { testPng } from '../fixtures/png';
 import {
   createAsset,
   createFileReference,
@@ -30,6 +31,24 @@ afterEach(async () => {
 });
 
 describe('ProjectImageMaterialResolver', () => {
+  it('accepts a real 17 MB PNG only with a bounded model allowance', async () => {
+    const bytes = testPng(2400, 2400, { noise: true });
+    expect(bytes.length).toBeGreaterThan(15 * 1024 * 1024);
+    expect(bytes.length).toBeLessThan(20_000_000);
+    const fixture = await createFixture({ bytes, width: 2400, height: 2400 });
+    const resolver = new ProjectImageMaterialResolver({
+      getSession: () => fixture.session,
+      maximumAllowedInputBytes: 30_000_000
+    });
+    const input = { projectId: fixture.projectId, assetId: fixture.assetId };
+    await expect(resolver.resolve(input)).rejects.toMatchObject({ code: 'material_too_large' });
+    await expect(resolver.resolve({ ...input, maximumInputBytes: 20_000_000 })).resolves.toMatchObject({
+      width: 2400, height: 2400, sizeBytes: bytes.length
+    });
+    await expect(resolver.resolve({ ...input, maximumInputBytes: 30_000_001 })).rejects.toThrow();
+    const defaultResolver = new ProjectImageMaterialResolver({ getSession: () => fixture.session });
+    await expect(defaultResolver.resolve({ ...input, maximumInputBytes: 20_000_000 })).rejects.toThrow();
+  });
   it('resolves only a revalidated project image and returns no path or hash', async () => {
     const fixture = await createFixture();
     const resolver = new ProjectImageMaterialResolver({
@@ -96,7 +115,7 @@ describe('ProjectImageMaterialResolver', () => {
   });
 });
 
-async function createFixture() {
+async function createFixture(image = { bytes: pngBytes(2, 3), width: 2, height: 3 }) {
   const root = await mkdtemp(path.join(os.tmpdir(), 'unicomp-material-secret-'));
   roots.push(root);
   const projectId = toProjectId('project-controlled-material');
@@ -105,7 +124,7 @@ async function createFixture() {
   const relativePath = 'files/input.png';
   const absolutePath = path.join(root, relativePath);
   await mkdir(path.dirname(absolutePath), { recursive: true });
-  const bytes = pngBytes(2, 3);
+  const bytes = image.bytes;
   await writeFile(absolutePath, bytes);
   const checksum = createHash('sha256').update(bytes).digest('hex');
   const pending = createFileReference({
@@ -138,8 +157,8 @@ async function createFixture() {
     origin: 'imported',
     imageMetadata: {
       mimeType: 'image/png',
-      width: 2,
-      height: 3
+      width: image.width,
+      height: image.height
     },
     createdAt: timestamp
   }));

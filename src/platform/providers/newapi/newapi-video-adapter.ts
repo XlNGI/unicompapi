@@ -114,6 +114,7 @@ export interface ControlledNewApiImagePort {
   resolve(input: {
     readonly projectId: string;
     readonly assetId: string;
+    readonly maximumInputBytes?: number;
   }): Promise<ControlledNewApiImageV1>;
 }
 

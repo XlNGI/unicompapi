@@ -505,10 +505,12 @@ function createControlledNewApiImagePort(
     async resolve(input: {
       readonly projectId: string;
       readonly assetId: string;
+      readonly maximumInputBytes?: number;
     }) {
       const material = await materials.resolve({
         projectId: input.projectId as never,
-        assetId: input.assetId as never
+        assetId: input.assetId as never,
+        ...(input.maximumInputBytes !== undefined ? { maximumInputBytes: input.maximumInputBytes } : {})
       });
       return {
         assetId: material.assetId,

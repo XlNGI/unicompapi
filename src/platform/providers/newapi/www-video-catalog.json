@@ -3,15 +3,22 @@
   "contracts": [
     {
       "id": "relay.unicompapi-www.MiniMax-H3.video",
-      "revision": 3,
+      "revision": 4,
       "authority": "relay",
       "modelKey": "MiniMax-H3",
       "action": "generate",
       "parameterEvidence": "documented_example_types_quote_validated",
+      "parameterExample": {
+        "resolution": "2K",
+        "ratio": "16:9",
+        "duration": 4,
+        "generate_audio": true,
+        "watermark": false
+      },
       "source": {
         "url": "https://www.unicompapi.com/docs/models/MiniMax-H3",
-        "retrievedAt": "2026-10-19T10:03:38.169Z",
-        "sha256": "9c3d0cbed91e6201b76c1361644200ce8f07b4911480c04163e4f72df80e8dee"
+        "retrievedAt": "2026-10-20T09:28:23.943Z",
+        "sha256": "9f6d64473e39ff5d813efd22978b817420deebbf124d1ea72246b8f8b47a2397"
       },
       "vendorContractId": "official.minimax.MiniMax-H3.video",
       "protocol": "h3-actions",
@@ -22,6 +29,7 @@
         {
           "name": "resolution",
           "required": null,
+          "example": "2K",
           "schema": {
             "type": "string"
           }
@@ -29,6 +37,7 @@
         {
           "name": "ratio",
           "required": null,
+          "example": "16:9",
           "schema": {
             "type": "string"
           }
@@ -36,6 +45,7 @@
         {
           "name": "duration",
           "required": null,
+          "example": 4,
           "schema": {
             "type": "integer"
           }
@@ -43,6 +53,7 @@
         {
           "name": "generate_audio",
           "required": null,
+          "example": true,
           "schema": {
             "type": "boolean"
           }
@@ -50,6 +61,7 @@
         {
           "name": "watermark",
           "required": null,
+          "example": false,
           "schema": {
             "type": "boolean"
           }
@@ -58,23 +70,34 @@
       "quoteBinding": "input_digest_and_price",
       "referenceBinding": "explicit_roles",
       "maximumPromptLength": 2500,
+      "promptLimitEvidence": "retained_product_limit",
+      "supportedOutputFormats": [
+        "mp4"
+      ],
+      "supportedImageModes": [
+        "first_frame",
+        "last_frame",
+        "first_last_frame",
+        "reference_images"
+      ],
       "imageLimits": {
         "maximum": 9,
         "minimumSide": 300,
         "maximumSide": 6000,
         "maximumPixels": 36000000,
-        "maximumBytes": 20971520
+        "maximumBytes": 20971520,
+        "allowAlphaChannel": true
       }
     },
     {
       "id": "relay.unicompapi-www.doubao-seedance-2-0-260128.video",
-      "revision": 2,
+      "revision": 3,
       "authority": "relay",
       "modelKey": "doubao-seedance-2-0-260128",
       "source": {
         "url": "https://www.unicompapi.com/docs/models/doubao-seedance-2-0-260128",
-        "retrievedAt": "2026-10-19T10:03:39.320Z",
-        "sha256": "414d00ad7bf33ec7903bb95a41db6ad7651f4bd7d9db2656967e8cebac9df007"
+        "retrievedAt": "2026-10-20T09:28:25.660Z",
+        "sha256": "c1847baab04707ae55194e12151a97cba7a3593eef68c35f010a23b74a31d507"
       },
       "vendorContractId": "official.volcengine.seedance-2.0.video",
       "protocol": "unicomp.media.v1",
@@ -91,9 +114,11 @@
             "enum": [
               "text_to_video",
               "first_frame",
+              "last_frame",
               "first_last_frame",
               "reference_images",
-              "reference_media"
+              "reference_media",
+              "first_frame_audio"
             ]
           }
         },
@@ -272,7 +297,8 @@
           "schema": {
             "type": "string",
             "enum": [
-              "mp4"
+              "mp4",
+              "mov"
             ]
           }
         },
@@ -295,25 +321,35 @@
       ],
       "quoteBinding": "input_digest_and_price",
       "referenceBinding": "explicit_roles",
-      "maximumPromptLength": 2500,
+      "maximumPromptLength": 20000,
+      "promptLimitEvidence": "documented_unicode_characters",
+      "supportedOutputFormats": [
+        "mp4"
+      ],
+      "supportedImageModes": [
+        "first_frame",
+        "first_last_frame",
+        "reference_images"
+      ],
       "imageLimits": {
         "maximum": 9,
         "minimumSide": 300,
         "maximumSide": 6000,
         "maximumPixels": 36000000,
-        "maximumBytes": 29999999
+        "maximumBytes": 29999999,
+        "allowAlphaChannel": true
       },
       "uploadProfile": "seedance-reference"
     },
     {
       "id": "relay.unicompapi-www.happyhorse-1.1-t2v.video",
-      "revision": 2,
+      "revision": 3,
       "authority": "relay",
       "modelKey": "happyhorse-1.1-t2v",
       "source": {
         "url": "https://www.unicompapi.com/docs/models/happyhorse-1.1-t2v",
-        "retrievedAt": "2026-10-19T10:04:58.870Z",
-        "sha256": "1a6b76a2899e3ab0ba70d8ed857222cc78b795c27e8c4a27d8551eb2e77aee0f"
+        "retrievedAt": "2026-10-20T09:28:27.371Z",
+        "sha256": "12fb0ad7182b3bf08756cd271b86f3da67a723e9596529986a78ba0254a5dbc8"
       },
       "protocol": "unicomp.media.v1",
       "features": [
@@ -379,24 +415,35 @@
       "quoteBinding": "price_version_and_amount",
       "referenceBinding": "asset_ids",
       "maximumPromptLength": 2500,
+      "promptLimitEvidence": "retained_product_limit",
+      "supportedOutputFormats": [
+        "mp4"
+      ],
+      "supportedImageModes": [
+        "first_frame",
+        "last_frame",
+        "first_last_frame",
+        "reference_images"
+      ],
       "imageLimits": {
         "maximum": 9,
         "minimumSide": 300,
         "maximumSide": 8192,
         "maximumPixels": 16000000,
         "maximumBytes": 20971520,
+        "allowAlphaChannel": true,
         "maximumTotalBytes": 20971520
       }
     },
     {
       "id": "relay.unicompapi-www.happyhorse-1.1-i2v.video",
-      "revision": 2,
+      "revision": 3,
       "authority": "relay",
       "modelKey": "happyhorse-1.1-i2v",
       "source": {
         "url": "https://www.unicompapi.com/docs/models/happyhorse-1.1-i2v",
-        "retrievedAt": "2026-10-19T10:05:00.005Z",
-        "sha256": "293a5726935f7de689baf4cdd833ccae0b829058f684a324b794fef216967f4b"
+        "retrievedAt": "2026-10-20T09:28:29.111Z",
+        "sha256": "6b244aaad302306e1b3efd9d2d627ff762db681530711d7b809963a2d7cb004d"
       },
       "protocol": "unicomp.media.v1",
       "features": [
@@ -444,24 +491,35 @@
       "quoteBinding": "price_version_and_amount",
       "referenceBinding": "asset_ids",
       "maximumPromptLength": 2500,
+      "promptLimitEvidence": "retained_product_limit",
+      "supportedOutputFormats": [
+        "mp4"
+      ],
+      "supportedImageModes": [
+        "first_frame",
+        "last_frame",
+        "first_last_frame",
+        "reference_images"
+      ],
       "imageLimits": {
         "maximum": 1,
         "minimumSide": 300,
         "maximumSide": 8192,
         "maximumPixels": 16000000,
         "maximumBytes": 20971520,
+        "allowAlphaChannel": true,
         "maximumTotalBytes": 20971520
       }
     },
     {
       "id": "relay.unicompapi-www.happyhorse-1.1-r2v.video",
-      "revision": 2,
+      "revision": 3,
       "authority": "relay",
       "modelKey": "happyhorse-1.1-r2v",
       "source": {
         "url": "https://www.unicompapi.com/docs/models/happyhorse-1.1-r2v",
-        "retrievedAt": "2026-10-19T10:05:01.145Z",
-        "sha256": "92ab65b3579db9dbc3ea56433c1aad653bcbeb58b762d45750c25070ba149828"
+        "retrievedAt": "2026-10-20T09:28:30.803Z",
+        "sha256": "a6ac8879d21af4e98221b35c9632f48f234734a250783624b540215f269a9c19"
       },
       "protocol": "unicomp.media.v1",
       "features": [
@@ -527,24 +585,35 @@
       "quoteBinding": "price_version_and_amount",
       "referenceBinding": "asset_ids",
       "maximumPromptLength": 2500,
+      "promptLimitEvidence": "retained_product_limit",
+      "supportedOutputFormats": [
+        "mp4"
+      ],
+      "supportedImageModes": [
+        "first_frame",
+        "last_frame",
+        "first_last_frame",
+        "reference_images"
+      ],
       "imageLimits": {
         "maximum": 9,
         "minimumSide": 400,
         "maximumSide": 8192,
         "maximumPixels": 16000000,
         "maximumBytes": 20971520,
+        "allowAlphaChannel": true,
         "maximumTotalBytes": 20971520
       }
     },
     {
       "id": "relay.unicompapi-www.wan3.0-video.video",
-      "revision": 2,
+      "revision": 3,
       "authority": "relay",
       "modelKey": "wan3.0-video",
       "source": {
         "url": "https://www.unicompapi.com/docs/models/wan3.0-video",
-        "retrievedAt": "2026-10-19T10:05:02.298Z",
-        "sha256": "4d791b516384b5e5b839100950a8e99034fe29a4b3988056db5783e802710620"
+        "retrievedAt": "2026-10-20T09:28:32.556Z",
+        "sha256": "dadbc1ff6ef44a21e680b203ce3cc4240d254c90faf83ef20e7746e8c1acd6b0"
       },
       "protocol": "unicomp.media.v1",
       "features": [
@@ -661,24 +730,35 @@
       "quoteBinding": "input_digest_and_price",
       "referenceBinding": "explicit_roles",
       "maximumPromptLength": 20000,
+      "promptLimitEvidence": "documented_unicode_characters",
+      "supportedOutputFormats": [
+        "mp4"
+      ],
+      "supportedImageModes": [
+        "first_frame",
+        "last_frame",
+        "first_last_frame",
+        "reference_images"
+      ],
       "imageLimits": {
         "maximum": 10,
         "minimumSide": 240,
         "maximumSide": 8000,
         "maximumPixels": 64000000,
         "maximumBytes": 20971520,
+        "allowAlphaChannel": true,
         "maximumTotalBytes": 20971520
       }
     },
     {
       "id": "relay.unicompapi-www.wan3.0-video-ali.video",
-      "revision": 2,
+      "revision": 3,
       "authority": "relay",
       "modelKey": "wan3.0-video-ali",
       "source": {
         "url": "https://www.unicompapi.com/docs/models/wan3.0-video-ali",
-        "retrievedAt": "2026-10-19T10:05:03.456Z",
-        "sha256": "2d40730bd02c2d93e772e448ec56be1f26677ed4211ae9713a4f462f63442427"
+        "retrievedAt": "2026-10-20T09:28:34.220Z",
+        "sha256": "5969b7d731fa1bb822c17fb8a4b8641ac82b963ccbd7a6e67c92cf0933b2f855"
       },
       "protocol": "unicomp.media.v1",
       "features": [
@@ -805,24 +885,35 @@
       "quoteBinding": "input_digest_and_price",
       "referenceBinding": "explicit_roles",
       "maximumPromptLength": 20000,
+      "promptLimitEvidence": "documented_unicode_characters",
+      "supportedOutputFormats": [
+        "mp4"
+      ],
+      "supportedImageModes": [
+        "first_frame",
+        "last_frame",
+        "first_last_frame",
+        "reference_images"
+      ],
       "imageLimits": {
         "maximum": 10,
         "minimumSide": 240,
         "maximumSide": 8000,
         "maximumPixels": 64000000,
-        "maximumBytes": 20000000
+        "maximumBytes": 20000000,
+        "allowAlphaChannel": false
       },
       "uploadProfile": "aliyun-wan-reference"
     },
     {
       "id": "relay.unicompapi-www.wan3.0-video-prime-ali.video",
-      "revision": 2,
+      "revision": 3,
       "authority": "relay",
       "modelKey": "wan3.0-video-prime-ali",
       "source": {
         "url": "https://www.unicompapi.com/docs/models/wan3.0-video-prime-ali",
-        "retrievedAt": "2026-10-19T10:05:04.617Z",
-        "sha256": "7ff4aca7da3f2c29244360fe6efe0944ce74b1f00aa3872a5d28b99badf52fec"
+        "retrievedAt": "2026-10-20T09:28:35.870Z",
+        "sha256": "c5f572c661374df2b89f8380b529b788af7195258c98bc15577d0f4342485907"
       },
       "protocol": "unicomp.media.v1",
       "features": [
@@ -949,24 +1040,35 @@
       "quoteBinding": "input_digest_and_price",
       "referenceBinding": "explicit_roles",
       "maximumPromptLength": 20000,
+      "promptLimitEvidence": "documented_unicode_characters",
+      "supportedOutputFormats": [
+        "mp4"
+      ],
+      "supportedImageModes": [
+        "first_frame",
+        "last_frame",
+        "first_last_frame",
+        "reference_images"
+      ],
       "imageLimits": {
         "maximum": 10,
         "minimumSide": 240,
         "maximumSide": 8000,
         "maximumPixels": 64000000,
-        "maximumBytes": 20000000
+        "maximumBytes": 20000000,
+        "allowAlphaChannel": false
       },
       "uploadProfile": "aliyun-wan-reference"
     },
     {
       "id": "relay.unicompapi-www.happyhorse-1.0-video-edit.video",
-      "revision": 2,
+      "revision": 3,
       "authority": "relay",
       "modelKey": "happyhorse-1.0-video-edit",
       "source": {
         "url": "https://www.unicompapi.com/docs/models/happyhorse-1.0-video-edit",
-        "retrievedAt": "2026-10-19T10:05:05.731Z",
-        "sha256": "6c86e83a223ea7bce39b777f79e20ba26a9c68ec245ea4d9bebef4cad90a0fe2"
+        "retrievedAt": "2026-10-20T09:28:37.510Z",
+        "sha256": "270f9be96261dfb73fe3edcf4e3db6448a39f98a45afcce38f613d8c3b39df3f"
       },
       "protocol": "unicomp.media.v1",
       "features": [
@@ -1020,12 +1122,23 @@
       "quoteBinding": "input_digest_and_price",
       "referenceBinding": "explicit_roles",
       "maximumPromptLength": 2500,
+      "promptLimitEvidence": "documented_unicode_characters",
+      "supportedOutputFormats": [
+        "mp4"
+      ],
+      "supportedImageModes": [
+        "first_frame",
+        "last_frame",
+        "first_last_frame",
+        "reference_images"
+      ],
       "imageLimits": {
         "maximum": 9,
         "minimumSide": 300,
         "maximumSide": 8192,
         "maximumPixels": 16000000,
         "maximumBytes": 20971520,
+        "allowAlphaChannel": true,
         "maximumTotalBytes": 20971520
       },
       "uploadProfile": "happyhorse-edit-reference"

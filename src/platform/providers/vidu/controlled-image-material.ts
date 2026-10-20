@@ -41,12 +41,15 @@ export interface ControlledImageMaterialPort {
   resolve(input: {
     readonly projectId: ProjectId;
     readonly assetId: AssetId;
+    readonly maximumInputBytes?: number;
   }): Promise<ControlledImageMaterial>;
 }
 
 export interface ProjectImageMaterialResolverDependencies {
   readonly getSession: () => StorageProjectSession | undefined;
   readonly maximumInputBytes?: number;
+  /** Host-owned ceiling for provider-specific binary uploads; defaults stay unchanged. */
+  readonly maximumAllowedInputBytes?: number;
 }
 
 export class ProjectImageMaterialResolver
@@ -60,12 +63,22 @@ export class ProjectImageMaterialResolver
     if (!Number.isSafeInteger(this.maximumInputBytes) || this.maximumInputBytes < 1) {
       throw new TypeError('maximum image input bytes must be a positive integer');
     }
+    const ceiling = dependencies.maximumAllowedInputBytes ?? this.maximumInputBytes;
+    if (!Number.isSafeInteger(ceiling) || ceiling < this.maximumInputBytes || ceiling > 100_000_000) {
+      throw new TypeError('Invalid controlled image byte ceiling');
+    }
   }
 
   async resolve(input: {
     readonly projectId: ProjectId;
     readonly assetId: AssetId;
+    readonly maximumInputBytes?: number;
   }): Promise<ControlledImageMaterial> {
+    const maximumInputBytes = input.maximumInputBytes ?? this.maximumInputBytes;
+    if (!Number.isSafeInteger(maximumInputBytes) || maximumInputBytes < 1 ||
+        maximumInputBytes > (this.dependencies.maximumAllowedInputBytes ?? this.maximumInputBytes)) {
+      throw new ControlledImageMaterialError('material_too_large');
+    }
     const session = this.dependencies.getSession();
     if (!session || session.projectId !== input.projectId) {
       throw new ControlledImageMaterialError('project_unavailable');
@@ -124,7 +137,7 @@ export class ProjectImageMaterialResolver
     ) {
       throw new ControlledImageMaterialError('material_changed');
     }
-    if (inspection.sizeBytes > this.maximumInputBytes) {
+    if (inspection.sizeBytes > maximumInputBytes) {
       throw new ControlledImageMaterialError('material_too_large');
     }
     let bytes: Buffer;

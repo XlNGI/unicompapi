@@ -6,6 +6,7 @@ import { NewApiVideoAdapter } from '../../src/platform/providers/newapi/newapi-v
 import { NEWAPI_ADAPTER_VERSION, NEWAPI_PROTOCOL_VERSION, NEWAPI_VIDEO_ADAPTER_ID, NEWAPI_VIDEO_PROTOCOL_ID, NEWAPI_VIDEO_RESULT_SCHEMA_ID } from '../../src/platform/providers/newapi/newapi-contracts';
 import { UNICOMPAPI_WWW_BASE_URL, UNICOMPAPI_WWW_PROVIDER_PACKAGE_ID, UNICOMPAPI_WWW_CREDENTIAL_SCHEMA_ID, UNICOMPAPI_WWW_ENDPOINT_POLICY_ID } from '../../src/platform/providers/newapi/unicompapi-contracts';
 import { wwwVideoContract, wwwVideoConstraint, wwwVideoContractFingerprint, wwwVideoParameterSchema, wwwVideoUsageSchema } from '../../src/platform/providers/newapi/www-video-contracts';
+import { testPng } from './png';
 
 export const wwwTime = toIsoTimestamp('2026-10-15T07:00:00.000Z');
 export function wwwConnection(): ProviderConnection {
@@ -46,6 +47,7 @@ export function wwwAdapterFixture(key = 'happyhorse-1.1-t2v', feature?: ProductF
   let lookup: Record<string, unknown> = {};
   let approval = true;
   let downloadFailures = 0;
+  let quoteFailure: { code: string; message: string } | undefined;
   const approvals: { quotedAmountCnyMicro: number; modelKey: string }[] = [];
   const runtime = new NewApiSharedRuntime({ transport: { async send(request): Promise<NewApiHttpTransportResponse> {
     calls.push(request);
@@ -54,7 +56,11 @@ export function wwwAdapterFixture(key = 'happyhorse-1.1-t2v', feature?: ProductF
     let data: unknown;
     if (url.pathname === '/v1/assets') data = { data: { id: `uploaded-${calls.length}` } };
     else if (url.pathname === '/v1/requests') data = lookup;
-    else if (url.pathname.endsWith('/quote') || body.operation === 'quote') data = quoted;
+    else if (url.pathname.endsWith('/quote') || body.operation === 'quote') {
+      if (quoteFailure) return { status: 400, headers: { 'content-type': 'application/json', 'x-request-id': 'synthetic-quote-error' },
+        body: new TextEncoder().encode(JSON.stringify({ error: quoteFailure })) };
+      data = quoted;
+    }
     else if (request.method === 'POST') { if (submitError) throw new Error('synthetic disconnect'); data = { id: task.id, model: key, status: 'queued' }; }
     else if (url.pathname.endsWith('/content')) {
       if (downloadFailures-- > 0) throw new Error('synthetic content GET disconnect');
@@ -63,17 +69,22 @@ export function wwwAdapterFixture(key = 'happyhorse-1.1-t2v', feature?: ProductF
     else data = task;
     return { status: 200, headers: { 'content-type': 'application/json', 'x-unicomp-request-id': 'request-www-fixture' }, body: new TextEncoder().encode(JSON.stringify(data)) };
   } } });
-  const imageBytes = new Uint8Array([1, 2, 3]);
+  const imageBytes = testPng(1280, 720);
+  let image = { mimeType: 'image/png', width: 1280, height: 720, sizeBytes: imageBytes.length, bytes: imageBytes as Uint8Array };
+  const imageResolutions: { maximumInputBytes?: number }[] = [];
   const adapter = new NewApiVideoAdapter(runtime, { get: async () => connection },
     { useCredential: async (_input, action) => action({ schemaId: UNICOMPAPI_WWW_CREDENTIAL_SCHEMA_ID, schemaVersion: 1, values: { api_key: 'synthetic-www-test-key' } }) },
     { get: async () => wwwVideoParameterSchema(wwwVideoContract(key)!, route.productFeature) },
-    { resolve: async ({ assetId }) => ({ assetId, mimeType: 'image/png', width: 1280, height: 720, sizeBytes: 3, bytes: imageBytes }) },
+    { resolve: async ({ assetId, maximumInputBytes }) => { imageResolutions.push({ maximumInputBytes }); return { assetId, ...image }; } },
     { append: async o => { usage.push(o); } }, { nextProviderUsageObservationId: () => toProviderUsageObservationId('usage-www-fixture') },
-    undefined, { resolve: async ({ assetId }) => ({ assetId, mimeType: 'video/mp4', durationMs: 4000, sizeBytes: 3, bytes: imageBytes }) },
+    undefined, { resolve: async ({ assetId }) => ({ assetId, mimeType: 'video/mp4', durationMs: 4000, sizeBytes: 3, bytes: new Uint8Array([1, 2, 3]) }) },
     { confirm: async input => { approvals.push(input); return approval; } });
   const request = { projectId: route.projectId, prompt: 'A synthetic orange cup on a white table.', invocationAttemptId: toProviderInvocationAttemptId('attempt-www-fixture'),
-    parameterValues: {  }, ...(route.productFeature === 'image_to_video' || route.productFeature === 'video_edit' ? { assetId: 'asset-www-fixture' } : {}) };
-  return { route, request, adapter, calls, usage, approvals, setApproval: (value: boolean) => { approval = value; }, setConnection: (v: ProviderConnection) => { connection = v; },
+    parameterValues: key === 'MiniMax-H3' ? { resolution: '2K', ratio: '16:9', duration: 4, generate_audio: true, watermark: false } : {},
+    ...(route.productFeature === 'image_to_video' || route.productFeature === 'video_edit' ? { assetId: 'asset-www-fixture' } : {}) };
+  return { route, request, adapter, calls, usage, approvals, imageResolutions,
+    setImage: (value: typeof image) => { image = value; }, setQuoteFailure: (value: typeof quoteFailure) => { quoteFailure = value; },
+    setApproval: (value: boolean) => { approval = value; }, setConnection: (v: ProviderConnection) => { connection = v; },
     setDownloadFailures: (count: number) => { downloadFailures = count; },
     setQuote: (v: Record<string, unknown>) => { quoted = { ...quoted, ...v }; }, setTask: (v: Record<string, unknown>) => { task = { ...task, ...v }; },
     disconnect: (value: Record<string, unknown> = {}) => { submitError = true; lookup = value; },

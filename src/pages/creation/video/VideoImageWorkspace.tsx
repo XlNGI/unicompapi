@@ -76,6 +76,7 @@ export function VideoImageWorkspace({
   const [previews, setPreviews] = useState<Readonly<Record<string, VideoWorkspaceMaterialPreviewDto>>>({});
   const [previewFailures, setPreviewFailures] = useState<Readonly<Record<string, boolean>>>({});
   const [busy, setBusy] = useState(false);
+  const [promptLimit, setPromptLimit] = useState<number>();
   const [historyRefreshKey, setHistoryRefreshKey] = useState(0);
   const [expectedWorkId, setExpectedWorkId] = useState<string>();
   const [expectedTaskId, setExpectedTaskId] = useState<string>();
@@ -651,14 +652,13 @@ export function VideoImageWorkspace({
                 aria-label="原始创作需求"
                 as="textarea"
                 className="uc-image-professional__prompt-textarea"
-                maxLength={3000}
                 onChange={(value) => changePrompt('originalInput', value)}
                 placeholder="描述画面变化和期望效果"
                 rows={8}
                 value={draft.prompt.originalInput}
               />
             </div>
-            <small>{draft.prompt.originalInput.length} / 3000</small>
+            <small>{Array.from(draft.prompt.originalInput).length}{promptLimit ? ` / ${promptLimit}` : ''} 字符</small>
           </div>
           <CreationAdvancedSection
             defaultOpen={Boolean(draft.imageToVideo.materials) || unsupportedContexts.length > 0}
@@ -730,12 +730,11 @@ export function VideoImageWorkspace({
             <BufferedPromptInput
               key={`${draft.draftId}:finalPrompt`}
               as="textarea"
-              maxLength={5000}
               onChange={(value) => changePrompt('finalPrompt', value)}
               rows={7}
               value={draft.prompt.finalPrompt}
             />
-            <small>{draft.prompt.finalPrompt.length} / 5000</small>
+            <small>{Array.from(draft.prompt.finalPrompt).length}{promptLimit ? ` / ${promptLimit}` : ''} 字符</small>
           </label>
           <div className="uc-image-quick__result-actions">
             <Button
@@ -760,6 +759,7 @@ export function VideoImageWorkspace({
             </div>
           </header>
           <VideoFeatureSubmissionPanel
+            onPromptLimitChange={setPromptLimit}
             blockedReason={blockedReason}
             className="uc-image-feature-panel--compact"
             collapseParameters

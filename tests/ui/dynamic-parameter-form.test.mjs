@@ -85,7 +85,7 @@ test('dynamic parameter controls omit persistent state and move constraints into
 test('dynamic parameters use accessible controls and responsive stable layout', () => {
   assert.match(source, /<Toggle/);
   assert.match(source, /checkedChildren="开启"/);
-  assert.match(source, /unCheckedChildren=\{value === undefined && !field\.required \? '默认' : '关闭'\}/);
+  assert.match(source, /unCheckedChildren=\{value === undefined && !field\.required \? field\.requirement === 'unknown' \? '未填' : '默认' : '关闭'\}/);
   assert.match(source, /onClick=\{\(\) => onDiscreteChange\(undefined\)\}/);
   assert.match(source, /label=\{displayParameterKey/);
   assert.match(source, /aria-label=\{displayParameterKey/);

@@ -12,6 +12,7 @@ import {
   LocalVideoResultReceiver,
   NodeProjectStorage,
   ProjectImageMaterialResolver,
+  listWwwVideoContracts,
   SecureCredentialVault,
   StoredImmediateImageResultPort,
   ViduProviderPackage,
@@ -146,7 +147,8 @@ export class ElectronViduComposition {
     };
   } {
     const materials = new ProjectImageMaterialResolver({
-      getSession: options.getSession
+      getSession: options.getSession,
+      maximumAllowedInputBytes: Math.max(...listWwwVideoContracts().map(c => c.imageLimits.maximumBytes))
     });
     const connections = {
       get: async (connectionId: string) => {

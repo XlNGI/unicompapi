@@ -1,4 +1,5 @@
 import { randomUUID } from 'node:crypto';
+import { isDeepStrictEqual } from 'node:util';
 import {
   addExecutionToTask,
   createExecution,
@@ -9,6 +10,9 @@ import {
   toIsoTimestamp,
   toTaskId
 } from '../../domain';
+import { validateParameterValues } from '../../domain';
+import { pruneParameterValuesToSchema } from './provider-feature-candidates';
+import { routeParameterValues } from './project-video-feature';
 import type {
   ExecutionId,
   ProviderAccessCategory,
@@ -73,8 +77,15 @@ export class VideoDraftArtifactFactory implements SubmissionArtifactFactoryPort 
       throw new TypeError('Video route model capability evidence is unavailable');
     }
 
-    // Domain createVideoTask freezes materials against draft sources/slots.
-    // Feature-path parameterValues still go out via dispatchRequest.
+    const schema = input.candidate.parameterSchema;
+    const mode = input.subject.surface === 'quick' ? 'required_only' : 'full';
+    const actualParameters = validateParameterValues(schema, mode,
+      pruneParameterValuesToSchema(schema, mode, routeParameterValues(draft.featureSelection?.parameterValues ?? {})));
+    if (!isDeepStrictEqual(actualParameters, input.subject.parameterValues) ||
+        draft.prompt.finalPrompt !== input.subject.outboundTextSnapshot) {
+      throw new TypeError('Video draft changed after preparation');
+    }
+    // Freeze the same validated request used for dispatch, with its schema pin.
     const confirmation: VideoSubmissionConfirmationSnapshot = {
       mode: draft.mode,
       purpose: 'video_generation',
@@ -89,6 +100,7 @@ export class VideoDraftArtifactFactory implements SubmissionArtifactFactoryPort 
       privacyState: 'unknown',
       regionState: 'unknown',
       parameters: { ...(draft.generation.parameters?.values ?? {}) },
+      featureParameters: { schemaId: schema.schemaId, revision: schema.revision, values: structuredClone(actualParameters) },
       materials: materialsMatchingDraft(draft),
       contextReferences: draft.contextReferences.map((reference) => ({ ...reference })),
       input: modeInputMatchingDraft(draft),
@@ -133,7 +145,7 @@ export class VideoDraftArtifactFactory implements SubmissionArtifactFactoryPort 
         executionId: execution.id,
         ...(assetIds.length === 1 ? { assetId: assetIds[0] } : {}),
         ...(assetIds.length > 1 ? { assetIds } : {}),
-        parameterValues: input.subject.parameterValues
+        parameterValues: task.submission.kind === 'video_generation' ? structuredClone(task.submission.video!.featureParameters!.values) : actualParameters
       }
     };
   }

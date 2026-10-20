@@ -1,4 +1,5 @@
 export * from './entities/asset';
+export * from './entities/parameter-request';
 export * from './entities/conversation';
 export * from './entities/conversation-response';
 export * from './entities/conversation-intent-plan';

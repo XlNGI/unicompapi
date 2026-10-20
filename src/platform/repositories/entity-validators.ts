@@ -317,6 +317,10 @@ function isVideoSubmissionSnapshot(value: unknown): value is {
     value.regionState === 'unknown' &&
     isRecord(value.parameters) &&
     Object.values(value.parameters).every(isDynamicValue) &&
+    (value.featureParameters === undefined ||
+      isRecord(value.featureParameters) && isNonBlankString(value.featureParameters.schemaId) &&
+      Number.isSafeInteger(value.featureParameters.revision) && Number(value.featureParameters.revision) > 0 &&
+      isRecord(value.featureParameters.values) && Object.values(value.featureParameters.values).every(isDynamicValue)) &&
     Array.isArray(value.materials) &&
     value.materials.every(isVideoSubmissionMaterial) &&
     Array.isArray(value.contextReferences) &&

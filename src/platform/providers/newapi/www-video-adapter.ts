@@ -1,10 +1,12 @@
 import { createHash } from 'node:crypto';
 import { Readable } from 'node:stream';
-import { createProviderUsageObservation, parseProviderExecutionRouteSnapshot, toIsoTimestamp, validateParameterValues,
+import { createProviderUsageObservation, parseProviderExecutionRouteSnapshot, toIsoTimestamp, validateParameterValues, parameterRequestError,
   type ProviderConnection, type ProviderExecutionRouteSnapshotV1, type ProviderInvocationAttemptId, type ProviderSubmitOutcome,
   type UsageFactV1 } from '../../../domain';
 import type { ProviderAsyncOperationPort, ProviderAsyncOperationStatus } from '../provider-execution-lifecycle';
 import { VideoResultPortError, type VideoResultPort } from '../../videos/video-result-port';
+import { imageHasAlphaChannel } from '../../files/image-alpha-channel';
+import { failureDiagnostic } from '../failure-diagnostic';
 import type { NewApiVideoConnectionResolverPort, NewApiVideoCredentialResolverPort, ControlledNewApiImagePort,
   NewApiVideoUsageObservationSinkPort, NewApiVideoAdapterIdFactory } from './newapi-video-adapter';
 import { NewApiRuntimeError, type NewApiSharedRuntime, type WwwVideoOperation } from './newapi-runtime';
@@ -37,6 +39,11 @@ interface Context {
 const encode = (value: unknown) => new TextEncoder().encode(JSON.stringify(value));
 const fail = () => new NewApiRuntimeError('invalid_response', 'not_retryable');
 const invalid = () => new NewApiRuntimeError('invalid_parameters', 'not_retryable');
+const invalidInput = (message: string) => {
+  const error = invalid();
+  error.failureDiagnostic = failureDiagnostic({ stage: 'before_request', code: 'invalid_parameters', message });
+  return error;
+};
 const record = (v: unknown): v is Record<string, unknown> => typeof v === 'object' && v !== null && !Array.isArray(v);
 const id = (v: unknown): string => { if (typeof v !== 'string' || !/^[A-Za-z0-9_-]{1,200}$/.test(v)) throw fail(); return v; };
 function json(bytes: Uint8Array): Record<string, unknown> {
@@ -63,17 +70,20 @@ export class WwwVideoAdapter implements ProviderAsyncOperationPort, VideoResultP
       if (!this.quoteApproval) throw invalid();
       const r = input.request;
       if (!record(r) || r.projectId !== route.projectId || typeof r.prompt !== 'string' || !r.prompt.trim() ||
-        r.prompt.length > contract.maximumPromptLength || typeof r.invocationAttemptId !== 'string') throw invalid();
+        typeof r.invocationAttemptId !== 'string') throw invalid();
       const values = validateParameterValues(wwwVideoParameterSchema(contract, route.productFeature), 'full', r.parameterValues);
       const assets: string[] = r.assetIds === undefined ? r.assetId === undefined ? [] : [id(r.assetId)] :
         Array.isArray(r.assetIds) ? r.assetIds.map(id) : (() => { throw invalid(); })();
       if (new Set(assets).size !== assets.length || r.assetId !== undefined && (assets.length !== 1 || assets[0] !== r.assetId)) throw invalid();
+      const requestError = parameterRequestError(wwwVideoParameterSchema(contract, route.productFeature).requestRules, {
+        parameters: values, prompt: r.prompt, imageCount: route.productFeature === 'video_edit' ? 0 : assets.length
+      });
+      if (requestError) throw invalidInput(requestError);
       const parameters = { ...values };
       const mode = route.productFeature === 'text_to_video' ? 'text_to_video' : route.productFeature === 'video_edit' ? 'reference_video' :
         typeof values.generation_mode === 'string' ? values.generation_mode : contract.modelKey.endsWith('-i2v') ? 'first_frame' : 'reference_images';
       const roles = this.roles(contract, route.productFeature, mode, assets.length);
       if (contract.fields.some(f => f.name === 'generation_mode')) parameters.generation_mode = mode;
-      if (parameters.frames !== undefined && parameters.duration_seconds !== undefined) throw invalid();
       context = { route, contract, invocationAttemptId: id(r.invocationAttemptId) as ProviderInvocationAttemptId, usagePersisted: false };
       // Deterministic key survives local recovery through the durable invocation attempt.
       key = `www-video-${createHash('sha256').update(context.invocationAttemptId).digest('hex')}`;
@@ -93,12 +103,18 @@ export class WwwVideoAdapter implements ProviderAsyncOperationPort, VideoResultP
             video.sizeBytes > 100_000_000 || video.durationMs < 3000 || video.durationMs > 60000) throw invalid();
           bytes = video.bytes; mimeType = video.mimeType;
         } else {
-          const image = await this.images.resolve({ projectId: route.projectId, assetId: assets[i] });
+          const image = await this.images.resolve({ projectId: route.projectId, assetId: assets[i], maximumInputBytes: contract.imageLimits.maximumBytes });
           const lim = contract.imageLimits;
           if (image.assetId !== assets[i] || !['image/png', 'image/jpeg'].includes(image.mimeType) || image.sizeBytes !== image.bytes.byteLength ||
             image.sizeBytes > lim.maximumBytes || Math.min(image.width, image.height) < lim.minimumSide || Math.max(image.width, image.height) > lim.maximumSide ||
             image.width * image.height > lim.maximumPixels) throw invalid();
           if (contract.modelKey === 'happyhorse-1.1-i2v' && (image.width / image.height < 0.4 || image.width / image.height > 2.5)) throw invalid();
+          if ('allowAlphaChannel' in lim && !lim.allowAlphaChannel) {
+            let hasAlpha: boolean;
+            try { hasAlpha = imageHasAlphaChannel(image.bytes, image.mimeType); }
+            catch { throw invalidInput('参考图片格式不完整，请重新导入有效的 PNG 或 JPEG 图片。'); }
+            if (hasAlpha) throw invalidInput('当前模型要求图片不含透明通道，请转换为不含透明通道的 PNG 或 JPEG 后重新导入。');
+          }
           total += image.sizeBytes;
           if ('maximumTotalBytes' in lim && lim.maximumTotalBytes !== undefined && total > lim.maximumTotalBytes) throw invalid();
           bytes = image.bytes; mimeType = image.mimeType as 'image/png' | 'image/jpeg';
@@ -129,7 +145,7 @@ export class WwwVideoAdapter implements ProviderAsyncOperationPort, VideoResultP
       // The quote pins uploaded bytes; also reject a changed local source before paid submission.
       for (let i = 0; i < assets.length; i++) {
         const current = route.productFeature === 'video_edit' ? await this.videos?.resolve({ projectId: route.projectId, assetId: assets[i] }) :
-          await this.images.resolve({ projectId: route.projectId, assetId: assets[i] });
+          await this.images.resolve({ projectId: route.projectId, assetId: assets[i], maximumInputBytes: contract.imageLimits.maximumBytes });
         if (!current || createHash('sha256').update(current.bytes).digest('hex') !== localHashes[i]) throw invalid();
       }
       const body = encode({ ...original, ...(contract.protocol === 'h3-actions' ? { operation: 'submit' } : {}),
@@ -153,10 +169,13 @@ export class WwwVideoAdapter implements ProviderAsyncOperationPort, VideoResultP
           return { kind: 'accepted_async', providerOperationId: remote, state: 'queued' };
         } catch { /* Preserve unknown outcome and its durable attempt; no generation retry. */ }
       }
-      if (!started) return { kind: 'failed_before_submission', message: 'The WWW video generation request was not submitted', retryability: 'not_retryable' };
+      const diagnostic = error instanceof NewApiRuntimeError ? error.failureDiagnostic : undefined;
+      if (!started) return { kind: 'failed_before_submission', message: 'The WWW video generation request was not submitted', retryability: 'not_retryable',
+        ...(diagnostic ? { failureDiagnostic: diagnostic } : {}) };
       const explicit = error instanceof NewApiRuntimeError && ['authentication_failed', 'permission_denied', 'insufficient_balance', 'invalid_parameters', 'invalid_request', 'model_not_found'].includes(error.code);
       if (started && !explicit) return { kind: 'submission_outcome_unknown', message: '视频提交结果待核，请查询原请求；不要重新生成。' };
-      return { kind: 'failed_before_submission', message: error instanceof NewApiRuntimeError ? error.message : '视频参数或素材校验未通过。', retryability: 'not_retryable' };
+      return { kind: 'failed_before_submission', message: error instanceof NewApiRuntimeError ? error.message : '视频参数或素材校验未通过。', retryability: 'not_retryable',
+        ...(diagnostic ? { failureDiagnostic: diagnostic } : {}) };
     }
   }
 

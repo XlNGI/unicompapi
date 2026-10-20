@@ -8,6 +8,7 @@ import { UNICOMPAPI_WWW_PROVIDER_PACKAGE_ID, UNICOMPAPI_WWW_BASE_URL, UNICOMPAPI
 import catalog from './www-video-catalog.json';
 import retainedH3 from './www-h3-contract.v1.json';
 import previousCatalog from './www-video-catalog.previous.json';
+import retainedCatalog from './www-video-catalog.retained-20261019.json';
 
 export const WWW_VIDEO_CONTRACT_PREFIX = 'relay.unicompapi-www.';
 export const wwwVideoUsageSchema = createUsageSchema({ id: toUsageSchemaId('usage.unicompapi-www.video'), revision: 1,
@@ -19,6 +20,8 @@ export function wwwVideoContract(key: string, revision?: number): WwwVideoContra
   if (revision === undefined || current?.revision === revision) return current;
   // Retained contracts are exclusively for querying/downloading accepted tasks.
   if (key === retainedH3.modelKey && revision === retainedH3.revision) return retainedH3 as WwwVideoContract;
+  const lastCurrent = retainedCatalog.contracts.find(c => c.modelKey === key && c.revision === revision);
+  if (lastCurrent) return lastCurrent as unknown as WwwVideoContract;
   const retained = previousCatalog.contracts.find(c => c.modelKey === key && c.revision === revision);
   if (retained) return retained as unknown as WwwVideoContract;
   return undefined;
@@ -35,10 +38,14 @@ export function wwwVideoParameterSchema(contract: WwwVideoContract, feature: Pro
     // This surface registers one video. Auxiliary images and mixed-media inputs
     // have no controlled receiver here, so their switches must not be offered.
     if (name === 'return_last_frame' || name === 'omni_reference_task_type') return [];
-    const schema = raw as JsonValueSchema;
+    const schema: JsonValueSchema = name === 'output_format' && 'supportedOutputFormats' in contract
+      ? { ...raw, enum: (raw as JsonValueSchema).enum instanceof Array
+        ? ((raw as JsonValueSchema).enum as string[]).filter(v => (contract.supportedOutputFormats as readonly string[]).includes(v)) : [] }
+      : raw as JsonValueSchema;
     if (name === 'generation_mode') {
       if (feature !== 'image_to_video') return [];
-      const modes = (schema.enum as readonly string[]).filter(m => ['first_frame', 'first_last_frame', 'reference_images', 'last_frame'].includes(m));
+      const modes = (schema.enum as readonly string[]).filter(m =>
+        ('supportedImageModes' in contract ? contract.supportedImageModes as readonly string[] : schema.enum as readonly string[]).includes(m));
       return [{ fieldId: name, labelId: `provider.parameter.${name}`, order: 10, valueType: 'enum' as const,
         exposure: 'user_required' as const, required: true, defaultPolicy: 'require_user_value' as const, options: modes }];
     }
@@ -46,12 +53,25 @@ export function wwwVideoParameterSchema(contract: WwwVideoContract, feature: Pro
     const valueType = options ? 'enum' as const : schema.type as 'integer' | 'boolean' | 'string';
     return [{ fieldId: name, labelId: `provider.parameter.${name}`, order: 20 + contract.fields.findIndex(f => f.name === name) * 10,
       valueType, required: documentedRequired === true, exposure: documentedRequired === true ? 'user_required' as const : 'user_optional' as const,
-      defaultPolicy: documentedRequired === true ? 'require_user_value' as const : 'omit_use_provider_default' as const,
+      requirement: documentedRequired === null ? 'unknown' as const : documentedRequired ? 'required' as const : 'optional' as const,
+      defaultPolicy: documentedRequired === true ? 'require_user_value' as const : documentedRequired === null ? 'omit_without_default_guarantee' as const : 'omit_use_provider_default' as const,
       validationSchema: schema, ...(options ? { options } : {}), ...(typeof schema.minimum === 'number' ? { minimum: schema.minimum } : {}),
       ...(typeof schema.maximum === 'number' ? { maximum: schema.maximum } : {}) }];
   });
   return { schemaVersion: 2, schemaId: `parameters.unicompapi-www.${contract.modelKey}.${feature}`, revision: contract.revision,
-    productFeature: feature, fields };
+    productFeature: feature, fields,
+    ...('parameterExample' in contract && contract.parameterExample ? { exampleValues: contract.parameterExample } : {}),
+    requestRules: {
+      maximumPromptCharacters: contract.maximumPromptLength,
+      ...(contract.protocol === 'h3-actions' ? { requireParameters: true } : {}),
+      ...(contract.fields.some(f => f.name === 'frames') ? { exclusiveFields: [['frames', 'duration_seconds']] } : {}),
+      imageCount: { minimum: feature === 'image_to_video' ? 1 : 0, maximum: feature === 'image_to_video' ? contract.imageLimits.maximum : 0 },
+      ...(feature === 'image_to_video' ? { modeImageCounts: [
+        { fieldId: 'generation_mode', value: 'first_frame', minimum: 1, maximum: 1 },
+        { fieldId: 'generation_mode', value: 'last_frame', minimum: 1, maximum: 1 },
+        { fieldId: 'generation_mode', value: 'first_last_frame', minimum: 2, maximum: 2 }
+      ] } : {})
+    } };
 }
 export function wwwVideoFeatureContracts() {
   return catalog.contracts.flatMap(c => c.features.map(f => ({ parameterSchema: wwwVideoParameterSchema(c, f as ProductFeature),

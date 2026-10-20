@@ -54,6 +54,7 @@ export function VideoQuickWorkspace({
 }: VideoQuickWorkspaceProps) {
   const videoWorkspaces = window.unicomp?.videoWorkspaces;
   const [busy, setBusy] = useState(false);
+  const [promptLimit, setPromptLimit] = useState<number>();
   const [historyRefreshKey, setHistoryRefreshKey] = useState(0);
   const [expectedWorkId, setExpectedWorkId] = useState<string>();
   const [expectedTaskId, setExpectedTaskId] = useState<string>();
@@ -154,13 +155,12 @@ export function VideoQuickWorkspace({
             <span>描述你想生成的视频</span>
             <Input
               as="textarea"
-              maxLength={1000}
               onChange={(value) => changePrompt(value)}
               placeholder="例如：海边日出时，一辆复古列车沿悬崖缓慢驶过"
               rows={7}
               value={draft.prompt.originalInput}
             />
-            <small>{draft.prompt.originalInput.length} / 1000</small>
+            <small>{Array.from(draft.prompt.originalInput).length}{promptLimit ? ` / ${promptLimit}` : ''} 字符</small>
           </label>
           <div className="uc-image-feature-panel__mode-fact">
             <LuSparkles aria-hidden="true" />
@@ -192,10 +192,11 @@ export function VideoQuickWorkspace({
             <span aria-hidden="true">2</span>
             <div>
               <h2>服务与提交</h2>
-              <p>选择模型后由后台锁定 API；快速视频使用服务默认参数，可直接生成。</p>
+              <p>选择模型并检查参数，生成前确认实时报价。</p>
             </div>
           </header>
           <VideoFeatureSubmissionPanel
+            onPromptLimitChange={setPromptLimit}
             blockedReason={legacyReason}
             className="uc-image-feature-panel--compact"
             dirty={dirty}

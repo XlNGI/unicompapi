@@ -2,6 +2,7 @@ import type { ProviderFailureDiagnosticV1 } from '../../domain';
 import { randomUUID } from 'node:crypto';
 import { initializeProviderFeatureProfiles } from '../providers/provider-feature-profile-initialization';
 import { failureDiagnostic } from '../providers/failure-diagnostic';
+import { listWwwVideoContracts } from '../providers/newapi/www-video-contracts';
 import {
   createProviderInvocationEvent,
   createLocalResultObservation,
@@ -289,7 +290,8 @@ export function createVideoFeatureControllerRuntime(
     providerRegistry: options.providerRegistry
   });
   const materials = new ProjectImageMaterialResolver({
-    getSession: () => options.session
+    getSession: () => options.session,
+    maximumAllowedInputBytes: Math.max(...listWwwVideoContracts().map(c => c.imageLimits.maximumBytes))
   });
   const dispatch = createVideoFeatureDispatchBridge({
     ...videoSubmission,
@@ -358,7 +360,7 @@ export function createVideoFeatureControllerRuntime(
 
     let workId: string | undefined;
     let localResultError: string | undefined;
-    let diagnostic: ProviderFailureDiagnosticV1 | undefined;
+    let diagnostic: ProviderFailureDiagnosticV1 | undefined = [...acceptance.invocationEvents].reverse().find(e => e.failureDiagnostic)?.failureDiagnostic;
     let finalStatus = orchestration.status;
     const acceptedExecutionId = acceptance.subjectArtifacts.execution.id;
     // The receipt ends the renderer request, so subsequent local failures must
@@ -512,6 +514,7 @@ export function createVideoFeatureControllerRuntime(
     } else if (acceptance.intent.status === 'failed_before_submission') {
       const safeCode = latestSafeCode(acceptance.invocationEvents);
       localResultError = userFacingSubmissionFeedback(safeCode, 'before_request');
+      if (diagnostic) localResultError += ` 原因：${diagnostic.message}`;
       await lifecycle.applyUnrecordedSubmitOutcome({
         executionId: acceptance.subjectArtifacts.execution.id,
         outcome: 'failed_before_submission',
@@ -520,6 +523,7 @@ export function createVideoFeatureControllerRuntime(
     } else if (acceptance.intent.status === 'failed') {
       const safeCode = latestSafeCode(acceptance.invocationEvents);
       localResultError = userFacingSubmissionFeedback(safeCode, 'after_request');
+      if (diagnostic) localResultError += ` 原因：${diagnostic.message}`;
       await lifecycle.applyExplicitSubmissionFailure({
         executionId: acceptance.subjectArtifacts.execution.id,
         message: localResultError
@@ -660,7 +664,7 @@ function userFacingSubmissionFeedback(
 ): string {
   switch (safeCode) {
     case 'www_video.generation_not_submitted':
-      return '报价、参数或素材检查未通过，尚未提交收费生成。请检查报价上限和素材后重试。';
+      return '报价、参数或素材检查未通过，尚未提交收费生成。请检查模型参数、素材及服务商返回的失败原因后重试。';
     case 'vidu.credential_unavailable':
       return '凭证不可用：请到服务商连接里重新保存 Token 后再生成';
     case 'vidu.credit_insufficient':

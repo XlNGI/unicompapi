@@ -9,6 +9,7 @@ export type DynamicParameterValue =
   | Readonly<Record<string, unknown>>;
 
 export interface DynamicParameterField {
+  readonly requirement?: 'required' | 'optional' | 'unknown';
   readonly validationSchema?: JsonValueSchema;
   readonly fieldId: string;
   readonly labelId: string;

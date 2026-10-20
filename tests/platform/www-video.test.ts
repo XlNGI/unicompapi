@@ -4,13 +4,14 @@ import { listWwwVideoContracts, wwwVideoContract, wwwVideoContractFingerprint, w
 import { type ProviderRegistrySnapshot } from '../../src/platform/providers/provider-registry';
 import { wwwAdapterFixture, wwwConnection, wwwTime } from '../fixtures/www-video';
 import previousCatalog from '../../src/platform/providers/newapi/www-video-catalog.previous.json';
+import retainedCatalog from '../../src/platform/providers/newapi/www-video-catalog.retained-20261019.json';
 
 describe('WWW exact gateway video contracts and lifecycle', () => {
   it('uses generate example types without inheriting regenerate or understand restrictions', () => {
     const schema = wwwVideoParameterSchema(wwwVideoContract('MiniMax-H3')!, 'text_to_video');
-    expect(schema.revision).toBe(3);
+    expect(schema.revision).toBe(4);
     expect(schema.fields.map(f => f.fieldId)).toEqual(['resolution', 'ratio', 'duration', 'generate_audio', 'watermark']);
-    expect(validateParameterValues(schema, 'full', {})).toEqual({});
+    expect(() => validateParameterValues(schema, 'full', {})).toThrow(/空参数/);
     expect(validateParameterValues(schema, 'full', { resolution: '768P', generate_audio: false, duration: 3 }))
       .toMatchObject({ resolution: '768P', generate_audio: false, duration: 3 });
     // Accepted locally means eligible for authoritative quote validation, not
@@ -30,7 +31,7 @@ describe('WWW exact gateway video contracts and lifecycle', () => {
     expect(x.approvals).toMatchObject([{ quotedAmountCnyMicro: 7_040_000 }]);
     const submitted = JSON.parse(new TextDecoder().decode(x.calls.at(-1)!.body));
     expect(submitted.expected_quote_amount).toBe(7_040_000);
-    expect(submitted.parameters).toEqual({});
+    expect(submitted.parameters).toEqual(x.request.parameterValues);
   });
   it.each(['maximum_cost_cny', 'made_up_field'])('rejects a non-model input at the adapter boundary: %s', async field => {
     const x = wwwAdapterFixture('MiniMax-H3');
@@ -38,7 +39,7 @@ describe('WWW exact gateway video contracts and lifecycle', () => {
       .toMatchObject({ kind: 'failed_before_submission' });
     expect(x.calls).toHaveLength(0);
   });
-  it.each(previousCatalog.contracts)('retains the previous $modelKey contract for original tasks only', async previous => {
+  it.each([...previousCatalog.contracts, ...retainedCatalog.contracts])('retains the previous $modelKey contract for original tasks only', async previous => {
     const x = wwwAdapterFixture(previous.modelKey, previous.features[0] as 'text_to_video');
     const retained = wwwVideoContract(previous.modelKey, previous.revision)!;
     expect(retained).toEqual(previous);
@@ -113,6 +114,7 @@ describe('WWW exact gateway video contracts and lifecycle', () => {
     it(`${c.modelKey} / ${f}: quote, exact submit, original query, original bearer download`, async () => {
       const x = wwwAdapterFixture(c.modelKey, f as 'text_to_video');
       const request = { ...x.request, parameterValues: {
+        ...x.request.parameterValues,
         ...(f === 'image_to_video' && c.fields.some(p => p.name === 'generation_mode') ? { generation_mode: 'first_frame' } : {}) } };
       let hook = 0;
       const outcome = await x.adapter.submit({ routeSnapshot: x.route, request, beforeRequestStarted: async () => { hook++; } });

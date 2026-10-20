@@ -1,3 +1,5 @@
+import type { ParameterRequestRules } from '../domain/entities/parameter-request';
+
 export const videoFeatureIpcChannels = {
   listCandidates: 'video-feature:list-candidates',
   prepareSubmission: 'video-feature:prepare-submission',
@@ -37,6 +39,7 @@ export type VideoFeatureIpcResult<T> =
     };
 
 export interface VideoFeatureParameterFieldDto {
+  readonly requirement?: 'required' | 'optional' | 'unknown';
   readonly validationSchema?: Readonly<Record<string, unknown>>;
   readonly fieldId: string;
   readonly labelId: string;
@@ -70,6 +73,8 @@ export interface VideoFeatureCandidateDto {
   readonly connectionName: string;
   readonly modelName: string;
   readonly parameterSchema: {
+    readonly requestRules?: ParameterRequestRules;
+    readonly exampleValues?: Readonly<Record<string, string | number | boolean>>;
     readonly schemaVersion: 2;
     readonly schemaId: string;
     readonly revision: number;

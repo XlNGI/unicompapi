@@ -1,4 +1,5 @@
 import { InvariantViolationError } from '../errors';
+import type { ParameterValue } from './product-feature';
 import type {
   AssetId,
   DraftId,
@@ -118,6 +119,12 @@ export interface VideoSubmissionConfirmationSnapshot {
   readonly privacyState: 'unknown';
   readonly regionState: 'unknown';
   readonly parameters: Readonly<Record<string, VideoDynamicParameterValue>>;
+  /** Validated values actually dispatched by the feature submission path. */
+  readonly featureParameters?: {
+    readonly schemaId: string;
+    readonly revision: number;
+    readonly values: Readonly<Record<string, ParameterValue>>;
+  };
   readonly materials: readonly VideoSubmissionMaterialSnapshot[];
   readonly contextReferences: readonly VideoContextReference[];
   readonly input: VideoSubmissionModeInput;
@@ -303,6 +310,16 @@ function validateVideoConfirmationAgainstDraft(
   draft: VideoWorkspaceDraft,
   confirmation: VideoSubmissionConfirmationSnapshot
 ): void {
+  if (confirmation.featureParameters) {
+    const frozen = confirmation.featureParameters;
+    const selection = draft.featureSelection;
+    if (!frozen.schemaId.trim() || !Number.isSafeInteger(frozen.revision) || frozen.revision < 1 ||
+        selection?.parameterSchemaId !== undefined && selection.parameterSchemaId !== frozen.schemaId ||
+        selection?.parameterSchemaRevision !== undefined && selection.parameterSchemaRevision !== frozen.revision ||
+        Object.entries(frozen.values).some(([key, value]) => !sameStructuredValue(selection?.parameterValues[key], value))) {
+      throw new InvariantViolationError('video feature parameters do not match the draft snapshot');
+    }
+  }
   if (
     draft.generation.model &&
     (draft.generation.model.modelId !== confirmation.modelId ||
@@ -415,6 +432,7 @@ function cloneVideoConfirmation(
   return {
     ...confirmation,
     parameters: structuredClone(confirmation.parameters),
+    ...(confirmation.featureParameters ? { featureParameters: structuredClone(confirmation.featureParameters) } : {}),
     materials: confirmation.materials.map((material) => ({
       ...material,
       target: { ...material.target }

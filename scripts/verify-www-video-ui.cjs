@@ -7,7 +7,9 @@ const { app, BrowserWindow } = require('electron');
 // Production React workbench; synthetic local IPC fixture and decoded local media only.
 const workspace = path.resolve(__dirname, '..');
 const h3 = process.argv.includes('--h3');
-const output = path.join(workspace, 'outputs/www-video-contracts', h3 ? 'ui-parameters-h3' : 'ui-parameters-edit');
+const seedance = process.argv.includes('--seedance');
+const textModel = h3 || seedance;
+const output = path.join(workspace, 'outputs/video-parameter-repair-20261020', h3 ? 'ui-h3' : seedance ? 'ui-seedance' : 'ui-edit');
 app.setPath('userData', path.join(os.tmpdir(), 'unicomp-www-ui-' + process.pid));
 app.disableHardwareAcceleration();
 app.commandLine.appendSwitch('disable-background-networking');
@@ -34,8 +36,8 @@ async function main() {
   const loaded = new Module(path.join(workspace, 'ui-contract.cjs'));
   loaded.filename = path.join(workspace, 'ui-contract.cjs'); loaded.paths = module.paths;
   loaded._compile(compiled.outputFiles[0].text, loaded.filename);
-  const modelKey = h3 ? 'MiniMax-H3' : 'happyhorse-1.0-video-edit';
-  const schema = loaded.exports.wwwVideoParameterSchema(loaded.exports.wwwVideoContract(modelKey), h3 ? 'text_to_video' : 'video_edit');
+  const modelKey = h3 ? 'MiniMax-H3' : seedance ? 'doubao-seedance-2-0-260128' : 'happyhorse-1.0-video-edit';
+  const schema = loaded.exports.wwwVideoParameterSchema(loaded.exports.wwwVideoContract(modelKey), textModel ? 'text_to_video' : 'video_edit');
   const candidate = { schemaVersion: 1, candidateId: 'candidate-0', providerName: 'WWW local fixture', connectionName: 'Isolated fixture',
     modelName: modelKey, available: true, unavailableReasons: [], parameterSchema: schema,
     usageSchema: { schemaVersion: 1, schemaId: 'usage.unicompapi-www.video', revision: 1 }, cost: { state: 'unknown' } };
@@ -49,7 +51,7 @@ async function main() {
       const end = code.indexOf('function makeDraft', start);
       assert.ok(start >= 0 && end > start);
       code = code.slice(0, start) + 'const candidates: VideoFeatureCandidateDto[] = ' + JSON.stringify([candidate]) + ';\n\n' + code.slice(end);
-      if (h3) return code.replace('parameterValues: {}', 'parameterValues: { generate_audio: true }');
+      if (textModel) return code;
       return code.replace("productFeature: textVideo ? 'text_to_video' : 'image_to_video'", "productFeature: 'video_edit'")
         .replace("originalInput: textVideo ? 'Local video prompt' : '', finalPrompt: textVideo ? 'Local video prompt' : ''", "originalInput: '将杯子改成蓝色', finalPrompt: '将杯子改成蓝色'")
         .replace("assetId: 'fixture-image', mediaKind: 'image' as const", "assetId: 'fixture-video', mediaKind: 'video' as const")
@@ -65,21 +67,48 @@ async function main() {
     webPreferences: { contextIsolation: true, nodeIntegration: false, backgroundThrottling: false, spellcheck: false, offscreen: true } });
   window.webContents.session.webRequest.onBeforeRequest({ urls: ['http://*/*', 'https://*/*'] }, (_request, callback) => { externalRequests++; callback({ cancel: true }); });
   window.webContents.on('console-message', (_event, level, message) => { if (level >= 3) errors.push(message); });
-  await window.loadFile(path.join(temporary, 'index.html'), h3 ? { query: { parameters: '1' } } : {});
+  await window.loadFile(path.join(temporary, 'index.html'), textModel ? { query: { parameters: '1' } } : {});
+  if (seedance) {
+    await until('window.workbenchHarness?.ready && document.body.textContent.includes("doubao-seedance-2-0-260128")');
+    const setPrompt = count => js(`(() => {
+      const input = document.querySelector('textarea');
+      Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value').set.call(input, '😀'.repeat(${count}));
+      input.dispatchEvent(new Event('input', { bubbles: true }));
+    })()`);
+    await setPrompt(20000);
+    await until('workbenchHarness.state().drafts[0].prompt.finalPrompt.length === 40000');
+    assert.equal(await js('document.body.textContent.includes("20000 / 20000")'), true);
+    assert.equal(await js('Array.from(document.querySelectorAll("button")).find(e => e.textContent.trim() === "生成").disabled'), false);
+    await setPrompt(20001);
+    await until('Array.from(document.querySelectorAll("button")).find(e => e.textContent.trim() === "生成").disabled');
+    assert.equal(await js('workbenchHarness.counters.prepares'), 0);
+    checks.push('production prompt input preserves 20,000 emoji without UTF-16 truncation', 'counter and Generate enforce the selected schema Unicode limit');
+    assert.deepEqual(errors, []); assert.equal(externalRequests, 0);
+    await fs.writeFile(path.join(output, 'validation.json'), JSON.stringify({ status: 'passed', checks, errors, externalRequests,
+      boundaries: 'production React; local synthetic IPC; no provider call' }, null, 2));
+    console.log(JSON.stringify({ status: 'passed', checks: checks.length, externalRequests })); return;
+  }
   if (h3) {
     await until('window.workbenchHarness?.ready && document.body.textContent.includes("MiniMax-H3")');
     await js('Array.from(document.querySelectorAll("details")).find(e => e.querySelector("summary")?.textContent.includes("模型参数")).open = true');
     await until('document.querySelector("input[aria-label=分辨率]")');
+    assert.equal(await js('Array.from(document.querySelectorAll("button")).find(e => e.textContent.trim() === "生成").disabled'), true);
+    assert.equal(await js('document.body.textContent.includes("不接受空参数")'), true);
+    assert.deepEqual(await js('workbenchHarness.state().drafts[0].featureSelection.parameterValues'), {});
+    await js('Array.from(document.querySelectorAll("button")).find(e => e.textContent.trim() === "填入官方示例").click()');
+    await until('workbenchHarness.state().drafts[0].featureSelection.parameterValues.duration === 4');
+    assert.deepEqual(await js('workbenchHarness.state().drafts[0].featureSelection.parameterValues'), schema.exampleValues);
+    assert.equal(await js('Array.from(document.querySelectorAll("button")).find(e => e.textContent.trim() === "生成").disabled'), false);
     assert.equal(await js('document.body.textContent.includes("费用上限") || document.body.textContent.includes("报价上限") || document.querySelector("section[aria-label=费用授权]") !== null'), false);
     await js('window.audioSwitch = Array.from(document.querySelectorAll(".uc-dynamic-parameters__field")).find(e => e.textContent.includes("生成音频")).querySelector("[role=switch]")');
     assert.equal(await js('window.audioSwitch.getAttribute("aria-checked")'), 'true');
     await js('window.audioSwitch.click()');
     await until('workbenchHarness.state().drafts[0].featureSelection.parameterValues.generate_audio === false');
     assert.equal(await js('window.audioSwitch.closest(".uc-dynamic-parameters__field").textContent.includes("关闭")'), true);
-    // Explicit false can return to omission, and omission must display default.
-    await js('document.querySelector("button[aria-label=生成音频使用服务商默认]").click()');
+    // Unknown official requirements cannot be described as a provider default.
+    await js('document.querySelector("button[aria-label=生成音频清除填写]").click()');
     await until('!Object.hasOwn(workbenchHarness.state().drafts[0].featureSelection.parameterValues, "generate_audio")');
-    assert.equal(await js('window.audioSwitch.closest(".uc-dynamic-parameters__field").textContent.includes("默认")'), true);
+    assert.equal(await js('window.audioSwitch.closest(".uc-dynamic-parameters__field").textContent.includes("未填")'), true);
     await js('window.audioSwitch.click()');
     await js('window.audioSwitch.click()');
     // Submit before idle commit; the focused model input must reach preflight.
@@ -98,7 +127,7 @@ async function main() {
     window.webContents.invalidate(); await delay(500);
     await fs.writeFile(path.join(output, 'h3-official-parameters.png'), (await window.webContents.capturePage()).toPNG());
     assert.deepEqual(errors, []); assert.equal(externalRequests, 0);
-    checks.push('H3 documented generate names/types; enum and requirement evidence remains incomplete', 'five gateway parameters; no manual budget input anywhere', 'optional booleans distinguish default and false and can return to omission', 'focused model edit saved before preflight without a budget');
+    checks.push('H3 empty parameters block Generate without supplying hidden defaults', 'official example requires an explicit user action and saves all five exact values', 'five gateway parameters; no manual budget input anywhere', 'unknown boolean distinguishes unset and false and can be cleared', 'focused model edit saved before preflight without a budget');
     await fs.writeFile(path.join(output, 'validation.json'), JSON.stringify({ status: 'passed', checks, errors, externalRequests,
       boundaries: 'production React workbench; isolated local IPC; no provider call; quote approval verified in native Host suite' }, null, 2));
     console.log(JSON.stringify({ status: 'passed', checks: checks.length, externalRequests })); return;
