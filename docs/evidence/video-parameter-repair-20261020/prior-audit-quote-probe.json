@@ -1,0 +1,53 @@
+{
+  "capturedAt": "2026-10-20T08:34:04.418Z",
+  "outboundScope": "Existing WWW connection credential used only in memory; public documentation sample prompt and fixed generation parameters sent to quote operation only",
+  "requests": [
+    {
+      "operation": "quote",
+      "method": "POST",
+      "path": "/v1/h3/tasks",
+      "parameterKeys": [],
+      "status": 400
+    },
+    {
+      "operation": "quote",
+      "method": "POST",
+      "path": "/v1/h3/tasks",
+      "parameterKeys": [
+        "resolution",
+        "ratio",
+        "duration",
+        "generate_audio",
+        "watermark"
+      ],
+      "status": 200
+    }
+  ],
+  "results": [
+    {
+      "name": "empty_parameters",
+      "outcome": "rejected",
+      "code": "invalid_request",
+      "diagnostic": {
+        "message": "请按所选H3动作填写参数，并使用本人素材或原任务",
+        "stage": "upstream_response",
+        "statusCode": 400,
+        "code": "invalid_h3_parameters"
+      }
+    },
+    {
+      "name": "documented_example",
+      "outcome": "quote_received",
+      "quote": {
+        "currency": "CNY_MICRO",
+        "quoted_amount": 7040000,
+        "price_version": "pv_1220535b1604e8a5a3b2bfe4f12fe8c5e3797d354428abc51f11b42982cc7e46",
+        "closed_reasons": []
+      }
+    }
+  ],
+  "generationPosts": 0,
+  "settlementPosts": 0,
+  "modelFees": 0,
+  "registryUnchanged": true
+}

@@ -1,0 +1,92 @@
+{
+  "compiledAt": "2026-10-20T11:30:22.069Z",
+  "sourceFile": "outputs/video-parameter-audit-20261020/sources.json",
+  "outboundScope": "compiler reads retained public documentation locally; no network",
+  "credentialReads": 0,
+  "generationRequests": 0,
+  "records": [
+    {
+      "modelKey": "MiniMax-H3",
+      "authority": "relay",
+      "source": {
+        "url": "https://www.unicompapi.com/docs/models/MiniMax-H3",
+        "retrievedAt": "2026-10-20T09:28:23.943Z",
+        "sha256": "9f6d64473e39ff5d813efd22978b817420deebbf124d1ea72246b8f8b47a2397"
+      },
+      "vendorContractId": "official.minimax.MiniMax-H3.video"
+    },
+    {
+      "modelKey": "doubao-seedance-2-0-260128",
+      "authority": "relay",
+      "source": {
+        "url": "https://www.unicompapi.com/docs/models/doubao-seedance-2-0-260128",
+        "retrievedAt": "2026-10-20T09:28:25.660Z",
+        "sha256": "c1847baab04707ae55194e12151a97cba7a3593eef68c35f010a23b74a31d507"
+      },
+      "vendorContractId": "official.volcengine.seedance-2.0.video"
+    },
+    {
+      "modelKey": "happyhorse-1.1-t2v",
+      "authority": "relay",
+      "source": {
+        "url": "https://www.unicompapi.com/docs/models/happyhorse-1.1-t2v",
+        "retrievedAt": "2026-10-20T09:28:27.371Z",
+        "sha256": "12fb0ad7182b3bf08756cd271b86f3da67a723e9596529986a78ba0254a5dbc8"
+      }
+    },
+    {
+      "modelKey": "happyhorse-1.1-i2v",
+      "authority": "relay",
+      "source": {
+        "url": "https://www.unicompapi.com/docs/models/happyhorse-1.1-i2v",
+        "retrievedAt": "2026-10-20T09:28:29.111Z",
+        "sha256": "6b244aaad302306e1b3efd9d2d627ff762db681530711d7b809963a2d7cb004d"
+      }
+    },
+    {
+      "modelKey": "happyhorse-1.1-r2v",
+      "authority": "relay",
+      "source": {
+        "url": "https://www.unicompapi.com/docs/models/happyhorse-1.1-r2v",
+        "retrievedAt": "2026-10-20T09:28:30.803Z",
+        "sha256": "a6ac8879d21af4e98221b35c9632f48f234734a250783624b540215f269a9c19"
+      }
+    },
+    {
+      "modelKey": "wan3.0-video",
+      "authority": "relay",
+      "source": {
+        "url": "https://www.unicompapi.com/docs/models/wan3.0-video",
+        "retrievedAt": "2026-10-20T09:28:32.556Z",
+        "sha256": "dadbc1ff6ef44a21e680b203ce3cc4240d254c90faf83ef20e7746e8c1acd6b0"
+      }
+    },
+    {
+      "modelKey": "wan3.0-video-ali",
+      "authority": "relay",
+      "source": {
+        "url": "https://www.unicompapi.com/docs/models/wan3.0-video-ali",
+        "retrievedAt": "2026-10-20T09:28:34.220Z",
+        "sha256": "5969b7d731fa1bb822c17fb8a4b8641ac82b963ccbd7a6e67c92cf0933b2f855"
+      }
+    },
+    {
+      "modelKey": "wan3.0-video-prime-ali",
+      "authority": "relay",
+      "source": {
+        "url": "https://www.unicompapi.com/docs/models/wan3.0-video-prime-ali",
+        "retrievedAt": "2026-10-20T09:28:35.870Z",
+        "sha256": "c5f572c661374df2b89f8380b529b788af7195258c98bc15577d0f4342485907"
+      }
+    },
+    {
+      "modelKey": "happyhorse-1.0-video-edit",
+      "authority": "relay",
+      "source": {
+        "url": "https://www.unicompapi.com/docs/models/happyhorse-1.0-video-edit",
+        "retrievedAt": "2026-10-20T09:28:37.510Z",
+        "sha256": "270f9be96261dfb73fe3edcf4e3db6448a39f98a45afcce38f613d8c3b39df3f"
+      }
+    }
+  ]
+}

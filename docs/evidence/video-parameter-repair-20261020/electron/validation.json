@@ -1,0 +1,432 @@
+{
+  "live": false,
+  "status": "passed",
+  "checks": [
+    {
+      "model": "MiniMax-H3",
+      "check": "native prepare rejects incomplete, invalid-enum, range, fractional and string duration inputs before requests",
+      "state": "passed"
+    },
+    {
+      "model": "MiniMax-H3",
+      "check": "native prepare rejects empty parameters with zero requests",
+      "state": "passed"
+    },
+    {
+      "model": "MiniMax-H3",
+      "check": "HTTP 400 safe diagnostic persists through native runtime and execution history",
+      "state": "passed"
+    },
+    {
+      "model": "MiniMax-H3",
+      "feature": "text_to_video",
+      "workId": "work-video-result-aed154fb-e340-4d9d-a365-5f35bf74bee2",
+      "checksumSha256": "db3fbb7c9c6621cd36d92dc1afd4e25db35f27762efb22401eeb6412762bcf8c",
+      "state": "passed"
+    },
+    {
+      "model": "doubao-seedance-2-0-260128",
+      "feature": "text_to_video",
+      "workId": "work-video-result-5dd36b7a-e446-42c9-a004-ddb591e6b9d5",
+      "checksumSha256": "db3fbb7c9c6621cd36d92dc1afd4e25db35f27762efb22401eeb6412762bcf8c",
+      "state": "passed"
+    },
+    {
+      "model": "doubao-seedance-2-0-260128",
+      "feature": "image_to_video",
+      "workId": "work-video-result-16702ec3-31ae-4d35-ae41-f191ba10c351",
+      "checksumSha256": "db3fbb7c9c6621cd36d92dc1afd4e25db35f27762efb22401eeb6412762bcf8c",
+      "state": "passed"
+    },
+    {
+      "model": "happyhorse-1.1-t2v",
+      "feature": "text_to_video",
+      "workId": "work-video-result-a45a03a0-b4b7-4985-a7df-d24f4792489d",
+      "checksumSha256": "db3fbb7c9c6621cd36d92dc1afd4e25db35f27762efb22401eeb6412762bcf8c",
+      "state": "passed"
+    },
+    {
+      "model": "happyhorse-1.1-i2v",
+      "feature": "image_to_video",
+      "workId": "work-video-result-81527e26-5661-4d2c-8e0e-1573496682e9",
+      "checksumSha256": "db3fbb7c9c6621cd36d92dc1afd4e25db35f27762efb22401eeb6412762bcf8c",
+      "state": "passed"
+    },
+    {
+      "model": "happyhorse-1.1-r2v",
+      "feature": "image_to_video",
+      "workId": "work-video-result-b34c5ba8-6552-4b28-9bb4-d686dc50db8a",
+      "checksumSha256": "db3fbb7c9c6621cd36d92dc1afd4e25db35f27762efb22401eeb6412762bcf8c",
+      "state": "passed"
+    },
+    {
+      "model": "wan3.0-video",
+      "feature": "text_to_video",
+      "workId": "work-video-result-7ad3437f-d9c2-4379-8609-43d4cb3948ac",
+      "checksumSha256": "db3fbb7c9c6621cd36d92dc1afd4e25db35f27762efb22401eeb6412762bcf8c",
+      "state": "passed"
+    },
+    {
+      "model": "wan3.0-video",
+      "feature": "image_to_video",
+      "workId": "work-video-result-3a47b0dc-e901-4141-bc60-bbc552bacfe3",
+      "checksumSha256": "db3fbb7c9c6621cd36d92dc1afd4e25db35f27762efb22401eeb6412762bcf8c",
+      "state": "passed"
+    },
+    {
+      "model": "wan3.0-video-ali",
+      "feature": "text_to_video",
+      "workId": "work-video-result-2bf0a07e-1fe0-4a6f-9e4d-09ae5e62323b",
+      "checksumSha256": "db3fbb7c9c6621cd36d92dc1afd4e25db35f27762efb22401eeb6412762bcf8c",
+      "state": "passed"
+    },
+    {
+      "model": "wan3.0-video-ali",
+      "feature": "image_to_video",
+      "workId": "work-video-result-6f831969-9a2a-4f6f-9209-37d4a0351942",
+      "checksumSha256": "db3fbb7c9c6621cd36d92dc1afd4e25db35f27762efb22401eeb6412762bcf8c",
+      "state": "passed"
+    },
+    {
+      "model": "wan3.0-video-prime-ali",
+      "feature": "text_to_video",
+      "workId": "work-video-result-23659167-f081-42f7-bb65-d3e4861cf726",
+      "checksumSha256": "db3fbb7c9c6621cd36d92dc1afd4e25db35f27762efb22401eeb6412762bcf8c",
+      "state": "passed"
+    },
+    {
+      "model": "wan3.0-video-prime-ali",
+      "feature": "image_to_video",
+      "workId": "work-video-result-788343f3-3176-4fbc-b33a-0cd88108a841",
+      "checksumSha256": "db3fbb7c9c6621cd36d92dc1afd4e25db35f27762efb22401eeb6412762bcf8c",
+      "state": "passed"
+    },
+    {
+      "model": "happyhorse-1.0-video-edit",
+      "feature": "video_edit",
+      "workId": "work-video-result-785c4b44-be01-45c4-a9a8-757660033de4",
+      "checksumSha256": "db3fbb7c9c6621cd36d92dc1afd4e25db35f27762efb22401eeb6412762bcf8c",
+      "state": "passed"
+    }
+  ],
+  "externalRequests": 0,
+  "paidPost": 0,
+  "requests": [
+    {
+      "method": "POST",
+      "path": "/v1/h3/tasks",
+      "operation": "post"
+    },
+    {
+      "method": "POST",
+      "path": "/v1/h3/tasks",
+      "operation": "post"
+    },
+    {
+      "method": "GET",
+      "path": "/v1/h3/tasks/task-www-0",
+      "operation": "read"
+    },
+    {
+      "method": "GET",
+      "path": "/v1/h3/tasks/task-www-0",
+      "operation": "read"
+    },
+    {
+      "method": "GET",
+      "path": "/v1/h3/tasks/task-www-0",
+      "operation": "read"
+    },
+    {
+      "method": "GET",
+      "path": "/v1/videos/task-www-0/content",
+      "operation": "read"
+    },
+    {
+      "method": "GET",
+      "path": "/v1/videos/task-www-0/content",
+      "operation": "read"
+    },
+    {
+      "method": "POST",
+      "path": "/v1/h3/tasks",
+      "operation": "post"
+    },
+    {
+      "method": "POST",
+      "path": "/v1/videos/quote",
+      "operation": "post"
+    },
+    {
+      "method": "POST",
+      "path": "/v1/videos",
+      "operation": "post"
+    },
+    {
+      "method": "GET",
+      "path": "/v1/videos/task-www-1",
+      "operation": "read"
+    },
+    {
+      "method": "GET",
+      "path": "/v1/videos/task-www-1/content",
+      "operation": "read"
+    },
+    {
+      "method": "POST",
+      "path": "/v1/assets",
+      "operation": "upload"
+    },
+    {
+      "method": "POST",
+      "path": "/v1/videos/quote",
+      "operation": "post"
+    },
+    {
+      "method": "POST",
+      "path": "/v1/videos",
+      "operation": "post"
+    },
+    {
+      "method": "GET",
+      "path": "/v1/videos/task-www-2",
+      "operation": "read"
+    },
+    {
+      "method": "GET",
+      "path": "/v1/videos/task-www-2/content",
+      "operation": "read"
+    },
+    {
+      "method": "POST",
+      "path": "/v1/videos/quote",
+      "operation": "post"
+    },
+    {
+      "method": "POST",
+      "path": "/v1/videos",
+      "operation": "post"
+    },
+    {
+      "method": "GET",
+      "path": "/v1/videos/task-www-3",
+      "operation": "read"
+    },
+    {
+      "method": "GET",
+      "path": "/v1/videos/task-www-3/content",
+      "operation": "read"
+    },
+    {
+      "method": "POST",
+      "path": "/v1/assets",
+      "operation": "upload"
+    },
+    {
+      "method": "POST",
+      "path": "/v1/videos/quote",
+      "operation": "post"
+    },
+    {
+      "method": "POST",
+      "path": "/v1/videos",
+      "operation": "post"
+    },
+    {
+      "method": "GET",
+      "path": "/v1/videos/task-www-4",
+      "operation": "read"
+    },
+    {
+      "method": "GET",
+      "path": "/v1/videos/task-www-4/content",
+      "operation": "read"
+    },
+    {
+      "method": "POST",
+      "path": "/v1/assets",
+      "operation": "upload"
+    },
+    {
+      "method": "POST",
+      "path": "/v1/videos/quote",
+      "operation": "post"
+    },
+    {
+      "method": "POST",
+      "path": "/v1/videos",
+      "operation": "post"
+    },
+    {
+      "method": "GET",
+      "path": "/v1/videos/task-www-5",
+      "operation": "read"
+    },
+    {
+      "method": "GET",
+      "path": "/v1/videos/task-www-5/content",
+      "operation": "read"
+    },
+    {
+      "method": "POST",
+      "path": "/v1/videos/quote",
+      "operation": "post"
+    },
+    {
+      "method": "POST",
+      "path": "/v1/videos",
+      "operation": "post"
+    },
+    {
+      "method": "GET",
+      "path": "/v1/videos/task-www-6",
+      "operation": "read"
+    },
+    {
+      "method": "GET",
+      "path": "/v1/videos/task-www-6/content",
+      "operation": "read"
+    },
+    {
+      "method": "POST",
+      "path": "/v1/assets",
+      "operation": "upload"
+    },
+    {
+      "method": "POST",
+      "path": "/v1/videos/quote",
+      "operation": "post"
+    },
+    {
+      "method": "POST",
+      "path": "/v1/videos",
+      "operation": "post"
+    },
+    {
+      "method": "GET",
+      "path": "/v1/videos/task-www-7",
+      "operation": "read"
+    },
+    {
+      "method": "GET",
+      "path": "/v1/videos/task-www-7/content",
+      "operation": "read"
+    },
+    {
+      "method": "POST",
+      "path": "/v1/videos/quote",
+      "operation": "post"
+    },
+    {
+      "method": "POST",
+      "path": "/v1/videos",
+      "operation": "post"
+    },
+    {
+      "method": "GET",
+      "path": "/v1/videos/task-www-8",
+      "operation": "read"
+    },
+    {
+      "method": "GET",
+      "path": "/v1/videos/task-www-8/content",
+      "operation": "read"
+    },
+    {
+      "method": "POST",
+      "path": "/v1/assets",
+      "operation": "upload"
+    },
+    {
+      "method": "POST",
+      "path": "/v1/videos/quote",
+      "operation": "post"
+    },
+    {
+      "method": "POST",
+      "path": "/v1/videos",
+      "operation": "post"
+    },
+    {
+      "method": "GET",
+      "path": "/v1/videos/task-www-9",
+      "operation": "read"
+    },
+    {
+      "method": "GET",
+      "path": "/v1/videos/task-www-9/content",
+      "operation": "read"
+    },
+    {
+      "method": "POST",
+      "path": "/v1/videos/quote",
+      "operation": "post"
+    },
+    {
+      "method": "POST",
+      "path": "/v1/videos",
+      "operation": "post"
+    },
+    {
+      "method": "GET",
+      "path": "/v1/videos/task-www-10",
+      "operation": "read"
+    },
+    {
+      "method": "GET",
+      "path": "/v1/videos/task-www-10/content",
+      "operation": "read"
+    },
+    {
+      "method": "POST",
+      "path": "/v1/assets",
+      "operation": "upload"
+    },
+    {
+      "method": "POST",
+      "path": "/v1/videos/quote",
+      "operation": "post"
+    },
+    {
+      "method": "POST",
+      "path": "/v1/videos",
+      "operation": "post"
+    },
+    {
+      "method": "GET",
+      "path": "/v1/videos/task-www-11",
+      "operation": "read"
+    },
+    {
+      "method": "GET",
+      "path": "/v1/videos/task-www-11/content",
+      "operation": "read"
+    },
+    {
+      "method": "POST",
+      "path": "/v1/assets",
+      "operation": "upload"
+    },
+    {
+      "method": "POST",
+      "path": "/v1/videos/quote",
+      "operation": "post"
+    },
+    {
+      "method": "POST",
+      "path": "/v1/videos",
+      "operation": "post"
+    },
+    {
+      "method": "GET",
+      "path": "/v1/videos/task-www-12",
+      "operation": "read"
+    },
+    {
+      "method": "GET",
+      "path": "/v1/videos/task-www-12/content",
+      "operation": "read"
+    }
+  ],
+  "boundaries": "injected transport; no real provider acceptance"
+}

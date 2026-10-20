@@ -1,0 +1,10 @@
+{
+  "status": "passed",
+  "checks": [
+    "production prompt input preserves 20,000 emoji without UTF-16 truncation",
+    "counter and Generate enforce the selected schema Unicode limit"
+  ],
+  "errors": [],
+  "externalRequests": 0,
+  "boundaries": "production React; local synthetic IPC; no provider call"
+}

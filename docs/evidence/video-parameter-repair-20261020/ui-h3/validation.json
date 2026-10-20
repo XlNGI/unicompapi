@@ -1,0 +1,15 @@
+{
+  "status": "passed",
+  "checks": [
+    "H3 required parameters block Generate without supplying hidden defaults",
+    "official example requires an explicit user action and saves all five exact values",
+    "five gateway parameters; no manual budget input anywhere",
+    "unknown boolean distinguishes unset and false and can be cleared",
+    "focused duration edit saved before preflight without a budget",
+    "duration 16 blocks Generate and 4 restores it",
+    "7001-character prompt blocks Generate and 7000 emoji are preserved and accepted locally"
+  ],
+  "errors": [],
+  "externalRequests": 0,
+  "boundaries": "production React workbench; isolated local IPC; no provider call; quote approval verified in native Host suite"
+}

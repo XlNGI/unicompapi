@@ -1,0 +1,618 @@
+{
+  "capturedAt": "2026-10-20T08:42:22.722Z",
+  "kind": "maintenance_audit_only",
+  "baseCommit": "1142611913cb5f68efe053571d156348a5b9d8a9",
+  "branch": "feature/video-h3-audit-20261020",
+  "productionFilesModified": false,
+  "connection": {
+    "endpoint": "https://www.unicompapi.com/v1",
+    "state": "available",
+    "credentialState": "valid"
+  },
+  "model": {
+    "key": "MiniMax-H3",
+    "enabled": true,
+    "catalogState": "present",
+    "profileStatus": "declared",
+    "contract": {
+      "schemaVersion": 1,
+      "contractId": "relay.unicompapi-www.MiniMax-H3.video",
+      "contractRevision": 3,
+      "rules": [],
+      "contractFingerprint": "df1e15c279908f5b56a18657c5a48efe66f8e75ba65ff265134542686b8d78c6"
+    }
+  },
+  "localSchema": {
+    "revision": 3,
+    "fields": [
+      {
+        "name": "resolution",
+        "required": false,
+        "defaultPolicy": "omit_use_provider_default"
+      },
+      {
+        "name": "ratio",
+        "required": false,
+        "defaultPolicy": "omit_use_provider_default"
+      },
+      {
+        "name": "duration",
+        "required": false,
+        "defaultPolicy": "omit_use_provider_default"
+      },
+      {
+        "name": "generate_audio",
+        "required": false,
+        "defaultPolicy": "omit_use_provider_default"
+      },
+      {
+        "name": "watermark",
+        "required": false,
+        "defaultPolicy": "omit_use_provider_default"
+      }
+    ],
+    "emptyParametersAccepted": true
+  },
+  "localProjects": [
+    {
+      "projectId": "project-aa122a6c-8905-4289-89a6-7bf26de06593",
+      "executions": [
+        {
+          "executionId": "execution-video-688081cf-91c3-4bcc-b10f-718b451be544",
+          "createdAt": "2026-10-20T08:04:53.239Z",
+          "updatedAt": "2026-10-20T08:04:53.721Z",
+          "model": "MiniMax-H3",
+          "contractRevision": 3,
+          "state": "failed",
+          "remoteOperationIdPresent": false,
+          "localFailure": {
+            "stage": "submitting",
+            "message": "报价、参数或素材检查未通过，尚未提交收费生成。请检查报价上限和素材后重试。",
+            "retryability": "not_retryable"
+          },
+          "emptyParametersQuoteBytes": 102,
+          "localEvents": [
+            {
+              "type": "submission_started",
+              "occurredAt": "2026-10-20T08:04:53.239Z"
+            },
+            {
+              "type": "failed",
+              "safeCode": "www_video.generation_not_submitted",
+              "occurredAt": "2026-10-20T08:04:53.612Z"
+            }
+          ],
+          "networkErrors": [
+            {
+              "at": "2026-10-20T08:04:53.617Z",
+              "operation": "video_submit",
+              "method": "POST",
+              "status": 400,
+              "errorCode": "invalid_request",
+              "elapsedMs": 137,
+              "requestBytes": 102,
+              "upstreamCode": "invalid_h3_parameters"
+            }
+          ]
+        },
+        {
+          "executionId": "execution-video-2c948d00-537b-4662-bdba-672c291189c5",
+          "createdAt": "2026-10-20T08:05:04.967Z",
+          "updatedAt": "2026-10-20T08:05:05.451Z",
+          "model": "MiniMax-H3",
+          "contractRevision": 3,
+          "state": "failed",
+          "remoteOperationIdPresent": false,
+          "localFailure": {
+            "stage": "submitting",
+            "message": "报价、参数或素材检查未通过，尚未提交收费生成。请检查报价上限和素材后重试。",
+            "retryability": "not_retryable"
+          },
+          "emptyParametersQuoteBytes": 102,
+          "localEvents": [
+            {
+              "type": "submission_started",
+              "occurredAt": "2026-10-20T08:05:04.967Z"
+            },
+            {
+              "type": "failed",
+              "safeCode": "www_video.generation_not_submitted",
+              "occurredAt": "2026-10-20T08:05:05.340Z"
+            }
+          ],
+          "networkErrors": [
+            {
+              "at": "2026-10-20T08:05:05.348Z",
+              "operation": "video_submit",
+              "method": "POST",
+              "status": 400,
+              "errorCode": "invalid_request",
+              "elapsedMs": 131,
+              "requestBytes": 102,
+              "upstreamCode": "invalid_h3_parameters"
+            }
+          ]
+        },
+        {
+          "executionId": "execution-video-f892e681-156c-4d2d-920a-cb56be5d2695",
+          "createdAt": "2026-10-20T08:04:14.205Z",
+          "updatedAt": "2026-10-20T08:06:56.944Z",
+          "model": "happyhorse-1.1-t2v",
+          "contractRevision": 2,
+          "state": "completed",
+          "remoteOperationIdPresent": true,
+          "localEvents": [
+            {
+              "type": "submission_started",
+              "occurredAt": "2026-10-20T08:04:14.205Z"
+            },
+            {
+              "type": "provider_accepted",
+              "occurredAt": "2026-10-20T08:04:31.015Z"
+            },
+            {
+              "type": "result_received",
+              "occurredAt": "2026-10-20T08:06:56.967Z"
+            },
+            {
+              "type": "completed",
+              "occurredAt": "2026-10-20T08:06:56.978Z"
+            }
+          ],
+          "networkErrors": [
+            {
+              "at": "2026-10-20T08:04:53.617Z",
+              "operation": "video_submit",
+              "method": "POST",
+              "status": 400,
+              "errorCode": "invalid_request",
+              "elapsedMs": 137,
+              "requestBytes": 102,
+              "upstreamCode": "invalid_h3_parameters"
+            },
+            {
+              "at": "2026-10-20T08:05:05.348Z",
+              "operation": "video_submit",
+              "method": "POST",
+              "status": 400,
+              "errorCode": "invalid_request",
+              "elapsedMs": 131,
+              "requestBytes": 102,
+              "upstreamCode": "invalid_h3_parameters"
+            }
+          ]
+        },
+        {
+          "executionId": "execution-video-49a3085d-c2a0-4746-909c-f19dedf589f4",
+          "createdAt": "2026-10-20T08:11:19.428Z",
+          "updatedAt": "2026-10-20T08:11:21.048Z",
+          "model": "MiniMax-H3",
+          "contractRevision": 3,
+          "state": "failed",
+          "remoteOperationIdPresent": false,
+          "localFailure": {
+            "stage": "submitting",
+            "message": "报价、参数或素材检查未通过，尚未提交收费生成。请检查报价上限和素材后重试。",
+            "retryability": "not_retryable"
+          },
+          "emptyParametersQuoteBytes": 102,
+          "localEvents": [
+            {
+              "type": "submission_started",
+              "occurredAt": "2026-10-20T08:11:19.428Z"
+            },
+            {
+              "type": "failed",
+              "safeCode": "www_video.generation_not_submitted",
+              "occurredAt": "2026-10-20T08:11:20.929Z"
+            }
+          ],
+          "networkErrors": [
+            {
+              "at": "2026-10-20T08:11:20.934Z",
+              "operation": "video_submit",
+              "method": "POST",
+              "status": 400,
+              "errorCode": "invalid_request",
+              "elapsedMs": 1252,
+              "requestBytes": 102,
+              "upstreamCode": "invalid_h3_parameters"
+            }
+          ]
+        },
+        {
+          "executionId": "execution-video-b68112ae-bf20-4731-8a20-d63932591a15",
+          "createdAt": "2026-10-20T08:15:05.602Z",
+          "updatedAt": "2026-10-20T08:15:06.121Z",
+          "model": "MiniMax-H3",
+          "contractRevision": 3,
+          "state": "failed",
+          "remoteOperationIdPresent": false,
+          "localFailure": {
+            "stage": "submitting",
+            "message": "报价、参数或素材检查未通过，尚未提交收费生成。请检查报价上限和素材后重试。",
+            "retryability": "not_retryable"
+          },
+          "emptyParametersQuoteBytes": 102,
+          "localEvents": [
+            {
+              "type": "submission_started",
+              "occurredAt": "2026-10-20T08:15:05.602Z"
+            },
+            {
+              "type": "failed",
+              "safeCode": "www_video.generation_not_submitted",
+              "occurredAt": "2026-10-20T08:15:06.010Z"
+            }
+          ],
+          "networkErrors": [
+            {
+              "at": "2026-10-20T08:15:06.014Z",
+              "operation": "video_submit",
+              "method": "POST",
+              "status": 400,
+              "errorCode": "invalid_request",
+              "elapsedMs": 160,
+              "requestBytes": 102,
+              "upstreamCode": "invalid_h3_parameters"
+            }
+          ]
+        },
+        {
+          "executionId": "execution-video-a7eb95b8-0c77-4c08-9ba2-6f10b25079fa",
+          "createdAt": "2026-10-20T08:15:14.615Z",
+          "updatedAt": "2026-10-20T08:17:38.444Z",
+          "model": "happyhorse-1.1-t2v",
+          "contractRevision": 2,
+          "state": "completed",
+          "remoteOperationIdPresent": true,
+          "localEvents": [
+            {
+              "type": "submission_started",
+              "occurredAt": "2026-10-20T08:15:14.615Z"
+            },
+            {
+              "type": "provider_accepted",
+              "occurredAt": "2026-10-20T08:16:06.133Z"
+            },
+            {
+              "type": "result_received",
+              "occurredAt": "2026-10-20T08:17:38.469Z"
+            },
+            {
+              "type": "completed",
+              "occurredAt": "2026-10-20T08:17:38.482Z"
+            }
+          ],
+          "networkErrors": []
+        },
+        {
+          "executionId": "execution-video-236051a3-f2dd-484c-abef-175d26221fe4",
+          "createdAt": "2026-10-20T08:19:26.094Z",
+          "updatedAt": "2026-10-20T08:22:07.803Z",
+          "model": "wan3.0-video-ali",
+          "contractRevision": 2,
+          "state": "completed",
+          "remoteOperationIdPresent": true,
+          "localEvents": [
+            {
+              "type": "submission_started",
+              "occurredAt": "2026-10-20T08:19:26.094Z"
+            },
+            {
+              "type": "provider_accepted",
+              "occurredAt": "2026-10-20T08:19:38.458Z"
+            },
+            {
+              "type": "result_received",
+              "occurredAt": "2026-10-20T08:22:07.827Z"
+            },
+            {
+              "type": "completed",
+              "occurredAt": "2026-10-20T08:22:07.839Z"
+            }
+          ],
+          "networkErrors": []
+        },
+        {
+          "executionId": "execution-video-63b3670d-9d8f-427e-935a-acee0c5b94e5",
+          "createdAt": "2026-10-20T08:25:50.826Z",
+          "updatedAt": "2026-10-20T08:26:01.226Z",
+          "model": "wan3.0-video-prime-ali",
+          "contractRevision": 2,
+          "state": "failed",
+          "remoteOperationIdPresent": false,
+          "localFailure": {
+            "stage": "submitting",
+            "message": "报价、参数或素材检查未通过，尚未提交收费生成。请检查报价上限和素材后重试。",
+            "retryability": "not_retryable"
+          },
+          "localEvents": [
+            {
+              "type": "submission_started",
+              "occurredAt": "2026-10-20T08:25:50.826Z"
+            },
+            {
+              "type": "failed",
+              "safeCode": "www_video.generation_not_submitted",
+              "occurredAt": "2026-10-20T08:26:01.100Z"
+            }
+          ],
+          "networkErrors": [
+            {
+              "at": "2026-10-20T08:26:01.109Z",
+              "operation": "video_submit",
+              "method": "POST",
+              "errorCode": "network_error",
+              "elapsedMs": 10010,
+              "requestBytes": 107
+            }
+          ]
+        }
+      ]
+    }
+  ],
+  "publicDoc": {
+    "retrievedAt": "2026-10-20T08:32:10.617Z",
+    "url": "https://www.unicompapi.com/docs/models/MiniMax-H3",
+    "status": 200,
+    "sha256": "9f6d64473e39ff5d813efd22978b817420deebbf124d1ea72246b8f8b47a2397",
+    "outboundScope": "Public documentation URL GET only; no credentials, prompt or project data",
+    "modelFees": 0,
+    "tables": [],
+    "examples": [
+      "{ \"operation\": \"quote\", \"model\": \"MiniMax-H3\", \"action\": \"generate\", \"prompt\": \"白色背景上的橙色陶瓷杯\", \"parameters\": { \"resolution\": \"2K\", \"ratio\": \"16:9\", \"duration\": 4, \"generate_audio\": true, \"watermark\": false } }",
+      "{ \"operation\": \"submit\", \"model\": \"MiniMax-H3\", \"action\": \"generate\", \"prompt\": \"白色背景上的橙色陶瓷杯\", \"parameters\": { \"resolution\": \"2K\", \"ratio\": \"16:9\", \"duration\": 4, \"generate_audio\": true, \"watermark\": false }, \"expected_input_digest\": \"<原quote.input_digest>\", \"expected_price_version\": \"<原quote.price_version>\", \"expected_quote_amount\": \"<原quote.quoted_amount正整数>\" }"
+    ],
+    "notes": []
+  },
+  "liveQuoteProbe": {
+    "capturedAt": "2026-10-20T08:34:04.418Z",
+    "outboundScope": "Existing WWW connection credential used only in memory; public documentation sample prompt and fixed generation parameters sent to quote operation only",
+    "requests": [
+      {
+        "operation": "quote",
+        "method": "POST",
+        "path": "/v1/h3/tasks",
+        "parameterKeys": [],
+        "status": 400
+      },
+      {
+        "operation": "quote",
+        "method": "POST",
+        "path": "/v1/h3/tasks",
+        "parameterKeys": [
+          "resolution",
+          "ratio",
+          "duration",
+          "generate_audio",
+          "watermark"
+        ],
+        "status": 200
+      }
+    ],
+    "results": [
+      {
+        "name": "empty_parameters",
+        "outcome": "rejected",
+        "code": "invalid_request",
+        "diagnostic": {
+          "message": "请按所选H3动作填写参数，并使用本人素材或原任务",
+          "stage": "upstream_response",
+          "statusCode": 400,
+          "code": "invalid_h3_parameters"
+        }
+      },
+      {
+        "name": "documented_example",
+        "outcome": "quote_received",
+        "quote": {
+          "currency": "CNY_MICRO",
+          "quoted_amount": 7040000,
+          "price_version": "pv_1220535b1604e8a5a3b2bfe4f12fe8c5e3797d354428abc51f11b42982cc7e46",
+          "closed_reasons": []
+        }
+      }
+    ],
+    "generationPosts": 0,
+    "settlementPosts": 0,
+    "modelFees": 0,
+    "registryUnchanged": true
+  },
+  "offlineReproduction": {
+    "case": "H3 quote rejection loses provider diagnostic",
+    "externalRequests": 0,
+    "calls": [
+      {
+        "method": "POST",
+        "path": "/v1/h3/tasks",
+        "operation": "quote",
+        "parameters": {}
+      }
+    ],
+    "outcome": {
+      "kind": "failed_before_submission",
+      "message": "The WWW video generation request was not submitted",
+      "retryability": "not_retryable"
+    },
+    "normalizedOutcome": {
+      "kind": "failed_before_submission",
+      "safeCode": "www_video.generation_not_submitted"
+    },
+    "diagnosticLost": true
+  },
+  "regression": {
+    "total": 310,
+    "passed": 310,
+    "failed": 0,
+    "pending": 0,
+    "fileCount": 16,
+    "reports": [
+      {
+        "source": "regression.json",
+        "sha256": "345ba97c124e77a2d56d0d0f65694bc8ff1d95e48f66eab29518f8d9aa5c3f5d",
+        "success": true,
+        "total": 116,
+        "passed": 116,
+        "failed": 0,
+        "pending": 0,
+        "files": [
+          {
+            "path": "tests/platform/openai-compatible-video-routing.test.ts",
+            "status": "passed",
+            "tests": 8
+          },
+          {
+            "path": "tests/platform/provider-submission-dispatch-bridge.test.ts",
+            "status": "passed",
+            "tests": 4
+          },
+          {
+            "path": "tests/platform/video-feature-controller.test.ts",
+            "status": "passed",
+            "tests": 5
+          },
+          {
+            "path": "tests/platform/video-feature-runtime-recovery.test.ts",
+            "status": "passed",
+            "tests": 8
+          },
+          {
+            "path": "tests/platform/video-result-receiver.test.ts",
+            "status": "passed",
+            "tests": 7
+          },
+          {
+            "path": "tests/platform/www-model-binding-management.test.ts",
+            "status": "passed",
+            "tests": 19
+          },
+          {
+            "path": "tests/platform/www-video.test.ts",
+            "status": "passed",
+            "tests": 65
+          }
+        ]
+      },
+      {
+        "source": "business-regression.json",
+        "sha256": "27883887bb9132c3d04da79d2231d7d4658ef3c96eda484a76a07355e6cc3cda",
+        "success": true,
+        "total": 194,
+        "passed": 194,
+        "failed": 0,
+        "pending": 0,
+        "files": [
+          {
+            "path": "tests/domain/video-submission-contracts.test.ts",
+            "status": "passed",
+            "tests": 4
+          },
+          {
+            "path": "tests/platform/electron-newapi-http-transport.test.ts",
+            "status": "passed",
+            "tests": 9
+          },
+          {
+            "path": "tests/platform/minimax-video-adapter.test.ts",
+            "status": "passed",
+            "tests": 7
+          },
+          {
+            "path": "tests/platform/newapi-provider-package.test.ts",
+            "status": "passed",
+            "tests": 143
+          },
+          {
+            "path": "tests/platform/project-video-feature.test.ts",
+            "status": "passed",
+            "tests": 5
+          },
+          {
+            "path": "tests/platform/provider-execution-lifecycle.test.ts",
+            "status": "passed",
+            "tests": 6
+          },
+          {
+            "path": "tests/platform/unicompapi-studio-h3-video-adapter.test.ts",
+            "status": "passed",
+            "tests": 5
+          },
+          {
+            "path": "tests/platform/vidu-text-video-adapter.test.ts",
+            "status": "passed",
+            "tests": 3
+          },
+          {
+            "path": "tests/platform/vidu-video-adapter.test.ts",
+            "status": "passed",
+            "tests": 12
+          }
+        ]
+      }
+    ]
+  },
+  "sourceFiles": [
+    {
+      "path": "src/platform/providers/newapi/www-video-adapter.ts",
+      "sha256": "3ebd05aabde2335128e8ca5571549a210eb7c4db5b4898b3255584317f60b7b3"
+    },
+    {
+      "path": "src/platform/providers/newapi/www-video-contracts.ts",
+      "sha256": "6a879911ccbf4ee7697e8a4fd92a8c68b378f24ba0b8038c24b5420197cd6415"
+    },
+    {
+      "path": "src/platform/providers/newapi/www-video-catalog.json",
+      "sha256": "dbf67c6557c15c93fcb41418e59573fabd8223a78b73db9b01b9b9a00b04bdfa"
+    },
+    {
+      "path": "src/platform/providers/newapi/newapi-runtime.ts",
+      "sha256": "981da2c277a38466fdb862bb69633cd091cb133b604bbc308194dc1884a2e51e"
+    },
+    {
+      "path": "src/platform/providers/newapi/newapi-video-adapter.ts",
+      "sha256": "1d728f89cf2bf78dadcd92aab268dc7e6c488c3b22f757eab10707bf3da8b1da"
+    },
+    {
+      "path": "src/platform/providers/video-feature-submission.ts",
+      "sha256": "c102e7c903654ed4c5f677f710f3a34467a3b67a7a14996cff89ec34b45d46c5"
+    },
+    {
+      "path": "src/platform/providers/provider-submission-dispatch-bridge.ts",
+      "sha256": "6cc6dea9f4a01103da44aa7ac920ff8b20cb67b23eae074b25725f822af869c0"
+    },
+    {
+      "path": "src/platform/providers/project-video-feature.ts",
+      "sha256": "75ec6b1197e511c52830ed08e9ec3efcf8f9dc969f93e8ad608d6e4b09d09a23"
+    },
+    {
+      "path": "src/platform/providers/video-draft-artifact-factory.ts",
+      "sha256": "1ab4c563233c63fc166166b716c396b20478ca75568c7e5789ea27438c3d5972"
+    },
+    {
+      "path": "src/platform/ipc/video-feature-runtime.ts",
+      "sha256": "1eb67887fb5a988849ba9a701e8e2ca36158f46eb0a141f85be492f5729f7665"
+    },
+    {
+      "path": "src/platform/providers/vidu/vidu-video-adapter.ts",
+      "sha256": "b9d60c3f6a0f281d9fed4a3969cb4a01161da20574b7f62a5fd67fd5877618f1"
+    },
+    {
+      "path": "src/platform/videos/video-result-receiver.ts",
+      "sha256": "88527b5482ca1ece4ea70ad17f972397b7f8d462c1de983c74cf49ba6370f1cb"
+    },
+    {
+      "path": "tests/platform/www-video.test.ts",
+      "sha256": "9ae5744648601fca0d7d9fe5dd096c68fe06c22b47644c158ee9a1623881f727"
+    },
+    {
+      "path": "tests/fixtures/www-video.ts",
+      "sha256": "5320eca6adae6785f1c01a9c873b96121920a69328804f0759bd3b24e3cc2a60"
+    }
+  ],
+  "limitations": [
+    "No paid generation or settlement submitted",
+    "No whole-repository test, production build, renderer UI acceptance or macOS hardware acceptance performed",
+    "H3 complete generate field requirements and enums remain undocumented; only empty-object rejection and complete documented-example quote success were live checked"
+  ]
+}

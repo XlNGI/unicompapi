@@ -1,0 +1,94 @@
+{
+  "live": false,
+  "safeError": "ERR_ASSERTION",
+  "checks": [
+    {
+      "model": "MiniMax-H3",
+      "check": "native prepare rejects empty parameters with zero requests",
+      "state": "passed"
+    },
+    {
+      "model": "MiniMax-H3",
+      "check": "HTTP 400 safe diagnostic persists through native runtime and execution history",
+      "state": "passed"
+    },
+    {
+      "model": "MiniMax-H3",
+      "feature": "text_to_video",
+      "workId": "work-video-result-af3292d6-9977-4460-bf05-db4cc1350517",
+      "checksumSha256": "db3fbb7c9c6621cd36d92dc1afd4e25db35f27762efb22401eeb6412762bcf8c",
+      "state": "passed"
+    },
+    {
+      "model": "doubao-seedance-2-0-260128",
+      "feature": "text_to_video",
+      "workId": "work-video-result-4d33732d-fcb4-40f1-86e3-1e8af82715c2",
+      "checksumSha256": "db3fbb7c9c6621cd36d92dc1afd4e25db35f27762efb22401eeb6412762bcf8c",
+      "state": "passed"
+    }
+  ],
+  "requests": [
+    {
+      "method": "POST",
+      "path": "/v1/h3/tasks",
+      "operation": "post"
+    },
+    {
+      "method": "POST",
+      "path": "/v1/h3/tasks",
+      "operation": "post"
+    },
+    {
+      "method": "GET",
+      "path": "/v1/h3/tasks/task-www-0",
+      "operation": "read"
+    },
+    {
+      "method": "GET",
+      "path": "/v1/h3/tasks/task-www-0",
+      "operation": "read"
+    },
+    {
+      "method": "GET",
+      "path": "/v1/h3/tasks/task-www-0",
+      "operation": "read"
+    },
+    {
+      "method": "GET",
+      "path": "/v1/videos/task-www-0/content",
+      "operation": "read"
+    },
+    {
+      "method": "GET",
+      "path": "/v1/videos/task-www-0/content",
+      "operation": "read"
+    },
+    {
+      "method": "POST",
+      "path": "/v1/h3/tasks",
+      "operation": "post"
+    },
+    {
+      "method": "POST",
+      "path": "/v1/videos/quote",
+      "operation": "post"
+    },
+    {
+      "method": "POST",
+      "path": "/v1/videos",
+      "operation": "post"
+    },
+    {
+      "method": "GET",
+      "path": "/v1/videos/task-www-1",
+      "operation": "read"
+    },
+    {
+      "method": "GET",
+      "path": "/v1/videos/task-www-1/content",
+      "operation": "read"
+    }
+  ],
+  "externalRequests": 0,
+  "paidPost": 0
+}

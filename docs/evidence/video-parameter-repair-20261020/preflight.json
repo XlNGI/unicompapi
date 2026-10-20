@@ -1,0 +1,22 @@
+{
+  "checkedAt": "2026-10-20T11:44:05.906Z",
+  "status": "passed",
+  "sourceFingerprintsVerified": 1134,
+  "artifactHashesVerified": 50,
+  "diffCheck": "passed",
+  "filesInScope": 96,
+  "textFilesScanned": 94,
+  "gzipFilesDecodedBeforeScan": 34,
+  "pngArtifactsExcludedFromTextScan": 2,
+  "knownCredentialPatterns": [
+    "private-key",
+    "openai-key-shape",
+    "github-token-shape",
+    "jwt-shape",
+    "aws-access-key-shape",
+    "bearer-literal"
+  ],
+  "credentialPatternMatches": [],
+  "forbiddenBuildOrToolPaths": 0,
+  "scope": "Changed/untracked deliverables. Known credential-format scan only; no user credential store or project was read."
+}

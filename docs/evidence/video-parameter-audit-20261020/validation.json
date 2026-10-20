@@ -1,0 +1,355 @@
+{
+  "auditedAt": "2026-10-20T10:05:44.984Z",
+  "finalizedAt": "2026-10-20T10:12:21.143Z",
+  "scope": "Audit only; no product repair",
+  "branch": "feature/video-h3-audit-20261020",
+  "head": "1142611913cb5f68efe053571d156348a5b9d8a9",
+  "regression": {
+    "vitest": [
+      {
+        "command": "pnpm exec vitest run tests/domain/dynamic-parameter-validation.test.ts tests/domain/product-feature.test.ts tests/platform/dynamic-parameter-buffer.test.ts tests/platform/www-video.test.ts tests/platform/project-video-feature.test.ts --reporter=json --outputFile=outputs/video-parameter-audit-20261020/regression.json",
+        "reportPath": "outputs/video-parameter-audit-20261020/regression.json",
+        "sha256": "3cd22e38a09072b22d2adc62ac5c7ff11ffb5031a9d3447930c4050bf5389696",
+        "startedAt": "2026-10-20T09:42:24.018Z",
+        "fileCount": 5,
+        "total": 96,
+        "passed": 96,
+        "failed": 0,
+        "skipped": 0,
+        "files": [
+          {
+            "path": "tests/domain/dynamic-parameter-validation.test.ts",
+            "status": "passed",
+            "assertions": 5
+          },
+          {
+            "path": "tests/domain/product-feature.test.ts",
+            "status": "passed",
+            "assertions": 7
+          },
+          {
+            "path": "tests/platform/dynamic-parameter-buffer.test.ts",
+            "status": "passed",
+            "assertions": 14
+          },
+          {
+            "path": "tests/platform/project-video-feature.test.ts",
+            "status": "passed",
+            "assertions": 5
+          },
+          {
+            "path": "tests/platform/www-video.test.ts",
+            "status": "passed",
+            "assertions": 65
+          }
+        ]
+      },
+      {
+        "command": "pnpm exec vitest run tests/platform/controlled-image-material.test.ts --reporter=json --outputFile=outputs/video-parameter-audit-20261020/material-regression.json",
+        "reportPath": "outputs/video-parameter-audit-20261020/material-regression.json",
+        "sha256": "349a8fa6524ef304fe2f209188d987b5b47f2e0f3e4a725d9b3a29ae70e25721",
+        "startedAt": "2026-10-20T10:00:55.569Z",
+        "fileCount": 1,
+        "total": 3,
+        "passed": 3,
+        "failed": 0,
+        "skipped": 0,
+        "files": [
+          {
+            "path": "tests/platform/controlled-image-material.test.ts",
+            "status": "passed",
+            "assertions": 3
+          }
+        ]
+      }
+    ],
+    "nodeUi": {
+      "command": "node --test tests/ui/dynamic-parameter-form.test.mjs tests/ui/dynamic-parameter-candidate-stability.test.mjs",
+      "fileCount": 2,
+      "total": 9,
+      "passed": 9,
+      "failed": 0,
+      "skipped": 0,
+      "evidenceKind": "Passing terminal result observed during this session; no separate JSON reporter artifact",
+      "files": [
+        {
+          "path": "tests/ui/dynamic-parameter-form.test.mjs",
+          "sha256": "e919bb6f2c44864dfdb2c7e3f6590af89a4acda6295c7c7ed1364c19bbc0592d"
+        },
+        {
+          "path": "tests/ui/dynamic-parameter-candidate-stability.test.mjs",
+          "sha256": "12b008c285878dce99091b07e0d3fa0badd1e6f14ec31c62f018c35e744abaf9"
+        }
+      ]
+    },
+    "totals": {
+      "differentFiles": 8,
+      "total": 108,
+      "passed": 108,
+      "failed": 0,
+      "skipped": 0
+    },
+    "priorRound310TestsIncluded": false
+  },
+  "offlineAudit": {
+    "command": "node docs/evidence/video-parameter-audit-20261020/inspect.cjs",
+    "evidencePath": "docs/evidence/video-parameter-audit-20261020/inspection.json",
+    "evidenceSha256": "424ec4bf7c2dea00b1752cf58a11f6b22be4fb6a6a2a8cc3bd4a916c4e3584dc",
+    "runnerPath": "docs/evidence/video-parameter-audit-20261020/inspect.cjs",
+    "runnerSha256": "0a9f96dc7c5cad12a278472745ccf33dbb7b4f32ffd0c99191d052e58a825e13",
+    "modelCount": 9,
+    "catalogFieldCount": 58,
+    "boundaryChecks": 247,
+    "allExpected": true,
+    "syntheticReplayGroups": [
+      "h3",
+      "seedance",
+      "aliTransparentPng",
+      "materialSize",
+      "compilerReplays"
+    ],
+    "checksCountedAsProductTests": false,
+    "nodeHarnessModification": "Only replace import.meta.env to disable Vite dev performance probe; validation/provider/material logic runs unchanged",
+    "transports": "Synthetic, with quote approval cancelled; real fetch blocked",
+    "materialFiles": "Only generated files and project records in ignored outputs/video-parameter-audit-20261020"
+  },
+  "findings": [
+    {
+      "id": "F1",
+      "priority": "P1",
+      "summary": "H3 unknown required/default facts are projected as optional/use provider default; known rejected empty parameters are admitted locally"
+    },
+    {
+      "id": "F2",
+      "priority": "P2",
+      "summary": "Seedance official 20000 Unicode characters becomes local 2500 UTF-16 code units"
+    },
+    {
+      "id": "F3",
+      "priority": "P2",
+      "summary": "UI/field schema and adapter disagree on request combinations and image roles/counts"
+    },
+    {
+      "id": "F4",
+      "priority": "P2",
+      "summary": "Wan Ali image inputs are missing official no-alpha-channel check"
+    },
+    {
+      "id": "F5",
+      "priority": "P2",
+      "summary": "Default 15 MiB material resolver rejects valid images within published model contracts without exposing the stricter product limit"
+    }
+  ],
+  "sourceSynchronization": [
+    {
+      "sourceFile": "outputs/www-video-contracts/official-reviewed-20261019/sources.json",
+      "fieldDifferenceCount": 0,
+      "changedFields": [],
+      "writesCapturedOnly": true
+    },
+    {
+      "sourceFile": "outputs/video-parameter-audit-20261020/sources.json",
+      "fieldDifferenceCount": 2,
+      "changedFields": [
+        {
+          "modelKey": "doubao-seedance-2-0-260128",
+          "field": "generation_mode"
+        },
+        {
+          "modelKey": "doubao-seedance-2-0-260128",
+          "field": "output_format"
+        }
+      ],
+      "writesCapturedOnly": true
+    }
+  ],
+  "sourceContractCaveats": [
+    "H3 five fields are illustrated with types; complete required/enum/range facts remain unknown",
+    "Other 53 catalog fields are documented optional, not blanket required",
+    "Current UI/catalog does not expose MOV or Seedance standalone last_frame",
+    "Current documentation lists last_frame in table but also says standalone last frame unavailable",
+    "Recompiling new MOV enum must be gated by current MP4-only result support",
+    "Local frames/duration mutual rejection does not prove gateway requires mutual exclusion"
+  ],
+  "sourceFingerprints": {
+    "count": 164,
+    "allUnchanged": true,
+    "mismatches": [],
+    "additionalRegressionFile": {
+      "path": "tests/platform/controlled-image-material.test.ts",
+      "sha256": "32ec19fa60cec3b6be1286d73c3f150de801508bbb715a2a6ee9f862755c953b"
+    }
+  },
+  "publicDocumentation": {
+    "getCount": 9,
+    "allHttp200": true,
+    "scope": "public documentation URL GET only",
+    "records": [
+      {
+        "modelKey": "MiniMax-H3",
+        "url": "https://www.unicompapi.com/docs/models/MiniMax-H3",
+        "retrievedAt": "2026-10-20T09:28:23.943Z",
+        "status": 200,
+        "sha256": "9f6d64473e39ff5d813efd22978b817420deebbf124d1ea72246b8f8b47a2397"
+      },
+      {
+        "modelKey": "doubao-seedance-2-0-260128",
+        "url": "https://www.unicompapi.com/docs/models/doubao-seedance-2-0-260128",
+        "retrievedAt": "2026-10-20T09:28:25.660Z",
+        "status": 200,
+        "sha256": "c1847baab04707ae55194e12151a97cba7a3593eef68c35f010a23b74a31d507"
+      },
+      {
+        "modelKey": "happyhorse-1.1-t2v",
+        "url": "https://www.unicompapi.com/docs/models/happyhorse-1.1-t2v",
+        "retrievedAt": "2026-10-20T09:28:27.371Z",
+        "status": 200,
+        "sha256": "12fb0ad7182b3bf08756cd271b86f3da67a723e9596529986a78ba0254a5dbc8"
+      },
+      {
+        "modelKey": "happyhorse-1.1-i2v",
+        "url": "https://www.unicompapi.com/docs/models/happyhorse-1.1-i2v",
+        "retrievedAt": "2026-10-20T09:28:29.111Z",
+        "status": 200,
+        "sha256": "6b244aaad302306e1b3efd9d2d627ff762db681530711d7b809963a2d7cb004d"
+      },
+      {
+        "modelKey": "happyhorse-1.1-r2v",
+        "url": "https://www.unicompapi.com/docs/models/happyhorse-1.1-r2v",
+        "retrievedAt": "2026-10-20T09:28:30.803Z",
+        "status": 200,
+        "sha256": "a6ac8879d21af4e98221b35c9632f48f234734a250783624b540215f269a9c19"
+      },
+      {
+        "modelKey": "wan3.0-video",
+        "url": "https://www.unicompapi.com/docs/models/wan3.0-video",
+        "retrievedAt": "2026-10-20T09:28:32.556Z",
+        "status": 200,
+        "sha256": "dadbc1ff6ef44a21e680b203ce3cc4240d254c90faf83ef20e7746e8c1acd6b0"
+      },
+      {
+        "modelKey": "wan3.0-video-ali",
+        "url": "https://www.unicompapi.com/docs/models/wan3.0-video-ali",
+        "retrievedAt": "2026-10-20T09:28:34.220Z",
+        "status": 200,
+        "sha256": "5969b7d731fa1bb822c17fb8a4b8641ac82b963ccbd7a6e67c92cf0933b2f855"
+      },
+      {
+        "modelKey": "wan3.0-video-prime-ali",
+        "url": "https://www.unicompapi.com/docs/models/wan3.0-video-prime-ali",
+        "retrievedAt": "2026-10-20T09:28:35.870Z",
+        "status": 200,
+        "sha256": "c5f572c661374df2b89f8380b529b788af7195258c98bc15577d0f4342485907"
+      },
+      {
+        "modelKey": "happyhorse-1.0-video-edit",
+        "url": "https://www.unicompapi.com/docs/models/happyhorse-1.0-video-edit",
+        "retrievedAt": "2026-10-20T09:28:37.510Z",
+        "status": 200,
+        "sha256": "270f9be96261dfb73fe3edcf4e3db6448a39f98a45afcce38f613d8c3b39df3f"
+      }
+    ]
+  },
+  "boundaries": {
+    "auditOnly": true,
+    "productChanges": 0,
+    "realCredentialReads": 0,
+    "userProjectReads": 0,
+    "offlineExternalRequestAttempts": 0,
+    "realGenerationRequests": 0,
+    "settlementRequests": 0,
+    "modelFeesCny": 0,
+    "publicDocumentationGets": 9,
+    "publicDocumentationScope": "Nine public WWW model documentation URLs; no credentials or project data",
+    "syntheticProjectWrites": true,
+    "productSourceHashesUnchanged": true,
+    "realUploadRequests": 0,
+    "realQuoteRequests": 0,
+    "realSettlementRequests": 0,
+    "restartedApplication": false
+  },
+  "notRun": [
+    "full repository regression",
+    "production build",
+    "typecheck/lint",
+    "real renderer UI",
+    "macOS hardware",
+    "real provider uploads/quotes/generation/settlement"
+  ],
+  "intermediateHarnessIssues": [
+    {
+      "issue": "Node/CommonJS import of UI Vite performance probe left import.meta unsupported",
+      "resolution": "Disable only the dev probe in the Node audit require hook"
+    },
+    {
+      "issue": "Initial audit assertion assumed yesterday output_format included MOV",
+      "resolution": "Verify retained raw HTML/hash; yesterday MP4 only, today MP4/MOV; correct assertion"
+    }
+  ],
+  "review": {
+    "trackedDiffWhitespaceCheck": "passed",
+    "credentialLikePatternScan": {
+      "scope": "Only listed audit outputs and PLANS; no live configuration or credential stores read",
+      "patterns": [
+        "providerKeyLike",
+        "bearerCredentialLike",
+        "privateKeyBlock"
+      ],
+      "files": [
+        {
+          "path": "PLANS.md",
+          "patternHits": {
+            "providerKeyLike": 0,
+            "bearerCredentialLike": 0,
+            "privateKeyBlock": 0
+          }
+        },
+        {
+          "path": "docs/current/video-h3-audit-20261020.md",
+          "patternHits": {
+            "providerKeyLike": 0,
+            "bearerCredentialLike": 0,
+            "privateKeyBlock": 0
+          }
+        },
+        {
+          "path": "docs/evidence/video-h3-audit-20261020/validation.json",
+          "patternHits": {
+            "providerKeyLike": 0,
+            "bearerCredentialLike": 0,
+            "privateKeyBlock": 0
+          }
+        },
+        {
+          "path": "docs/current/video-parameter-audit-20261020.md",
+          "patternHits": {
+            "providerKeyLike": 0,
+            "bearerCredentialLike": 0,
+            "privateKeyBlock": 0
+          }
+        },
+        {
+          "path": "docs/evidence/video-parameter-audit-20261020/inspect.cjs",
+          "patternHits": {
+            "providerKeyLike": 0,
+            "bearerCredentialLike": 0,
+            "privateKeyBlock": 0
+          }
+        },
+        {
+          "path": "docs/evidence/video-parameter-audit-20261020/inspection.json",
+          "patternHits": {
+            "providerKeyLike": 0,
+            "bearerCredentialLike": 0,
+            "privateKeyBlock": 0
+          }
+        }
+      ]
+    },
+    "report": {
+      "path": "docs/current/video-parameter-audit-20261020.md",
+      "sha256": "308aaf9ad6f21cbeedc22c653e64b94ffae4156067c43e1ec3ee5fbb8a2ddce2"
+    },
+    "plansSha256": "0d1a73e2258212339adcc351c918b202f5f31b4a4fe066c2c0e9ee5fd8070c57"
+  }
+}

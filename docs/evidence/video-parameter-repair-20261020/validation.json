@@ -1,0 +1,584 @@
+{
+  "collectedAt": "2026-10-20T11:44:05.284Z",
+  "status": "passed",
+  "branch": "feature/video-h3-audit-20261020",
+  "baseCommit": "1142611913cb5f68efe053571d156348a5b9d8a9",
+  "codeCommit": "eeb3dbfd87828e59dfbfb8814a50e8cfb6d528e6",
+  "scope": "Maintenance repair of WWW video contracts, H3 parameter handling, safe failures, snapshots and controlled image constraints.",
+  "collection": {
+    "localOnly": true,
+    "compressedFilesRoundTripVerified": true,
+    "publicSourceHashesVerified": 9,
+    "officialSourceHashesVerified": 10,
+    "currentCatalogRecompilationMatches": true,
+    "retainedCatalogMatchesBase": true,
+    "sourceFingerprints": 1134
+  },
+  "verification": [
+    {
+      "command": "pnpm test --testTimeout=15000 --maxWorkers=4 --minWorkers=1",
+      "exitCode": 0,
+      "nodeUi": {
+        "passed": 394,
+        "failed": 0,
+        "skipped": 0
+      },
+      "vitest": {
+        "files": 350,
+        "passed": 3572,
+        "failed": 0,
+        "skipped": 0
+      },
+      "total": 3966,
+      "qualification": "After official H3 V2 fallback and wording change. The only later edit expands the review screenshot in the H3 verification script, which was rerun."
+    },
+    {
+      "command": "pnpm exec vitest run tests/domain/video-submission-contracts.test.ts tests/platform/controlled-image-material.test.ts tests/platform/video-parameter-repair.test.ts tests/platform/www-video.test.ts",
+      "exitCode": 0,
+      "files": 4,
+      "passed": 113,
+      "includedInFullRegression": true
+    },
+    {
+      "command": "pnpm exec electron scripts/verify-www-video-electron.cjs",
+      "exitCode": 0,
+      "passed": 16,
+      "nativeElectronPreloadIpcHost": true,
+      "supportedModels": 9,
+      "supportedModelFeatureCases": 13,
+      "additionalH3Checks": 3,
+      "live": false
+    },
+    {
+      "command": "pnpm exec electron scripts/verify-www-video-ui.cjs --h3",
+      "exitCode": 0,
+      "passed": 7,
+      "syntheticIpc": true
+    },
+    {
+      "command": "pnpm exec electron scripts/verify-www-video-ui.cjs --seedance",
+      "exitCode": 0,
+      "passed": 2,
+      "syntheticIpc": true
+    },
+    {
+      "command": "pnpm exec electron scripts/verify-www-video-ui.cjs",
+      "exitCode": 0,
+      "passed": 5,
+      "syntheticIpc": true
+    },
+    {
+      "command": "node --test tests/ui/quick-video-ui-contract.test.mjs",
+      "exitCode": 0,
+      "passed": 5,
+      "afterFinalSourceChange": true,
+      "repeatedSubset": true
+    },
+    {
+      "command": "pnpm typecheck",
+      "exitCode": 0,
+      "afterFinalSourceChange": true
+    },
+    {
+      "command": "pnpm lint",
+      "exitCode": 0,
+      "afterFinalSourceChange": true
+    },
+    {
+      "command": "pnpm build",
+      "exitCode": 0,
+      "afterFinalSourceChange": true
+    },
+    {
+      "command": "pnpm audit:platform",
+      "exitCode": 0,
+      "scannedFiles": 650,
+      "violations": []
+    }
+  ],
+  "intermediateFailures": [
+    {
+      "artifact": "logs/intermediate-failures/default-timeout.log.gz",
+      "vitestPassed": 3544,
+      "vitestFailed": 11,
+      "disposition": "Document-loop timing/streaming-state and progress-performance failures under default 5-second timeout; no unrelated business/config changes. Final run bounded workers and used 15 seconds. Default-load timing is not claimed repaired."
+    },
+    {
+      "artifact": "logs/intermediate-failures/electron-host-ceiling.log.gz",
+      "disposition": "Second Host composition still used old input ceiling; wired current contract ceiling, rebuilt, and reran 16 native checks successfully."
+    },
+    {
+      "artifact": "intermediate-failures/electron-failure.json",
+      "disposition": "Retained historical failure, superseded by electron/validation.json."
+    }
+  ],
+  "costAndOutbound": {
+    "isolatedValidationExternalRequests": 0,
+    "officialPublicDocumentationGets": 14,
+    "officialDocumentationSuccessfulResponses": 8,
+    "officialDocumentationNotFoundResponses": 2,
+    "officialDocumentationRedirectResponses": 4,
+    "officialDocumentationManifest": "official-minimax/manifest.json",
+    "officialDocumentationOutboundScope": "Public official documentation GET only; no authentication, user prompt, project content or attachment.",
+    "repairCredentialReads": 0,
+    "repairRealUserProjectReads": 0,
+    "repairRealUploads": 0,
+    "repairRealQuotes": 0,
+    "repairPaidGenerationPosts": 0,
+    "repairSettlementPosts": 0,
+    "repairModelFeesCny": 0,
+    "earlierAudit": "Nine public documentation GETs and two bounded H3 quote requests are historical evidence, not new repair calls. See public-sources.json, prior-audit-quote-probe.json and the audit records."
+  },
+  "limitations": [
+    "Official H3 V2 supplements the shared required resolution/ratio/duration fields and prompt constraints. Gateway-only generate_audio/watermark names still have unknown requirements; no mapping or defaults are invented.",
+    "The gateway action/quote protocol is preserved. Its actual coverage of official H3 values and arbitrary field combinations has not been validated against the real service; the five-field gateway example stays opt-in.",
+    "No new paid end-to-end generation or real-service recovery claim; isolated synthetic transport is not live service validation.",
+    "Seedance single-last-frame documentation remains inconsistent; unsupported modes and MOV stay outside current controlled receivers.",
+    "No macOS machine validation and no restart of the user application; a normal restart is needed to load the repair.",
+    "Existing Vite CJS/chunk warnings remain. Default-load test timing failures are retained, not claimed fixed."
+  ],
+  "artifacts": [
+    {
+      "file": "electron/validation.json",
+      "source": "outputs/video-parameter-repair-20261020/electron/validation.json",
+      "originalBytes": 10499,
+      "originalSha256": "1535adc8ff64f0dd5203eca846c98c10827e6af01b21d3755d26a7b51b52b7cf",
+      "bytes": 10499,
+      "sha256": "1535adc8ff64f0dd5203eca846c98c10827e6af01b21d3755d26a7b51b52b7cf",
+      "gzipRoundTripVerified": false
+    },
+    {
+      "file": "ui-h3/validation.json",
+      "source": "outputs/video-parameter-repair-20261020/ui-h3/validation.json",
+      "originalBytes": 734,
+      "originalSha256": "130922cfc27cac5807a6c72a45a04059b457cf9ec1e727550e05df4199965f7a",
+      "bytes": 734,
+      "sha256": "130922cfc27cac5807a6c72a45a04059b457cf9ec1e727550e05df4199965f7a",
+      "gzipRoundTripVerified": false
+    },
+    {
+      "file": "ui-seedance/validation.json",
+      "source": "outputs/video-parameter-repair-20261020/ui-seedance/validation.json",
+      "originalBytes": 308,
+      "originalSha256": "301e449ae99b4e01a6f2f8b5b3ac47f48d8d7b586071f0c8e536b5c4c43e06b5",
+      "bytes": 308,
+      "sha256": "301e449ae99b4e01a6f2f8b5b3ac47f48d8d7b586071f0c8e536b5c4c43e06b5",
+      "gzipRoundTripVerified": false
+    },
+    {
+      "file": "ui-edit/validation.json",
+      "source": "outputs/video-parameter-repair-20261020/ui-edit/validation.json",
+      "originalBytes": 618,
+      "originalSha256": "fd2ec798c6dd89462ad1073c625739da5655c55b15081f69fa1b7a755c3d3e4e",
+      "bytes": 618,
+      "sha256": "fd2ec798c6dd89462ad1073c625739da5655c55b15081f69fa1b7a755c3d3e4e",
+      "gzipRoundTripVerified": false
+    },
+    {
+      "file": "ui-h3/h3-official-parameters.png",
+      "source": "outputs/video-parameter-repair-20261020/ui-h3/h3-official-parameters.png",
+      "originalBytes": 193344,
+      "originalSha256": "7162a9b411fd334399eb69b6cfcf03dc6a5914df55c4e9558d66e4332d7fc03e",
+      "bytes": 193344,
+      "sha256": "7162a9b411fd334399eb69b6cfcf03dc6a5914df55c4e9558d66e4332d7fc03e",
+      "gzipRoundTripVerified": false
+    },
+    {
+      "file": "ui-edit/video-edit.png",
+      "source": "outputs/video-parameter-repair-20261020/ui-edit/video-edit.png",
+      "originalBytes": 181315,
+      "originalSha256": "8dd4f612a0ea2e2d125e8ca463df07e1b0bb8125e7e9620ccf02f9ed4f2c9732",
+      "bytes": 181315,
+      "sha256": "8dd4f612a0ea2e2d125e8ca463df07e1b0bb8125e7e9620ccf02f9ed4f2c9732",
+      "gzipRoundTripVerified": false
+    },
+    {
+      "file": "focused.json.gz",
+      "source": "outputs/video-parameter-repair-focused-delivery.json",
+      "originalBytes": 43073,
+      "originalSha256": "ae6886544dc61953b33c976773df904bfb09c145aad7c0fc75ba0cf0fdffda76",
+      "bytes": 4527,
+      "sha256": "1043d5d1406f17a9b623cfe70460f9bef43fe7bc834620554aa129da7950201e",
+      "gzipRoundTripVerified": true
+    },
+    {
+      "file": "intermediate-failures/electron-failure.json",
+      "source": "outputs/video-parameter-repair-20261020/electron/failure.json",
+      "originalBytes": 2189,
+      "originalSha256": "b02bbcc8935d73c2e4445c0ffa88c895f1c1a50f4b5dc0fe1a5b087ac702d8ff",
+      "bytes": 2189,
+      "sha256": "b02bbcc8935d73c2e4445c0ffa88c895f1c1a50f4b5dc0fe1a5b087ac702d8ff",
+      "gzipRoundTripVerified": false
+    },
+    {
+      "file": "logs/full-regression.log.gz",
+      "source": "outputs/video-parameter-repair-test-delivery.log",
+      "originalBytes": 123388,
+      "originalSha256": "ea28950462f196a205571f44adb627fe5843b798630b4c6d8c310d4d01f37868",
+      "bytes": 24776,
+      "sha256": "5b9622b91b20deff2e8a068b4dfcf1be8c64b92c328af701b374935fbae2a4de",
+      "gzipRoundTripVerified": true
+    },
+    {
+      "file": "logs/intermediate-failures/default-timeout.log.gz",
+      "source": "outputs/video-parameter-repair-test-default-timeout.log",
+      "originalBytes": 144527,
+      "originalSha256": "9125774ae1e051ded208b2714ad78ed765e2702cc63a24ef995432f833f16a1a",
+      "bytes": 29312,
+      "sha256": "2a658ef0d7614da9d3d90a603db3f70ad39f6928051d4b5aa38cdb084a44f8f0",
+      "gzipRoundTripVerified": true
+    },
+    {
+      "file": "logs/focused.log.gz",
+      "source": "outputs/video-parameter-repair-focused-delivery.log",
+      "originalBytes": 481,
+      "originalSha256": "328b1166eaea1c784e9b52458bc54c01cf192298c9c7506d33200a1088b8457c",
+      "bytes": 354,
+      "sha256": "17262d66e66579925735ac660679064231da1ba6669886fc7fd966c025402b04",
+      "gzipRoundTripVerified": true
+    },
+    {
+      "file": "logs/electron.log.gz",
+      "source": "outputs/video-parameter-repair-electron-delivery.log",
+      "originalBytes": 139,
+      "originalSha256": "7306689b3c2079e295fb136bf162fb27ec4a490e8b7593d813c0ad8a214ac33e",
+      "bytes": 140,
+      "sha256": "72da63df2975b9a6f921a152d8d3db18f529f63cceb3a50987870e0b550e5b2d",
+      "gzipRoundTripVerified": true
+    },
+    {
+      "file": "logs/intermediate-failures/electron-host-ceiling.log.gz",
+      "source": "outputs/video-parameter-repair-electron-final.log",
+      "originalBytes": 874,
+      "originalSha256": "14d6608511d9d081c066a078b2e1a99f9ded39d580281ceccd250b92049f9fbb",
+      "bytes": 620,
+      "sha256": "00e4e0fc578c60ffbf4a2dd05e8827301663fd99d165173ccc39d46281e29c47",
+      "gzipRoundTripVerified": true
+    },
+    {
+      "file": "logs/intermediate-failures/electron-initial.log.gz",
+      "source": "outputs/video-parameter-repair-electron.log",
+      "originalBytes": 376,
+      "originalSha256": "c605bccad3cfab81465dea93dc84f75e584d1c275a1bc57f2fd1b20f3c73af42",
+      "bytes": 273,
+      "sha256": "71ce9852db4cc692905418fb28abcc4ed25fd2bb925ca600935b26fc8c5c68a0",
+      "gzipRoundTripVerified": true
+    },
+    {
+      "file": "logs/ui-h3.log.gz",
+      "source": "outputs/video-parameter-repair-ui-h3-delivery.log",
+      "originalBytes": 253,
+      "originalSha256": "9e4ae415e6519be57e10f6836e2728977c1dfc25a9387ae1c34cfaf06ac976d9",
+      "bytes": 221,
+      "sha256": "f181d7ddaa04fcec6325fa8918c7496adfd308677b469bb5dddb999452cb1154",
+      "gzipRoundTripVerified": true
+    },
+    {
+      "file": "logs/ui-seedance.log.gz",
+      "source": "outputs/video-parameter-repair-ui-seedance-delivery.log",
+      "originalBytes": 253,
+      "originalSha256": "9ea92d9dad7455431def690008dc9a16eeb18f7a3962064c5eb5e84a7a6e7376",
+      "bytes": 220,
+      "sha256": "69fddcffebcf497e737245de5fb1a257f3a4721424a10002f1d63c6ebe4103cb",
+      "gzipRoundTripVerified": true
+    },
+    {
+      "file": "logs/ui-edit.log.gz",
+      "source": "outputs/video-parameter-repair-ui-edit-delivery.log",
+      "originalBytes": 253,
+      "originalSha256": "3ad2a1bdb2cbad77ed73febb09cc688ec31e69970fa87c52b4098a640b248c94",
+      "bytes": 221,
+      "sha256": "f16badbb062100ec66c40ed1010fa583247b7cb3f24a11097508b2851313feff",
+      "gzipRoundTripVerified": true
+    },
+    {
+      "file": "logs/build.log.gz",
+      "source": "outputs/video-parameter-repair-build-delivery.log",
+      "originalBytes": 1158,
+      "originalSha256": "43279fffb011e76fba4da339309aa1ebbf7d89ff550e3b4fe31243d7457953ca",
+      "bytes": 689,
+      "sha256": "c97f40c209df9649bc4476ebfba8ae0a048e16818a3633407838de3f22e3e560",
+      "gzipRoundTripVerified": true
+    },
+    {
+      "file": "logs/typecheck.log.gz",
+      "source": "outputs/video-parameter-repair-typecheck-delivery.log",
+      "originalBytes": 108,
+      "originalSha256": "bff1f874a0ce3eb293377bee4ad27802b178d05a6bca56497506b44078fc4cf7",
+      "bytes": 113,
+      "sha256": "504b43ced1475cd9d47f48b4b08bd0df2e0d5d547bd0b5f510045617e112674f",
+      "gzipRoundTripVerified": true
+    },
+    {
+      "file": "logs/lint.log.gz",
+      "source": "outputs/video-parameter-repair-lint-delivery.log",
+      "originalBytes": 66,
+      "originalSha256": "0319e633a4f1ec36297a67f8385b3461113bf159a03f4935a18df9ed57a1895a",
+      "bytes": 86,
+      "sha256": "242027432bfd611b70999c997c82cde87763a2d705f6341186ad936f504c354f",
+      "gzipRoundTripVerified": true
+    },
+    {
+      "file": "logs/platform.log.gz",
+      "source": "outputs/video-parameter-repair-platform-delivery.log",
+      "originalBytes": 2838,
+      "originalSha256": "014d7c6b6ab7ce90135defaa3dcd35cb2f258daf47e6e96991023f787984f31c",
+      "bytes": 668,
+      "sha256": "32ec72fe14a7ec019de41e613543e25f290ceaa1a7095582377d488c9d303f05",
+      "gzipRoundTripVerified": true
+    },
+    {
+      "file": "logs/quick-ui.log.gz",
+      "source": "outputs/video-parameter-repair-quick-ui-delivery.log",
+      "originalBytes": 535,
+      "originalSha256": "28d97269f94e63b938c83fff8e2a53d3eae81181f5f4f73fac45d33c498facc7",
+      "bytes": 318,
+      "sha256": "a6e657a067b6b54aa5186daaca2414c0857bcca594990bd8a19107ad94dbcd52",
+      "gzipRoundTripVerified": true
+    },
+    {
+      "file": "public-sources.json",
+      "source": "outputs/video-parameter-audit-20261020/sources.json",
+      "originalBytes": 45992,
+      "originalSha256": "035849bd661ca2997b865eca9e5df7f09ed225f074010a85514a697b3afb8171",
+      "bytes": 45992,
+      "sha256": "035849bd661ca2997b865eca9e5df7f09ed225f074010a85514a697b3afb8171",
+      "gzipRoundTripVerified": false
+    },
+    {
+      "file": "public-sources/MiniMax-H3.html.gz",
+      "source": "outputs/video-parameter-audit-20261020/MiniMax-H3.html",
+      "originalBytes": 44367,
+      "originalSha256": "9f6d64473e39ff5d813efd22978b817420deebbf124d1ea72246b8f8b47a2397",
+      "bytes": 9832,
+      "sha256": "2514868d1e86b438d4909feacb980ae9df7f5f1fe16a48607f44807f0275d5eb",
+      "gzipRoundTripVerified": true
+    },
+    {
+      "file": "public-sources/doubao-seedance-2-0-260128.html.gz",
+      "source": "outputs/video-parameter-audit-20261020/doubao-seedance-2-0-260128.html",
+      "originalBytes": 148839,
+      "originalSha256": "c1847baab04707ae55194e12151a97cba7a3593eef68c35f010a23b74a31d507",
+      "bytes": 21930,
+      "sha256": "0019f394ddbb34efa385b71a676468a974d5f718e12aa0282f040f4ba3737fb6",
+      "gzipRoundTripVerified": true
+    },
+    {
+      "file": "public-sources/happyhorse-1.1-t2v.html.gz",
+      "source": "outputs/video-parameter-audit-20261020/happyhorse-1.1-t2v.html",
+      "originalBytes": 62963,
+      "originalSha256": "12fb0ad7182b3bf08756cd271b86f3da67a723e9596529986a78ba0254a5dbc8",
+      "bytes": 12590,
+      "sha256": "669948f0bed7885d71238aee00733a09a6db564a4eb42a25ae0196437ce2b043",
+      "gzipRoundTripVerified": true
+    },
+    {
+      "file": "public-sources/happyhorse-1.1-i2v.html.gz",
+      "source": "outputs/video-parameter-audit-20261020/happyhorse-1.1-i2v.html",
+      "originalBytes": 63565,
+      "originalSha256": "6b244aaad302306e1b3efd9d2d627ff762db681530711d7b809963a2d7cb004d",
+      "bytes": 12842,
+      "sha256": "d9d2bbc0341053c7b99cd93fca127e8275c16928bf05091e29af0c9a8404fa09",
+      "gzipRoundTripVerified": true
+    },
+    {
+      "file": "public-sources/happyhorse-1.1-r2v.html.gz",
+      "source": "outputs/video-parameter-audit-20261020/happyhorse-1.1-r2v.html",
+      "originalBytes": 64513,
+      "originalSha256": "a6ac8879d21af4e98221b35c9632f48f234734a250783624b540215f269a9c19",
+      "bytes": 12941,
+      "sha256": "b7a7e5cba92ee2a32b72afc5477106bc19645e42ea6da7401f82c3bafd76877b",
+      "gzipRoundTripVerified": true
+    },
+    {
+      "file": "public-sources/wan3.0-video.html.gz",
+      "source": "outputs/video-parameter-audit-20261020/wan3.0-video.html",
+      "originalBytes": 131506,
+      "originalSha256": "dadbc1ff6ef44a21e680b203ce3cc4240d254c90faf83ef20e7746e8c1acd6b0",
+      "bytes": 20258,
+      "sha256": "4e12e4328bb35ee8403276a03281e6743ce47a9b5d4ee119bcf5d0bd29e22454",
+      "gzipRoundTripVerified": true
+    },
+    {
+      "file": "public-sources/wan3.0-video-ali.html.gz",
+      "source": "outputs/video-parameter-audit-20261020/wan3.0-video-ali.html",
+      "originalBytes": 178711,
+      "originalSha256": "5969b7d731fa1bb822c17fb8a4b8641ac82b963ccbd7a6e67c92cf0933b2f855",
+      "bytes": 23880,
+      "sha256": "09072cf2a8490bc592277f084a9d2e196092f07bd21c347065bf01b9011f8bba",
+      "gzipRoundTripVerified": true
+    },
+    {
+      "file": "public-sources/wan3.0-video-prime-ali.html.gz",
+      "source": "outputs/video-parameter-audit-20261020/wan3.0-video-prime-ali.html",
+      "originalBytes": 179114,
+      "originalSha256": "c5f572c661374df2b89f8380b529b788af7195258c98bc15577d0f4342485907",
+      "bytes": 23926,
+      "sha256": "7d3160a4a7e38e45a32214189422e95a3ea671f1af57d1ddfbed39c22cfce3bc",
+      "gzipRoundTripVerified": true
+    },
+    {
+      "file": "public-sources/happyhorse-1.0-video-edit.html.gz",
+      "source": "outputs/video-parameter-audit-20261020/happyhorse-1.0-video-edit.html",
+      "originalBytes": 87988,
+      "originalSha256": "270f9be96261dfb73fe3edcf4e3db6448a39f98a45afcce38f613d8c3b39df3f",
+      "bytes": 15697,
+      "sha256": "ddbc242b53217c87daa3d2954ecbad7c61aa4a3270166e8146a066fd21058c13",
+      "gzipRoundTripVerified": true
+    },
+    {
+      "file": "prior-audit-quote-probe.json",
+      "source": "outputs/video-h3-audit-20261020/quote-probe.json",
+      "originalBytes": 1387,
+      "originalSha256": "2cc8fca1c957a2e095664c72450bbd960e5dc706ea57c1f4b35b333d52d96901",
+      "bytes": 1387,
+      "sha256": "2cc8fca1c957a2e095664c72450bbd960e5dc706ea57c1f4b35b333d52d96901",
+      "gzipRoundTripVerified": false
+    },
+    {
+      "file": "official-minimax/0-platform.minimaxi.com-_llms.txt.html.gz",
+      "source": "docs/evidence/video-parameter-repair-20261020/official-minimax/0-platform.minimaxi.com-_llms.txt.html.gz",
+      "originalBytes": 16019,
+      "originalSha256": "ac85ff8b265d48e0462a3421dd4d7e32445f4bb1c501fd6c47d1cdb905ee763a",
+      "bytes": 16019,
+      "sha256": "ac85ff8b265d48e0462a3421dd4d7e32445f4bb1c501fd6c47d1cdb905ee763a",
+      "gzipRoundTripVerified": false
+    },
+    {
+      "file": "official-minimax/1-platform.minimax.io-_llms.txt.html.gz",
+      "source": "docs/evidence/video-parameter-repair-20261020/official-minimax/1-platform.minimax.io-_llms.txt.html.gz",
+      "originalBytes": 12764,
+      "originalSha256": "5aa3670e4bc1a0334a6ce641393ed0225bcb0a7b7af7c5842dbd2a0d433b6449",
+      "bytes": 12764,
+      "sha256": "5aa3670e4bc1a0334a6ce641393ed0225bcb0a7b7af7c5842dbd2a0d433b6449",
+      "gzipRoundTripVerified": false
+    },
+    {
+      "file": "official-minimax/3-platform.minimax.io-_docs_api-reference_video-generation-t2v.txt.gz",
+      "source": "docs/evidence/video-parameter-repair-20261020/official-minimax/3-platform.minimax.io-_docs_api-reference_video-generation-t2v.txt.gz",
+      "originalBytes": 2939,
+      "originalSha256": "c2c7e7997574705bd7186f1840dd0bd9d6037742787441b7da8b692b2b60b3bc",
+      "bytes": 2939,
+      "sha256": "c2c7e7997574705bd7186f1840dd0bd9d6037742787441b7da8b692b2b60b3bc",
+      "gzipRoundTripVerified": false
+    },
+    {
+      "file": "official-minimax/followup-0-platform.minimax.cn-_docs_api-reference_video-generation-t2v.txt.gz",
+      "source": "docs/evidence/video-parameter-repair-20261020/official-minimax/followup-0-platform.minimax.cn-_docs_api-reference_video-generation-t2v.txt.gz",
+      "originalBytes": 3473,
+      "originalSha256": "369646087231a185854046c83cdd9f90debdc01687ebc477e211ba488955eaf0",
+      "bytes": 3473,
+      "sha256": "369646087231a185854046c83cdd9f90debdc01687ebc477e211ba488955eaf0",
+      "gzipRoundTripVerified": false
+    },
+    {
+      "file": "official-minimax/followup-1-platform.minimax.cn-_docs_guides_video-generation.txt.gz",
+      "source": "docs/evidence/video-parameter-repair-20261020/official-minimax/followup-1-platform.minimax.cn-_docs_guides_video-generation.txt.gz",
+      "originalBytes": 5692,
+      "originalSha256": "d3f70609c93fdea3138b7423a2790922c3a44b0379bee177fd60cea8a6d01169",
+      "bytes": 5692,
+      "sha256": "d3f70609c93fdea3138b7423a2790922c3a44b0379bee177fd60cea8a6d01169",
+      "gzipRoundTripVerified": false
+    },
+    {
+      "file": "official-minimax/followup-2-platform.minimax.io-_docs_llms.txt.txt.gz",
+      "source": "docs/evidence/video-parameter-repair-20261020/official-minimax/followup-2-platform.minimax.io-_docs_llms.txt.txt.gz",
+      "originalBytes": 6154,
+      "originalSha256": "545da00b6d645e0b0599230def7122bef009369aee0bbd40e93ef69b56898b62",
+      "bytes": 6154,
+      "sha256": "545da00b6d645e0b0599230def7122bef009369aee0bbd40e93ef69b56898b62",
+      "gzipRoundTripVerified": false
+    },
+    {
+      "file": "official-minimax/followup-3-platform.minimax.cn-_docs_llms.txt.txt.gz",
+      "source": "docs/evidence/video-parameter-repair-20261020/official-minimax/followup-3-platform.minimax.cn-_docs_llms.txt.txt.gz",
+      "originalBytes": 7491,
+      "originalSha256": "95ad9edfa82c56e91c79ff9876a36f07ef930df6771707fdce10f9d052f38b14",
+      "bytes": 7491,
+      "sha256": "95ad9edfa82c56e91c79ff9876a36f07ef930df6771707fdce10f9d052f38b14",
+      "gzipRoundTripVerified": false
+    },
+    {
+      "file": "official-minimax/h3-0-platform.minimax.cn-_docs_api-reference_video-generation-v2-create.txt.gz",
+      "source": "docs/evidence/video-parameter-repair-20261020/official-minimax/h3-0-platform.minimax.cn-_docs_api-reference_video-generation-v2-create.txt.gz",
+      "originalBytes": 6390,
+      "originalSha256": "6afa33042c6eca7b394f7a871ecb44535ae8e12a00081c38d183627b8bcca915",
+      "bytes": 6390,
+      "sha256": "6afa33042c6eca7b394f7a871ecb44535ae8e12a00081c38d183627b8bcca915",
+      "gzipRoundTripVerified": false
+    },
+    {
+      "file": "official-minimax/h3-1-platform.minimax.io-_docs_api-reference_video-generation-v2-create.txt.gz",
+      "source": "docs/evidence/video-parameter-repair-20261020/official-minimax/h3-1-platform.minimax.io-_docs_api-reference_video-generation-v2-create.txt.gz",
+      "originalBytes": 5832,
+      "originalSha256": "9cfbf78633cf8dff0904aa5ddbf2f1e1bf751d2ffe796521675ad214571baf8f",
+      "bytes": 5832,
+      "sha256": "9cfbf78633cf8dff0904aa5ddbf2f1e1bf751d2ffe796521675ad214571baf8f",
+      "gzipRoundTripVerified": false
+    },
+    {
+      "file": "official-minimax/h3-2-platform.minimax.io-_docs_guides_video-generation.txt.gz",
+      "source": "docs/evidence/video-parameter-repair-20261020/official-minimax/h3-2-platform.minimax.io-_docs_guides_video-generation.txt.gz",
+      "originalBytes": 5012,
+      "originalSha256": "281c0b8be344b3e1548022f6ac1c2e9d183fa9bcc103f2c3b306e649e3e97e0d",
+      "bytes": 5012,
+      "sha256": "281c0b8be344b3e1548022f6ac1c2e9d183fa9bcc103f2c3b306e649e3e97e0d",
+      "gzipRoundTripVerified": false
+    },
+    {
+      "file": "official-minimax/manifest.json",
+      "source": "docs/evidence/video-parameter-repair-20261020/official-minimax/manifest.json",
+      "originalBytes": 7830,
+      "originalSha256": "9aff7d2a16a750d12a6c3b63f8f3709d5802bd0a6eab27f52b15b5b2007a5193",
+      "bytes": 7830,
+      "sha256": "9aff7d2a16a750d12a6c3b63f8f3709d5802bd0a6eab27f52b15b5b2007a5193",
+      "gzipRoundTripVerified": false
+    },
+    {
+      "file": "official-minimax/retrieval-redirects.json",
+      "source": "docs/evidence/video-parameter-repair-20261020/official-minimax/retrieval-redirects.json",
+      "originalBytes": 582,
+      "originalSha256": "a39ccd5bc118cc383a8ea235dd55a99138291e071beac8c5671a166492c0802b",
+      "bytes": 582,
+      "sha256": "a39ccd5bc118cc383a8ea235dd55a99138291e071beac8c5671a166492c0802b",
+      "gzipRoundTripVerified": false
+    },
+    {
+      "file": "official-minimax/retrieval-sources-followup.json",
+      "source": "docs/evidence/video-parameter-repair-20261020/official-minimax/retrieval-sources-followup.json",
+      "originalBytes": 2095,
+      "originalSha256": "f339bed220597465b96cbd67fce6af0dc58871b8ab492ae9c4f4a4080b8c0cde",
+      "bytes": 2095,
+      "sha256": "f339bed220597465b96cbd67fce6af0dc58871b8ab492ae9c4f4a4080b8c0cde",
+      "gzipRoundTripVerified": false
+    },
+    {
+      "file": "official-minimax/retrieval-sources-h3.json",
+      "source": "docs/evidence/video-parameter-repair-20261020/official-minimax/retrieval-sources-h3.json",
+      "originalBytes": 1790,
+      "originalSha256": "c4812c56ea7f3fe46fd94d6066114d2d527602d070022ecb4f00174cee5e1feb",
+      "bytes": 1790,
+      "sha256": "c4812c56ea7f3fe46fd94d6066114d2d527602d070022ecb4f00174cee5e1feb",
+      "gzipRoundTripVerified": false
+    },
+    {
+      "file": "official-minimax/retrieval-sources.json",
+      "source": "docs/evidence/video-parameter-repair-20261020/official-minimax/retrieval-sources.json",
+      "originalBytes": 1928,
+      "originalSha256": "4119c454c81398c51e63730d8ed97ca147459b2783037839a18704d90c81104e",
+      "bytes": 1928,
+      "sha256": "4119c454c81398c51e63730d8ed97ca147459b2783037839a18704d90c81104e",
+      "gzipRoundTripVerified": false
+    },
+    {
+      "file": "source-fingerprints.json",
+      "bytes": 181026,
+      "sha256": "bc2964efe24bc6721da64af6fadf1656a8aac99a71d83f185724ecc8a854ae8b"
+    },
+    {
+      "file": "compile.json",
+      "bytes": 3283,
+      "sha256": "7a2ccacf93e1a9aa0257f7835e7c2db5974e0375b6c050c553ea618e09170fc3"
+    }
+  ]
+}
