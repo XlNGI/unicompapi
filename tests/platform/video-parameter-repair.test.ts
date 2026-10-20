@@ -3,26 +3,59 @@ import { parameterRequestError, projectParameterSchema, validateParameterRequest
 import { wwwVideoContract, wwwVideoParameterSchema } from '../../src/platform/providers/newapi/www-video-contracts';
 import { normalizeProviderSubmitOutcome } from '../../src/platform/providers/provider-submission-dispatch-bridge';
 import { imageHasAlphaChannel } from '../../src/platform/files/image-alpha-channel';
+import { validateDynamicParameterValues } from '../../src/components/dynamic-parameter-validation';
 import { testPng } from '../fixtures/png';
 import { wwwAdapterFixture } from '../fixtures/www-video';
 
 describe('video parameter repair boundaries', () => {
-  it('keeps unknown requirements explicit and the H3 example opt-in on both projections', async () => {
+  it('uses official H3 V2 requirements while keeping gateway-only switches unknown', async () => {
     const schema = wwwVideoParameterSchema(wwwVideoContract('MiniMax-H3')!, 'text_to_video');
     for (const mode of ['required_only', 'full'] as const) {
       const projection = projectParameterSchema(schema, mode);
       expect(projection.fields).toHaveLength(5);
-      expect(projection.fields.every(f => f.requirement === 'unknown' && !f.required && f.defaultPolicy === 'omit_without_default_guarantee')).toBe(true);
-      expect(() => validateParameterValues(schema, mode, {})).toThrow(/空参数/);
+      expect(projection.fields.filter(f => f.required).map(f => f.fieldId)).toEqual(['resolution', 'ratio', 'duration']);
+      expect(projection.fields.filter(f => !f.required).every(f => f.requirement === 'unknown' && f.defaultPolicy === 'omit_without_default_guarantee')).toBe(true);
+      expect(() => validateParameterValues(schema, mode, {})).toThrow();
       expect(validateParameterValues(schema, mode, schema.exampleValues)).toEqual(schema.exampleValues);
-      expect(validateParameterValues(schema, mode, { watermark: false })).toEqual({ watermark: false });
-      expect(validateParameterValues(schema, mode, { duration: 5 })).toEqual({ duration: 5 });
+      const required = { resolution: '768P', ratio: '21:9', duration: 15 };
+      expect(validateParameterValues(schema, mode, required)).toEqual(required);
+      expect(validateDynamicParameterValues(projection.fields, required).valid).toBe(true);
     }
     const x = wwwAdapterFixture('MiniMax-H3');
     const outcome = await x.adapter.submit({ routeSnapshot: x.route, request: { ...x.request, parameterValues: {} } });
     expect(outcome.kind).toBe('failed_before_submission');
     expect(x.calls).toHaveLength(0);
     expect(x.approvals).toHaveLength(0);
+  });
+
+  it.each([
+    ['resolution', undefined], ['ratio', undefined], ['duration', undefined],
+    ['resolution', '480P'], ['resolution', '1080P'], ['resolution', 2048],
+    ['ratio', 'adaptive'], ['ratio', '2:1'], ['ratio', 1],
+    ['duration', -1], ['duration', 3], ['duration', 16], ['duration', 4.5], ['duration', '5'],
+    ['generate_audio', 'true'], ['watermark', 0]
+  ])('rejects invalid H3 %s=%s in UI, Host schema and adapter before quote', async (name, value) => {
+    const schema = wwwVideoParameterSchema(wwwVideoContract('MiniMax-H3')!, 'text_to_video');
+    const parameters = { ...schema.exampleValues, [name]: value };
+    for (const mode of ['required_only', 'full'] as const) {
+      expect(validateDynamicParameterValues(projectParameterSchema(schema, mode).fields, parameters).valid).toBe(false);
+      expect(() => validateParameterValues(schema, mode, parameters)).toThrow();
+    }
+    const x = wwwAdapterFixture('MiniMax-H3');
+    expect(await x.adapter.submit({ routeSnapshot: x.route, request: { ...x.request, parameterValues: parameters } }))
+      .toMatchObject({ kind: 'failed_before_submission' });
+    expect(x.calls).toHaveLength(0);
+    expect(x.approvals).toHaveLength(0);
+  });
+
+  it('enforces the H3 7000-character prompt limit without inheriting legacy Hailuo 2000', async () => {
+    const x = wwwAdapterFixture('MiniMax-H3');
+    const prompt = '😀'.repeat(7000);
+    expect(await x.adapter.submit({ routeSnapshot: x.route, request: { ...x.request, prompt } })).toMatchObject({ kind: 'accepted_async' });
+    const rejected = wwwAdapterFixture('MiniMax-H3');
+    expect(await rejected.adapter.submit({ routeSnapshot: rejected.route, request: { ...rejected.request, prompt: prompt + '中' } }))
+      .toMatchObject({ kind: 'failed_before_submission', failureDiagnostic: { message: expect.stringContaining('7000') } });
+    expect(rejected.calls).toHaveLength(0);
   });
 
   it('uses documented Unicode limits at the shared rule and real adapter boundary', async () => {

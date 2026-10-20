@@ -7,7 +7,19 @@
       "authority": "relay",
       "modelKey": "MiniMax-H3",
       "action": "generate",
-      "parameterEvidence": "documented_example_types_quote_validated",
+      "parameterEvidence": "gateway_example_with_official_h3_v2_fallback",
+      "supplementalSources": [
+        {
+          "url": "https://platform.minimax.cn/docs/api-reference/video-generation-v2-create",
+          "retrievedAt": "2026-10-20T11:26:20.015Z",
+          "sha256": "b7512ad43e9c8d8d7fc7a94e1592a566932b9800c571979c39d8acc0d06bbf72"
+        },
+        {
+          "url": "https://platform.minimax.cn/docs/guides/video-generation",
+          "retrievedAt": "2026-10-20T11:25:19.983Z",
+          "sha256": "5b2f1dc15657cf1d19c40f89712ea1c16d4558f8ec4e52207cffc78ad66f73a5"
+        }
+      ],
       "parameterExample": {
         "resolution": "2K",
         "ratio": "16:9",
@@ -28,26 +40,40 @@
       "fields": [
         {
           "name": "resolution",
-          "required": null,
+          "required": true,
           "example": "2K",
           "schema": {
-            "type": "string"
+            "type": "string",
+            "enum": [
+              "768P",
+              "2K"
+            ]
           }
         },
         {
           "name": "ratio",
-          "required": null,
+          "required": true,
           "example": "16:9",
           "schema": {
-            "type": "string"
+            "type": "string",
+            "enum": [
+              "21:9",
+              "16:9",
+              "4:3",
+              "1:1",
+              "3:4",
+              "9:16"
+            ]
           }
         },
         {
           "name": "duration",
-          "required": null,
+          "required": true,
           "example": 4,
           "schema": {
-            "type": "integer"
+            "type": "integer",
+            "minimum": 4,
+            "maximum": 15
           }
         },
         {
@@ -69,8 +95,8 @@
       ],
       "quoteBinding": "input_digest_and_price",
       "referenceBinding": "explicit_roles",
-      "maximumPromptLength": 2500,
-      "promptLimitEvidence": "retained_product_limit",
+      "maximumPromptLength": 7000,
+      "promptLimitEvidence": "official_h3_v2_characters",
       "supportedOutputFormats": [
         "mp4"
       ],

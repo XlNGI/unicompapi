@@ -1,0 +1,48 @@
+{
+  "collectedAt": "2026-10-20T11:18:32.007Z",
+  "authorization": "User explicitly requested official MiniMax documentation fallback on 2026-10-20.",
+  "outboundScope": "Public official documentation GET only; no authentication, user prompt, project content or attachment.",
+  "credentialReads": 0,
+  "providerApiCalls": 0,
+  "modelFeesCny": 0,
+  "records": [
+    {
+      "originalUrl": "https://platform.minimaxi.com/llms.txt",
+      "url": "https://platform.minimaxi.com/llms.txt",
+      "redirects": [],
+      "retrievedAt": "2026-10-20T11:18:30.724Z",
+      "status": 404,
+      "bytes": 49820,
+      "sha256": "9fc64a0c29b74439376d058ffccec792dc92d3aecd3fbafdda5b3c498a1e90f0",
+      "file": "0-platform.minimaxi.com-_llms.txt.html"
+    },
+    {
+      "originalUrl": "https://platform.minimax.io/llms.txt",
+      "url": "https://platform.minimax.io/llms.txt",
+      "redirects": [],
+      "retrievedAt": "2026-10-20T11:18:30.757Z",
+      "status": 404,
+      "bytes": 44373,
+      "sha256": "b281abc381886ac292ef0564059265dd8a16a5ae1bb3d7bc0eff61a6f6f941d2",
+      "file": "1-platform.minimax.io-_llms.txt.html"
+    },
+    {
+      "originalUrl": "https://platform.minimaxi.com/docs/api-reference/video-generation-t2v",
+      "error": "Official documentation host outside allowlist"
+    },
+    {
+      "originalUrl": "https://platform.minimax.io/docs/api-reference/video-generation-t2v",
+      "url": "https://platform.minimax.io/docs/api-reference/video-generation-t2v",
+      "redirects": [],
+      "retrievedAt": "2026-10-20T11:18:30.758Z",
+      "status": 200,
+      "bytes": 8282,
+      "sha256": "6b6f2d3e88464ba87f35b73907ceec054afb6602bae29eb7db235396ff71a5e7",
+      "file": "3-platform.minimax.io-_docs_api-reference_video-generation-t2v.txt"
+    },
+    {
+      "originalUrl": "https://platform.minimaxi.com/docs/guides/video-generation",
+      "error": "Official documentation host outside allowlist"
+    }
+  ]
+}

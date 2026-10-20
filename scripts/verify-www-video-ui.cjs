@@ -91,14 +91,35 @@ async function main() {
   if (h3) {
     await until('window.workbenchHarness?.ready && document.body.textContent.includes("MiniMax-H3")');
     await js('Array.from(document.querySelectorAll("details")).find(e => e.querySelector("summary")?.textContent.includes("模型参数")).open = true');
-    await until('document.querySelector("input[aria-label=分辨率]")');
+    await until('document.querySelector(".uc-dynamic-parameters__field")');
     assert.equal(await js('Array.from(document.querySelectorAll("button")).find(e => e.textContent.trim() === "生成").disabled'), true);
-    assert.equal(await js('document.body.textContent.includes("不接受空参数")'), true);
+    assert.equal(await js('document.body.textContent.includes("必填")'), true);
     assert.deepEqual(await js('workbenchHarness.state().drafts[0].featureSelection.parameterValues'), {});
     await js('Array.from(document.querySelectorAll("button")).find(e => e.textContent.trim() === "填入官方示例").click()');
     await until('workbenchHarness.state().drafts[0].featureSelection.parameterValues.duration === 4');
     assert.deepEqual(await js('workbenchHarness.state().drafts[0].featureSelection.parameterValues'), schema.exampleValues);
     assert.equal(await js('Array.from(document.querySelectorAll("button")).find(e => e.textContent.trim() === "生成").disabled'), false);
+    const setDuration = value => js(`(() => {
+      const input = document.querySelector('input[aria-label="视频时长"]');
+      Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value').set.call(input, ${JSON.stringify(value)});
+      input.dispatchEvent(new Event('input', { bubbles: true }));
+    })()`);
+    await setDuration('16');
+    await until('Array.from(document.querySelectorAll("button")).find(e => e.textContent.trim() === "生成").disabled');
+    await setDuration('4');
+    await until('!Array.from(document.querySelectorAll("button")).find(e => e.textContent.trim() === "生成").disabled');
+    const setPrompt = count => js(`(() => {
+      const input = document.querySelector('textarea');
+      Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value').set.call(input, '😀'.repeat(${count}));
+      input.dispatchEvent(new Event('input', { bubbles: true }));
+    })()`);
+    await setPrompt(7001);
+    await until('Array.from(document.querySelectorAll("button")).find(e => e.textContent.trim() === "生成").disabled');
+    await setPrompt(7000);
+    await until('!Array.from(document.querySelectorAll("button")).find(e => e.textContent.trim() === "生成").disabled');
+    assert.equal(await js('document.body.textContent.includes("7000 / 7000")'), true);
+    // Keep the review screenshot concise after verifying the actual boundary.
+    await js(`(() => { const input = document.querySelector('textarea'); Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value').set.call(input, 'Local H3 prompt'); input.dispatchEvent(new Event('input', { bubbles: true })); })()`);
     assert.equal(await js('document.body.textContent.includes("费用上限") || document.body.textContent.includes("报价上限") || document.querySelector("section[aria-label=费用授权]") !== null'), false);
     await js('window.audioSwitch = Array.from(document.querySelectorAll(".uc-dynamic-parameters__field")).find(e => e.textContent.includes("生成音频")).querySelector("[role=switch]")');
     assert.equal(await js('window.audioSwitch.getAttribute("aria-checked")'), 'true');
@@ -111,10 +132,10 @@ async function main() {
     assert.equal(await js('window.audioSwitch.closest(".uc-dynamic-parameters__field").textContent.includes("未填")'), true);
     await js('window.audioSwitch.click()');
     await js('window.audioSwitch.click()');
-    // Submit before idle commit; the focused model input must reach preflight.
+    // Submit before idle commit; the focused numeric input must reach preflight.
     await js(`(() => {
       const set = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value').set;
-      for (const [label, value] of [['分辨率','768P']]) {
+      for (const [label, value] of [['视频时长','5']]) {
         const input = document.querySelector('input[aria-label="' + label + '"]');
         set.call(input, value); input.dispatchEvent(new Event('input', { bubbles: true }));
       }
@@ -122,12 +143,13 @@ async function main() {
     await js('Array.from(document.querySelectorAll("button")).find(e => e.textContent.trim() === "生成").click()');
     await until('workbenchHarness.counters.prepares === 1');
     const parameters = await js('workbenchHarness.state().drafts[0].featureSelection.parameterValues');
-    assert.equal(parameters.resolution, '768P'); assert.equal(parameters.maximum_cost_cny, undefined); assert.equal(parameters.generate_audio, false);
+    assert.equal(parameters.duration, 5); assert.equal(parameters.maximum_cost_cny, undefined); assert.equal(parameters.generate_audio, false);
     assert.equal(await js('Array.from(document.querySelectorAll("details summary")).find(e => e.textContent.includes("模型参数")).textContent.includes("5 项")'), true);
+    await js('Array.from(document.querySelectorAll("details")).find(e => e.querySelector("summary")?.textContent.includes("模型参数")).open = true');
     window.webContents.invalidate(); await delay(500);
     await fs.writeFile(path.join(output, 'h3-official-parameters.png'), (await window.webContents.capturePage()).toPNG());
     assert.deepEqual(errors, []); assert.equal(externalRequests, 0);
-    checks.push('H3 empty parameters block Generate without supplying hidden defaults', 'official example requires an explicit user action and saves all five exact values', 'five gateway parameters; no manual budget input anywhere', 'unknown boolean distinguishes unset and false and can be cleared', 'focused model edit saved before preflight without a budget');
+    checks.push('H3 required parameters block Generate without supplying hidden defaults', 'official example requires an explicit user action and saves all five exact values', 'five gateway parameters; no manual budget input anywhere', 'unknown boolean distinguishes unset and false and can be cleared', 'focused duration edit saved before preflight without a budget', 'duration 16 blocks Generate and 4 restores it', '7001-character prompt blocks Generate and 7000 emoji are preserved and accepted locally');
     await fs.writeFile(path.join(output, 'validation.json'), JSON.stringify({ status: 'passed', checks, errors, externalRequests,
       boundaries: 'production React workbench; isolated local IPC; no provider call; quote approval verified in native Host suite' }, null, 2));
     console.log(JSON.stringify({ status: 'passed', checks: checks.length, externalRequests })); return;

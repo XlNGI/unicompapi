@@ -1,0 +1,40 @@
+{
+  "collectedAt": "2026-10-20T11:26:21.488Z",
+  "authorization": "User explicitly requested official MiniMax documentation fallback on 2026-10-20.",
+  "outboundScope": "Public official documentation GET only; no authentication, user prompt, project content or attachment.",
+  "credentialReads": 0,
+  "providerApiCalls": 0,
+  "modelFeesCny": 0,
+  "records": [
+    {
+      "originalUrl": "https://platform.minimax.cn/docs/api-reference/video-generation-v2-create",
+      "url": "https://platform.minimax.cn/docs/api-reference/video-generation-v2-create",
+      "redirects": [],
+      "retrievedAt": "2026-10-20T11:26:20.015Z",
+      "status": 200,
+      "bytes": 20760,
+      "sha256": "b7512ad43e9c8d8d7fc7a94e1592a566932b9800c571979c39d8acc0d06bbf72",
+      "file": "h3-0-platform.minimax.cn-_docs_api-reference_video-generation-v2-create.txt"
+    },
+    {
+      "originalUrl": "https://platform.minimax.io/docs/api-reference/video-generation-v2-create",
+      "url": "https://platform.minimax.io/docs/api-reference/video-generation-v2-create",
+      "redirects": [],
+      "retrievedAt": "2026-10-20T11:26:20.050Z",
+      "status": 200,
+      "bytes": 22084,
+      "sha256": "71d0244dfc0d1284a19a50f061274516fc6d2744077da29e0c5f3ff54130f42f",
+      "file": "h3-1-platform.minimax.io-_docs_api-reference_video-generation-v2-create.txt"
+    },
+    {
+      "originalUrl": "https://platform.minimax.io/docs/guides/video-generation",
+      "url": "https://platform.minimax.io/docs/guides/video-generation",
+      "redirects": [],
+      "retrievedAt": "2026-10-20T11:26:20.051Z",
+      "status": 200,
+      "bytes": 15561,
+      "sha256": "9d8e05716c44f805c14a8b5e151ad232295fb643f570163b7cc06943b6ae15ea",
+      "file": "h3-2-platform.minimax.io-_docs_guides_video-generation.txt"
+    }
+  ]
+}

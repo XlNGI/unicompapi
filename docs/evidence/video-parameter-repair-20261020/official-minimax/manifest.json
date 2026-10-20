@@ -1,0 +1,167 @@
+{
+  "collectedAt": "2026-10-20T11:30:03.790Z",
+  "authorization": "User explicitly requested official MiniMax documentation fallback on 2026-10-20.",
+  "outboundScope": "Public official documentation GET only; no authentication, user prompt, project content or attachment.",
+  "requestCount": 14,
+  "successfulResponses": 8,
+  "notFoundResponses": 2,
+  "redirectResponses": 4,
+  "credentialReads": 0,
+  "providerApiCalls": 0,
+  "modelFeesCny": 0,
+  "note": "The first Chinese redirects were blocked by the collector hostname allowlist, then explicitly inspected and followed on the official minimax.cn hostname. No provider API or media/example requests executed.",
+  "h3Create": {
+    "originalUrl": "https://platform.minimax.cn/docs/api-reference/video-generation-v2-create",
+    "url": "https://platform.minimax.cn/docs/api-reference/video-generation-v2-create",
+    "redirects": [],
+    "retrievedAt": "2026-10-20T11:26:20.015Z",
+    "status": 200,
+    "bytes": 20760,
+    "sha256": "b7512ad43e9c8d8d7fc7a94e1592a566932b9800c571979c39d8acc0d06bbf72",
+    "file": "h3-0-platform.minimax.cn-_docs_api-reference_video-generation-v2-create.txt.gz",
+    "compression": "gzip",
+    "compressedSha256": "6afa33042c6eca7b394f7a871ecb44535ae8e12a00081c38d183627b8bcca915"
+  },
+  "h3Guide": {
+    "originalUrl": "https://platform.minimax.cn/docs/guides/video-generation",
+    "url": "https://platform.minimax.cn/docs/guides/video-generation",
+    "redirects": [],
+    "retrievedAt": "2026-10-20T11:25:19.983Z",
+    "status": 200,
+    "bytes": 15025,
+    "sha256": "5b2f1dc15657cf1d19c40f89712ea1c16d4558f8ec4e52207cffc78ad66f73a5",
+    "file": "followup-1-platform.minimax.cn-_docs_guides_video-generation.txt.gz",
+    "compression": "gzip",
+    "compressedSha256": "d3f70609c93fdea3138b7423a2790922c3a44b0379bee177fd60cea8a6d01169"
+  },
+  "records": [
+    {
+      "originalUrl": "https://platform.minimaxi.com/llms.txt",
+      "url": "https://platform.minimaxi.com/llms.txt",
+      "redirects": [],
+      "retrievedAt": "2026-10-20T11:18:30.724Z",
+      "status": 404,
+      "bytes": 49820,
+      "sha256": "9fc64a0c29b74439376d058ffccec792dc92d3aecd3fbafdda5b3c498a1e90f0",
+      "file": "0-platform.minimaxi.com-_llms.txt.html.gz",
+      "compression": "gzip",
+      "compressedSha256": "ac85ff8b265d48e0462a3421dd4d7e32445f4bb1c501fd6c47d1cdb905ee763a"
+    },
+    {
+      "originalUrl": "https://platform.minimax.io/llms.txt",
+      "url": "https://platform.minimax.io/llms.txt",
+      "redirects": [],
+      "retrievedAt": "2026-10-20T11:18:30.757Z",
+      "status": 404,
+      "bytes": 44373,
+      "sha256": "b281abc381886ac292ef0564059265dd8a16a5ae1bb3d7bc0eff61a6f6f941d2",
+      "file": "1-platform.minimax.io-_llms.txt.html.gz",
+      "compression": "gzip",
+      "compressedSha256": "5aa3670e4bc1a0334a6ce641393ed0225bcb0a7b7af7c5842dbd2a0d433b6449"
+    },
+    {
+      "originalUrl": "https://platform.minimaxi.com/docs/api-reference/video-generation-t2v",
+      "error": "Official documentation host outside allowlist"
+    },
+    {
+      "originalUrl": "https://platform.minimax.io/docs/api-reference/video-generation-t2v",
+      "url": "https://platform.minimax.io/docs/api-reference/video-generation-t2v",
+      "redirects": [],
+      "retrievedAt": "2026-10-20T11:18:30.758Z",
+      "status": 200,
+      "bytes": 8282,
+      "sha256": "6b6f2d3e88464ba87f35b73907ceec054afb6602bae29eb7db235396ff71a5e7",
+      "file": "3-platform.minimax.io-_docs_api-reference_video-generation-t2v.txt.gz",
+      "compression": "gzip",
+      "compressedSha256": "c2c7e7997574705bd7186f1840dd0bd9d6037742787441b7da8b692b2b60b3bc"
+    },
+    {
+      "originalUrl": "https://platform.minimaxi.com/docs/guides/video-generation",
+      "error": "Official documentation host outside allowlist"
+    },
+    {
+      "originalUrl": "https://platform.minimax.cn/docs/api-reference/video-generation-t2v",
+      "url": "https://platform.minimax.cn/docs/api-reference/video-generation-t2v",
+      "redirects": [],
+      "retrievedAt": "2026-10-20T11:25:19.950Z",
+      "status": 200,
+      "bytes": 8201,
+      "sha256": "cf0a461b04259a227db2ea3ca31ec62086775736afce5cb6e8d0d42c5c8b74fa",
+      "file": "followup-0-platform.minimax.cn-_docs_api-reference_video-generation-t2v.txt.gz",
+      "compression": "gzip",
+      "compressedSha256": "369646087231a185854046c83cdd9f90debdc01687ebc477e211ba488955eaf0"
+    },
+    {
+      "originalUrl": "https://platform.minimax.cn/docs/guides/video-generation",
+      "url": "https://platform.minimax.cn/docs/guides/video-generation",
+      "redirects": [],
+      "retrievedAt": "2026-10-20T11:25:19.983Z",
+      "status": 200,
+      "bytes": 15025,
+      "sha256": "5b2f1dc15657cf1d19c40f89712ea1c16d4558f8ec4e52207cffc78ad66f73a5",
+      "file": "followup-1-platform.minimax.cn-_docs_guides_video-generation.txt.gz",
+      "compression": "gzip",
+      "compressedSha256": "d3f70609c93fdea3138b7423a2790922c3a44b0379bee177fd60cea8a6d01169"
+    },
+    {
+      "originalUrl": "https://platform.minimax.io/docs/llms.txt",
+      "url": "https://platform.minimax.io/docs/llms.txt",
+      "redirects": [],
+      "retrievedAt": "2026-10-20T11:25:19.984Z",
+      "status": 200,
+      "bytes": 25479,
+      "sha256": "e9d8ead4c54dd0189d15888995d341f72439847c585f92b0ac605a6f5204135e",
+      "file": "followup-2-platform.minimax.io-_docs_llms.txt.txt.gz",
+      "compression": "gzip",
+      "compressedSha256": "545da00b6d645e0b0599230def7122bef009369aee0bbd40e93ef69b56898b62"
+    },
+    {
+      "originalUrl": "https://platform.minimax.cn/docs/llms.txt",
+      "url": "https://platform.minimax.cn/docs/llms.txt",
+      "redirects": [],
+      "retrievedAt": "2026-10-20T11:25:19.985Z",
+      "status": 200,
+      "bytes": 26998,
+      "sha256": "0139d06b3f818916db00a37003e3cb6751681e89e9adc0463e352a0dd889029b",
+      "file": "followup-3-platform.minimax.cn-_docs_llms.txt.txt.gz",
+      "compression": "gzip",
+      "compressedSha256": "95ad9edfa82c56e91c79ff9876a36f07ef930df6771707fdce10f9d052f38b14"
+    },
+    {
+      "originalUrl": "https://platform.minimax.cn/docs/api-reference/video-generation-v2-create",
+      "url": "https://platform.minimax.cn/docs/api-reference/video-generation-v2-create",
+      "redirects": [],
+      "retrievedAt": "2026-10-20T11:26:20.015Z",
+      "status": 200,
+      "bytes": 20760,
+      "sha256": "b7512ad43e9c8d8d7fc7a94e1592a566932b9800c571979c39d8acc0d06bbf72",
+      "file": "h3-0-platform.minimax.cn-_docs_api-reference_video-generation-v2-create.txt.gz",
+      "compression": "gzip",
+      "compressedSha256": "6afa33042c6eca7b394f7a871ecb44535ae8e12a00081c38d183627b8bcca915"
+    },
+    {
+      "originalUrl": "https://platform.minimax.io/docs/api-reference/video-generation-v2-create",
+      "url": "https://platform.minimax.io/docs/api-reference/video-generation-v2-create",
+      "redirects": [],
+      "retrievedAt": "2026-10-20T11:26:20.050Z",
+      "status": 200,
+      "bytes": 22084,
+      "sha256": "71d0244dfc0d1284a19a50f061274516fc6d2744077da29e0c5f3ff54130f42f",
+      "file": "h3-1-platform.minimax.io-_docs_api-reference_video-generation-v2-create.txt.gz",
+      "compression": "gzip",
+      "compressedSha256": "9cfbf78633cf8dff0904aa5ddbf2f1e1bf751d2ffe796521675ad214571baf8f"
+    },
+    {
+      "originalUrl": "https://platform.minimax.io/docs/guides/video-generation",
+      "url": "https://platform.minimax.io/docs/guides/video-generation",
+      "redirects": [],
+      "retrievedAt": "2026-10-20T11:26:20.051Z",
+      "status": 200,
+      "bytes": 15561,
+      "sha256": "9d8e05716c44f805c14a8b5e151ad232295fb643f570163b7cc06943b6ae15ea",
+      "file": "h3-2-platform.minimax.io-_docs_guides_video-generation.txt.gz",
+      "compression": "gzip",
+      "compressedSha256": "281c0b8be344b3e1548022f6ac1c2e9d183fa9bcc103f2c3b306e649e3e97e0d"
+    }
+  ]
+}

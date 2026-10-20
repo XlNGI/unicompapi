@@ -236,13 +236,31 @@ async function main() {
     if (!live && c.modelKey === 'MiniMax-H3') {
       assert.equal(candidate.parameterSchema.requestRules.requireParameters, true);
       assert.deepEqual(candidate.parameterSchema.exampleValues, c.parameterExample);
-      assert.ok(candidate.parameterSchema.fields.every(f => f.requirement === 'unknown'));
+      assert.deepEqual(candidate.parameterSchema.fields.filter(f => f.required).map(f => f.fieldId), ['resolution', 'ratio', 'duration']);
+      assert.ok(candidate.parameterSchema.fields.filter(f => !f.required).every(f => f.requirement === 'unknown'));
       const before = requests.length;
       const empty = { ...draft, featureSelection: { ...draft.featureSelection, parameterValues: {} } };
       const savedEmpty = unwrap(await js(`window.unicomp.videoWorkspaces.update(${JSON.stringify(empty)})`));
       const invalid = await js(`window.unicomp.videoFeatures.prepareSubmission(${JSON.stringify(savedEmpty.draftId)}, ${JSON.stringify(savedEmpty.updatedAt)}, ${JSON.stringify(candidate.candidateId)})`);
       assert.equal(invalid.ok, false);
       assert.equal(requests.length, before);
+      for (const parameters of [
+        { duration: 5 },
+        { ...c.parameterExample, resolution: '480P' },
+        { ...c.parameterExample, ratio: 'adaptive' },
+        { ...c.parameterExample, duration: 3 },
+        { ...c.parameterExample, duration: 16 },
+        { ...c.parameterExample, duration: 4.5 },
+        { ...c.parameterExample, duration: '5' }
+      ]) {
+        const invalidDraft = { ...savedEmpty, featureSelection: { ...savedEmpty.featureSelection, parameterValues: parameters } };
+        const saved = unwrap(await js(`window.unicomp.videoWorkspaces.update(${JSON.stringify(invalidDraft)})`));
+        const rejected = await js(`window.unicomp.videoFeatures.prepareSubmission(${JSON.stringify(saved.draftId)}, ${JSON.stringify(saved.updatedAt)}, ${JSON.stringify(candidate.candidateId)})`);
+        assert.equal(rejected.ok, false);
+        assert.equal(requests.length, before);
+        savedEmpty.updatedAt = saved.updatedAt;
+      }
+      checks.push({ model: c.modelKey, check: 'native prepare rejects incomplete, invalid-enum, range, fractional and string duration inputs before requests', state: 'passed' });
       draft = unwrap(await js(`window.unicomp.videoWorkspaces.update(${JSON.stringify({ ...draft, updatedAt: savedEmpty.updatedAt })})`));
       checks.push({ model: c.modelKey, check: 'native prepare rejects empty parameters with zero requests', state: 'passed' });
     }

@@ -70,7 +70,7 @@ export function validateDynamicParameterValue(
     if (field.valueType === 'integer' && !Number.isSafeInteger(value)) {
       return `${label}必须是整数。`;
     }
-    if (isDurationField(field) && value < 0) {
+    if (field.requirement !== 'unknown' && isDurationField(field) && value < 0) {
       return `${label}不能为负数。`;
     }
     return validateNumericConstraint(field, value, label);

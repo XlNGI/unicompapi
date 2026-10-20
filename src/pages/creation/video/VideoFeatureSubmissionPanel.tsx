@@ -865,7 +865,7 @@ export function VideoFeatureSubmissionPanel({
           ) : null}
           {selectedCandidate.parameterSchema.exampleValues && Object.keys(selectedCandidate.parameterSchema.exampleValues).length > 0 ? (
             <div className="uc-image-quick__preflight">
-              <span>官方尚未公开完整必填条件、范围与默认值。可填写参数或采用官方示例，提交前仍需报价校验。</span>
+              <span>请填写标记为必填的参数，也可填入网关公开示例。未公开的参数约束仍以提交前报价校验为准。</span>
               <Button disabled={busy} onClick={applyOfficialExample}>填入官方示例</Button>
             </div>
           ) : null}

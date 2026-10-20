@@ -7,16 +7,14 @@ import previousCatalog from '../../src/platform/providers/newapi/www-video-catal
 import retainedCatalog from '../../src/platform/providers/newapi/www-video-catalog.retained-20261019.json';
 
 describe('WWW exact gateway video contracts and lifecycle', () => {
-  it('uses generate example types without inheriting regenerate or understand restrictions', () => {
+  it('uses official H3 generation limits without inheriting Max or legacy Hailuo limits', () => {
     const schema = wwwVideoParameterSchema(wwwVideoContract('MiniMax-H3')!, 'text_to_video');
     expect(schema.revision).toBe(4);
     expect(schema.fields.map(f => f.fieldId)).toEqual(['resolution', 'ratio', 'duration', 'generate_audio', 'watermark']);
-    expect(() => validateParameterValues(schema, 'full', {})).toThrow(/空参数/);
-    expect(validateParameterValues(schema, 'full', { resolution: '768P', generate_audio: false, duration: 3 }))
-      .toMatchObject({ resolution: '768P', generate_audio: false, duration: 3 });
-    // Accepted locally means eligible for authoritative quote validation, not
-    // a claim that every integer duration is accepted by the gateway.
-    expect(() => validateParameterValues(schema, 'full', { duration: 4.5 })).toThrow();
+    expect(() => validateParameterValues(schema, 'full', {})).toThrow();
+    expect(validateParameterValues(schema, 'full', { resolution: '768P', ratio: '9:16', generate_audio: false, duration: 4 }))
+      .toMatchObject({ resolution: '768P', ratio: '9:16', generate_audio: false, duration: 4 });
+    expect(() => validateParameterValues(schema, 'full', { ...schema.exampleValues, duration: 4.5 })).toThrow();
   });
   it('shows an exact quote before the paid POST and stops on cancellation', async () => {
     const x = wwwAdapterFixture('MiniMax-H3'); x.setApproval(false);

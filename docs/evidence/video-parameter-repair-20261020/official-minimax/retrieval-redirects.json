@@ -1,0 +1,20 @@
+[
+  {
+    "status": "fulfilled",
+    "value": {
+      "url": "https://platform.minimaxi.com/docs/api-reference/video-generation-t2v",
+      "retrievedAt": "2026-10-20T11:18:51.341Z",
+      "status": 302,
+      "location": "https://platform.minimax.cn/docs/api-reference/video-generation-t2v"
+    }
+  },
+  {
+    "status": "fulfilled",
+    "value": {
+      "url": "https://platform.minimaxi.com/docs/guides/video-generation",
+      "retrievedAt": "2026-10-20T11:18:51.381Z",
+      "status": 302,
+      "location": "https://platform.minimax.cn/docs/guides/video-generation"
+    }
+  }
+]
